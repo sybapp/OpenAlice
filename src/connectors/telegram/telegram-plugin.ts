@@ -214,7 +214,7 @@ export class TelegramPlugin implements Plugin {
         if (payload.text) {
           const chunks = splitMessage(payload.text, MAX_MESSAGE_LENGTH)
           for (const chunk of chunks) {
-            await bot.api.sendMessage(chatId, chunk)
+            await sendWithMarkdown(bot.api, chatId, chunk)
           }
         }
 
@@ -403,12 +403,12 @@ export class TelegramPlugin implements Plugin {
       let startIdx = 0
 
       if (placeholderMsgId && chunks.length > 0) {
-        const edited = await this.bot!.api.editMessageText(chatId, placeholderMsgId, chunks[0]).then(() => true).catch(() => false)
+        const edited = await this.bot!.api.editMessageText(chatId, placeholderMsgId, markdownToHTML(chunks[0]), { parse_mode: 'HTML' }).then(() => true).catch(() => false)
         if (edited) startIdx = 1
       }
 
       for (let i = startIdx; i < chunks.length; i++) {
-        await this.bot!.api.sendMessage(chatId, chunks[i])
+        await sendWithMarkdown(this.bot!.api, chatId, chunks[i])
       }
 
       // Placeholder was edited — done
@@ -425,10 +425,77 @@ export class TelegramPlugin implements Plugin {
     if (text) {
       const chunks = splitMessage(text, MAX_MESSAGE_LENGTH)
       for (const chunk of chunks) {
-        await this.bot!.api.sendMessage(chatId, chunk)
+        await sendWithMarkdown(this.bot!.api, chatId, chunk)
       }
     }
   }
+}
+
+/** Send a message with HTML markdown rendering, falling back to plain text on parse error. */
+async function sendWithMarkdown(api: Bot['api'], chatId: number, text: string) {
+  try {
+    await api.sendMessage(chatId, markdownToHTML(text), { parse_mode: 'HTML' })
+  } catch {
+    await api.sendMessage(chatId, text)
+  }
+}
+
+/**
+ * Convert common Markdown patterns to Telegram HTML.
+ * Telegram HTML supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a href>.
+ *
+ * Strategy: extract code blocks as placeholders first so bold/italic
+ * regexes never match inside <code>/<pre> content.
+ */
+function markdownToHTML(text: string): string {
+  const slots: string[] = []
+  const slot = (html: string) => {
+    slots.push(html)
+    return `\x02${slots.length - 1}\x03` // STX…ETX — won't appear in normal text
+  }
+
+  let out = text
+
+  // 1. Extract fenced code blocks before any escaping
+  out = out.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) =>
+    slot(`<pre><code>${htmlEscape(code)}</code></pre>`),
+  )
+  out = out.replace(/```([\s\S]*?)```/g, (_, code) =>
+    slot(`<pre><code>${htmlEscape(code)}</code></pre>`),
+  )
+  // 2. Extract inline code
+  out = out.replace(/`([^`\n]+)`/g, (_, code) =>
+    slot(`<code>${htmlEscape(code)}</code>`),
+  )
+
+  // 3. Escape HTML special chars in remaining (non-code) text
+  out = htmlEscape(out)
+
+  // 4. Bold (**text** or __text__)
+  out = out.replace(/\*\*(.+?)\*\*/gs, '<b>$1</b>')
+  out = out.replace(/__(.+?)__/gs, '<b>$1</b>')
+
+  // 5. Italic (*text* or _text_)
+  out = out.replace(/\*([^*\n]+)\*/g, '<i>$1</i>')
+  out = out.replace(/(?<![_\w])_([^_\n]+)_(?![_\w])/g, '<i>$1</i>')
+
+  // 6. Strikethrough
+  out = out.replace(/~~(.+?)~~/gs, '<s>$1</s>')
+
+  // 7. Markdown headers → bold line
+  out = out.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>')
+
+  // 8. Links
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>')
+
+  // 9. Restore code blocks
+  out = out.replace(/\x02(\d+)\x03/g, (_, i) => slots[parseInt(i, 10)])
+
+  return out
+}
+
+function htmlEscape(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function splitMessage(text: string, maxLength: number): string[] {
