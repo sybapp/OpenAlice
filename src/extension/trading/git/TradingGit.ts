@@ -39,6 +39,7 @@ export class TradingGit implements ITradingGit {
   private pendingHash: CommitHash | null = null
   private commits: GitCommit[] = []
   private head: CommitHash | null = null
+  private pendingOrderIndex = new Map<string, string>()
   private currentRound: number | undefined = undefined
   private readonly config: TradingGitConfig
 
@@ -123,6 +124,7 @@ export class TradingGit implements ITradingGit {
 
     this.commits.push(commit)
     this.head = hash
+    this.applyPendingOrderResults(operations, results)
 
     await this.config.onCommit?.(this.exportState())
 
@@ -260,6 +262,7 @@ export class TradingGit implements ITradingGit {
     const git = new TradingGit(config)
     git.commits = [...state.commits]
     git.head = state.head
+    git.rebuildPendingOrderIndex()
     return git
   }
 
@@ -300,6 +303,7 @@ export class TradingGit implements ITradingGit {
 
     this.commits.push(commit)
     this.head = hash
+    this.applySyncUpdatesToPendingIndex(updates)
 
     await this.config.onCommit?.(this.exportState())
 
@@ -307,37 +311,10 @@ export class TradingGit implements ITradingGit {
   }
 
   getPendingOrderIds(): Array<{ orderId: string; symbol: string }> {
-    // Scan newest→oldest to find latest known status per orderId
-    const orderStatus = new Map<string, string>()
-
-    for (let i = this.commits.length - 1; i >= 0; i--) {
-      for (const result of this.commits[i].results) {
-        if (result.orderId && !orderStatus.has(result.orderId)) {
-          orderStatus.set(result.orderId, result.status)
-        }
-      }
-    }
-
-    // Collect orders still pending
-    const pending: Array<{ orderId: string; symbol: string }> = []
-    const seen = new Set<string>()
-
-    for (const commit of this.commits) {
-      for (let j = 0; j < commit.results.length; j++) {
-        const result = commit.results[j]
-        if (
-          result.orderId &&
-          !seen.has(result.orderId) &&
-          orderStatus.get(result.orderId) === 'pending'
-        ) {
-          const symbol = (commit.operations[j]?.params?.symbol as string) ?? 'unknown'
-          pending.push({ orderId: result.orderId, symbol })
-          seen.add(result.orderId)
-        }
-      }
-    }
-
-    return pending
+    return Array.from(this.pendingOrderIndex.entries()).map(([orderId, symbol]) => ({
+      orderId,
+      symbol,
+    }))
   }
 
   // ==================== Simulation ====================
@@ -490,6 +467,40 @@ export class TradingGit implements ITradingGit {
     value: number,
   ): number {
     return type === 'absolute' ? value : currentPrice * (1 + value / 100)
+  }
+
+  private rebuildPendingOrderIndex(): void {
+    this.pendingOrderIndex.clear()
+    for (const commit of this.commits) {
+      this.applyPendingOrderResults(commit.operations, commit.results)
+    }
+  }
+
+  private applyPendingOrderResults(operations: Operation[], results: OperationResult[]): void {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (!result.orderId) continue
+
+      if (result.status === 'pending') {
+        const symbol =
+          (operations[i]?.params?.symbol as string | undefined) ??
+          this.pendingOrderIndex.get(result.orderId) ??
+          'unknown'
+        this.pendingOrderIndex.set(result.orderId, symbol)
+      } else {
+        this.pendingOrderIndex.delete(result.orderId)
+      }
+    }
+  }
+
+  private applySyncUpdatesToPendingIndex(updates: OrderStatusUpdate[]): void {
+    for (const update of updates) {
+      if (update.currentStatus === 'pending') {
+        this.pendingOrderIndex.set(update.orderId, update.symbol)
+      } else {
+        this.pendingOrderIndex.delete(update.orderId)
+      }
+    }
   }
 
   // ==================== Internal ====================

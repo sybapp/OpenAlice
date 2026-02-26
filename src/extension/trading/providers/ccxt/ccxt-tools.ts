@@ -77,5 +77,89 @@ Use searchContracts first to get the aliceId.`,
       },
     }),
 
+    setStopLoss: tool({
+      description: `Stage a native stop-loss order for an existing CCXT position.
+
+Behavior:
+- Looks up the current position to determine side and default size
+- Stages a reduce-only stop order on the opposite side
+- Protects the full position by default; pass qty for partial protection
+
+Use this after opening a futures position when you want exchange-native downside protection.`,
+      inputSchema: z.object({
+        aliceId: z.string().describe('Contract identifier from searchContracts or getPortfolio (e.g. "bybit-BTCUSDT")'),
+        stopPrice: z.number().positive().describe('Trigger price for the stop-loss order'),
+        qty: z.number().positive().optional().describe('Quantity to protect (default: full current position)'),
+        source: z.string().optional().describe(sourceDesc),
+      }),
+      execute: async ({ aliceId, stopPrice, qty, source }) => {
+        const resolved = resolveCcxtOne(source)
+        if ('error' in resolved) return resolved
+        const { account, id } = resolved
+
+        const position = (await account.getPositions()).find((p) => p.contract.aliceId === aliceId)
+        if (!position) return { error: `No open position for ${aliceId}.` }
+
+        const git = resolver.getGit(id)
+        if (!git) return { error: `No git instance for account "${id}".` }
+
+        return git.add({
+          action: 'placeOrder',
+          params: {
+            aliceId: position.contract.aliceId,
+            symbol: position.contract.symbol,
+            side: position.side === 'long' ? 'sell' : 'buy',
+            type: 'stop',
+            qty: qty ?? position.qty,
+            stopPrice,
+            reduceOnly: true,
+            timeInForce: 'gtc',
+          },
+        })
+      },
+    }),
+
+    setTakeProfit: tool({
+      description: `Stage a native take-profit order for an existing CCXT position.
+
+Behavior:
+- Looks up the current position to determine side and default size
+- Stages a reduce-only take-profit order on the opposite side
+- Protects the full position by default; pass qty for partial profit taking
+
+Use this after opening a futures position when you want an exchange-native upside target.`,
+      inputSchema: z.object({
+        aliceId: z.string().describe('Contract identifier from searchContracts or getPortfolio (e.g. "bybit-BTCUSDT")'),
+        takeProfitPrice: z.number().positive().describe('Trigger price for the take-profit order'),
+        qty: z.number().positive().optional().describe('Quantity to protect (default: full current position)'),
+        source: z.string().optional().describe(sourceDesc),
+      }),
+      execute: async ({ aliceId, takeProfitPrice, qty, source }) => {
+        const resolved = resolveCcxtOne(source)
+        if ('error' in resolved) return resolved
+        const { account, id } = resolved
+
+        const position = (await account.getPositions()).find((p) => p.contract.aliceId === aliceId)
+        if (!position) return { error: `No open position for ${aliceId}.` }
+
+        const git = resolver.getGit(id)
+        if (!git) return { error: `No git instance for account "${id}".` }
+
+        return git.add({
+          action: 'placeOrder',
+          params: {
+            aliceId: position.contract.aliceId,
+            symbol: position.contract.symbol,
+            side: position.side === 'long' ? 'sell' : 'buy',
+            type: 'take_profit',
+            qty: qty ?? position.qty,
+            stopPrice: takeProfitPrice,
+            reduceOnly: true,
+            timeInForce: 'gtc',
+          },
+        })
+      },
+    }),
+
   }
 }

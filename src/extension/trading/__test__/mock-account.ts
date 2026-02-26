@@ -31,7 +31,7 @@ export const DEFAULT_ACCOUNT_INFO: AccountInfo = {
 
 export const DEFAULT_CAPABILITIES: AccountCapabilities = {
   supportedSecTypes: ['STK'],
-  supportedOrderTypes: ['market', 'limit', 'stop', 'stop_limit'],
+  supportedOrderTypes: ['market', 'limit', 'stop', 'stop_limit', 'take_profit'],
 }
 
 export function makeContract(overrides: Partial<Contract> = {}): Contract {

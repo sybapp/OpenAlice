@@ -31,7 +31,24 @@ import {
   contractToCcxt,
 } from './ccxt-contracts.js'
 
+const PROTECTION_PRICE_EPSILON = 0.0002
+const PROTECTION_QTY_EPSILON = 0.001
+
+function isFinitePositive(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+function approxEqual(a: number | undefined, b: number | undefined, epsilonRatio: number): boolean {
+  if (!isFinitePositive(a) || !isFinitePositive(b)) return false
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1)
+  return Math.abs(a - b) <= scale * epsilonRatio
+}
+
 export class CcxtAccount implements ITradingAccount {
+  private static readonly POSITIONS_CACHE_TTL_MS = 1000
+  private static readonly ORDERS_CACHE_TTL_MS = 1000
+  private static readonly PROTECTION_INTENT_TTL_MS = 6 * 60 * 60 * 1000
+
   readonly id: string
   readonly provider: string  // "ccxt" or the specific exchange name
   readonly label: string
@@ -44,6 +61,25 @@ export class CcxtAccount implements ITradingAccount {
 
   // orderId → ccxtSymbol cache (CCXT needs symbol to cancel)
   private orderSymbolCache = new Map<string, string>()
+
+  private positionsCache:
+    | { at: number; raw: Awaited<ReturnType<Exchange['fetchPositions']>>; mapped: Position[] }
+    | null = null
+  private positionsInFlight:
+    | Promise<{ raw: Awaited<ReturnType<Exchange['fetchPositions']>>; mapped: Position[] }>
+    | null = null
+
+  private ordersCache: { at: number; data: Order[] } | null = null
+  private ordersInFlight: Promise<Order[]> | null = null
+
+  private protectionIntentCache = new Map<string, {
+    kind: 'stop' | 'take_profit'
+    side: 'buy' | 'sell'
+    triggerPrice: number
+    qty: number
+    orderId?: string
+    updatedAt: number
+  }>()
 
   constructor(config: CcxtAccountConfig) {
     this.exchangeName = config.exchange
@@ -254,15 +290,105 @@ export class CcxtAccount implements ITradingAccount {
     }
 
     try {
+      const protectionKind =
+        order.reduceOnly && order.type === 'stop'
+          ? 'stop'
+          : order.reduceOnly && order.type === 'take_profit'
+            ? 'take_profit'
+            : null
+
+      if (protectionKind) {
+        const recentIntent = this.readProtectionIntent(order.contract, protectionKind)
+        if (
+          recentIntent &&
+          recentIntent.side === order.side &&
+          approxEqual(recentIntent.triggerPrice, order.stopPrice, PROTECTION_PRICE_EPSILON) &&
+          approxEqual(recentIntent.qty, size, PROTECTION_QTY_EPSILON)
+        ) {
+          return {
+            success: true,
+            orderId: recentIntent.orderId,
+            message: `${protectionKind} already armed (cached)`,
+          }
+        }
+
+        try {
+          const existingOrders = await this.getOrders()
+          const protectionOrders = existingOrders.filter((existing) => {
+            const existingKind =
+              existing.type === 'take_profit'
+                ? 'take_profit'
+                : existing.type === 'stop'
+                  ? 'stop'
+                  : null
+
+            return (
+              existing.status === 'pending' &&
+              existing.reduceOnly &&
+              existingKind === protectionKind &&
+              ((order.contract.aliceId && existing.contract.aliceId === order.contract.aliceId) ||
+                (order.contract.symbol && existing.contract.symbol === order.contract.symbol))
+            )
+          })
+
+          const identical = protectionOrders.find((existing) => (
+            existing.side === order.side &&
+            approxEqual(existing.stopPrice ?? existing.price, order.stopPrice, PROTECTION_PRICE_EPSILON) &&
+            approxEqual(existing.qty, size, PROTECTION_QTY_EPSILON)
+          ))
+          if (identical) {
+            this.writeProtectionIntent(order.contract, protectionKind, {
+              side: order.side,
+              triggerPrice: order.stopPrice ?? identical.stopPrice ?? identical.price ?? 0,
+              qty: size,
+              orderId: identical.id,
+            })
+            return {
+              success: true,
+              orderId: identical.id,
+              message: `${protectionKind} already armed`,
+            }
+          }
+
+          this.clearProtectionIntent(order.contract, protectionKind)
+          for (const existing of protectionOrders) {
+            try {
+              await this.cancelOrder(existing.id)
+            } catch {
+              // Best-effort cleanup before replacing protection orders.
+            }
+          }
+        } catch {
+          // Non-fatal: continue even if existing protection orders cannot be listed.
+        }
+      }
+
       const params: Record<string, unknown> = {}
       if (order.reduceOnly) params.reduceOnly = true
+      if (order.stopPrice != null) {
+        params.stopPrice = order.stopPrice
+        params.triggerPrice = order.stopPrice
+      }
+
+      const ccxtOrderType =
+        order.type === 'stop'
+          ? 'stop_market'
+          : order.type === 'take_profit'
+            ? 'take_profit_market'
+            : order.type
+      const priceArg =
+        order.type === 'limit' || order.type === 'stop_limit'
+          ? order.price
+          : order.type === 'stop' || order.type === 'take_profit'
+            ? order.stopPrice
+            : undefined
 
       const ccxtOrder = await this.exchange.createOrder(
         ccxtSymbol,
-        order.type,
+        ccxtOrderType,
         order.side,
         size,
-        order.type === 'limit' ? order.price : undefined,
+        priceArg,
         params,
       )
 
@@ -270,6 +396,18 @@ export class CcxtAccount implements ITradingAccount {
       if (ccxtOrder.id) {
         this.orderSymbolCache.set(ccxtOrder.id, ccxtSymbol)
       }
+
+      if (protectionKind) {
+        this.writeProtectionIntent(order.contract, protectionKind, {
+          side: order.side,
+          triggerPrice: order.stopPrice ?? 0,
+          qty: size,
+          orderId: ccxtOrder.id,
+        })
+      }
+
+      this.invalidateOrderCache()
+      this.invalidatePositionCache()
 
       const status = mapOrderStatus(ccxtOrder.status)
 
@@ -291,7 +429,30 @@ export class CcxtAccount implements ITradingAccount {
 
     try {
       const ccxtSymbol = this.orderSymbolCache.get(orderId)
+
+      if (this.exchange.id === 'binance' && ccxtSymbol) {
+        const ex = this.exchange as Exchange & {
+          market?: (symbol: string) => { id?: string }
+          fapiPrivateDeleteAlgoOrder?: (params: { symbol: string; algoId: string }) => Promise<unknown>
+        }
+        const marketId = ex.market?.(ccxtSymbol)?.id
+        if (marketId && typeof ex.fapiPrivateDeleteAlgoOrder === 'function') {
+          try {
+            await ex.fapiPrivateDeleteAlgoOrder({ symbol: marketId, algoId: orderId })
+            this.clearProtectionIntentByOrderId(orderId)
+            this.invalidateOrderCache()
+            this.invalidatePositionCache()
+            return true
+          } catch {
+            // Fall back to regular cancelOrder for non-algo orders.
+          }
+        }
+      }
+
       await this.exchange.cancelOrder(orderId, ccxtSymbol)
+      this.clearProtectionIntentByOrderId(orderId)
+      this.invalidateOrderCache()
+      this.invalidatePositionCache()
       return true
     } catch {
       return false
@@ -318,6 +479,9 @@ export class CcxtAccount implements ITradingAccount {
         changes.qty ?? original.amount,
         changes.price ?? original.price,
       )
+
+      this.invalidateOrderCache()
+      this.invalidatePositionCache()
 
       return {
         success: true,
@@ -347,13 +511,39 @@ export class CcxtAccount implements ITradingAccount {
       return { success: false, error: `No open position for ${aliceId ?? symbol ?? 'unknown'}` }
     }
 
-    return this.placeOrder({
+    const result = await this.placeOrder({
       contract: pos.contract,
       side: pos.side === 'long' ? 'sell' : 'buy',
       type: 'market',
       qty: qty ?? pos.qty,
       reduceOnly: true,
     })
+
+    if (!result.success) {
+      return result
+    }
+
+    try {
+      const orders = await this.getOrders()
+      const pending = orders.filter((o) =>
+        o.status === 'pending' &&
+        ((pos.contract.aliceId && o.contract.aliceId === pos.contract.aliceId) ||
+          (pos.contract.symbol && o.contract.symbol === pos.contract.symbol)),
+      )
+
+      for (const order of pending) {
+        try {
+          await this.cancelOrder(order.id)
+        } catch {
+          // Best-effort cleanup after a successful close.
+        }
+      }
+    } catch {
+      // Best-effort cleanup failure should not make the close fail.
+    }
+
+    this.clearProtectionIntent(pos.contract)
+    return result
   }
 
   // ---- Queries ----
@@ -362,9 +552,14 @@ export class CcxtAccount implements ITradingAccount {
     this.ensureInit()
     this.ensureWritable()
 
-    const [balance, rawPositions] = await Promise.all([
-      this.exchange.fetchBalance(),
-      this.exchange.fetchPositions(),
+    const balanceParams: Record<string, string> = {}
+    if (this.defaultMarketType === 'swap') {
+      balanceParams.type = 'swap'
+    }
+
+    const [balance, positionsSnapshot] = await Promise.all([
+      this.exchange.fetchBalance(balanceParams),
+      this.getPositionsSnapshot(),
     ])
 
     const bal = balance as unknown as Record<string, Record<string, unknown>>
@@ -374,7 +569,7 @@ export class CcxtAccount implements ITradingAccount {
 
     let unrealizedPnL = 0
     let realizedPnL = 0
-    for (const p of rawPositions) {
+    for (const p of positionsSnapshot.raw) {
       unrealizedPnL += parseFloat(String(p.unrealizedPnl ?? 0))
       realizedPnL += parseFloat(String((p as unknown as Record<string, unknown>).realizedPnl ?? 0))
     }
@@ -392,7 +587,90 @@ export class CcxtAccount implements ITradingAccount {
     this.ensureInit()
     this.ensureWritable()
 
+    const snapshot = await this.getPositionsSnapshot()
+    return snapshot.mapped.map((position) => ({
+      ...position,
+      contract: { ...position.contract },
+    }))
+  }
+
+  async getOrders(): Promise<Order[]> {
+    this.ensureInit()
+    this.ensureWritable()
+
+    const cached = this.ordersCache
+    if (cached && (Date.now() - cached.at) < CcxtAccount.ORDERS_CACHE_TTL_MS) {
+      return cached.data.map((order) => ({
+        ...order,
+        contract: { ...order.contract },
+      }))
+    }
+
+    if (this.ordersInFlight) {
+      const inFlightOrders = await this.ordersInFlight
+      return inFlightOrders.map((order) => ({
+        ...order,
+        contract: { ...order.contract },
+      }))
+    }
+
+    this.ordersInFlight = this.loadOrders()
+    try {
+      const orders = await this.ordersInFlight
+      this.ordersCache = { at: Date.now(), data: orders }
+      return orders.map((order) => ({
+        ...order,
+        contract: { ...order.contract },
+      }))
+    } finally {
+      this.ordersInFlight = null
+    }
+  }
+
+  private invalidatePositionCache(): void {
+    this.positionsCache = null
+  }
+
+  private invalidateOrderCache(): void {
+    this.ordersCache = null
+  }
+
+  private async getPositionsSnapshot(): Promise<{
+    raw: Awaited<ReturnType<Exchange['fetchPositions']>>
+    mapped: Position[]
+  }> {
+    const cached = this.positionsCache
+    if (cached && (Date.now() - cached.at) < CcxtAccount.POSITIONS_CACHE_TTL_MS) {
+      return cached
+    }
+
+    if (this.positionsInFlight) {
+      return await this.positionsInFlight
+    }
+
+    this.positionsInFlight = this.loadPositionsSnapshot()
+    try {
+      const snapshot = await this.positionsInFlight
+      this.positionsCache = {
+        at: Date.now(),
+        raw: snapshot.raw,
+        mapped: snapshot.mapped,
+      }
+      return snapshot
+    } finally {
+      this.positionsInFlight = null
+    }
+  }
+
+  private async loadPositionsSnapshot(): Promise<{
+    raw: Awaited<ReturnType<Exchange['fetchPositions']>>
+    mapped: Position[]
+  }> {
     const raw = await this.exchange.fetchPositions()
+    return { raw, mapped: this.mapPositions(raw) }
+  }
+
+  private mapPositions(raw: Awaited<ReturnType<Exchange['fetchPositions']>>): Position[] {
     const result: Position[] = []
 
     for (const p of raw) {
@@ -427,10 +705,7 @@ export class CcxtAccount implements ITradingAccount {
     return result
   }
 
-  async getOrders(): Promise<Order[]> {
-    this.ensureInit()
-    this.ensureWritable()
-
+  private async loadOrders(): Promise<Order[]> {
     const allOrders: CcxtOrder[] = []
 
     try {
@@ -457,19 +732,184 @@ export class CcxtAccount implements ITradingAccount {
         this.orderSymbolCache.set(o.id, o.symbol)
       }
 
+      const rawType = String(o.type ?? 'market').toLowerCase()
+      const orderType: Order['type'] =
+        rawType.includes('take') && rawType.includes('profit')
+          ? 'take_profit'
+          : rawType.includes('stop')
+            ? 'stop'
+            : (o.type ?? 'market') as Order['type']
+
+      const rawTriggerPrice =
+        o.stopPrice ??
+        (o.info as Record<string, unknown> | undefined)?.['stopPrice'] ??
+        (o.info as Record<string, unknown> | undefined)?.['triggerPrice']
+      const stopPrice = rawTriggerPrice != null ? parseFloat(String(rawTriggerPrice)) : undefined
+
       result.push({
         id: o.id,
         contract: marketToContract(market, this.exchangeName),
         side: o.side as 'buy' | 'sell',
-        type: (o.type ?? 'market') as Order['type'],
+        type: orderType,
         qty: o.amount ?? 0,
         price: o.price ?? undefined,
+        stopPrice: Number.isFinite(stopPrice) ? stopPrice : undefined,
         reduceOnly: o.reduceOnly ?? false,
         status: mapOrderStatus(o.status),
         filledPrice: o.average ?? undefined,
         filledQty: o.filled ?? undefined,
         filledAt: o.lastTradeTimestamp ? new Date(o.lastTradeTimestamp) : undefined,
         createdAt: new Date(o.timestamp ?? Date.now()),
+      })
+    }
+
+    const algoOrders = await this.loadBinanceOpenAlgoOrders()
+    const seenOrderIds = new Set(result.map((order) => order.id))
+    for (const order of algoOrders) {
+      if (seenOrderIds.has(order.id)) continue
+      result.push(order)
+    }
+
+    return result
+  }
+
+  private contractIntentKey(contract: Partial<Contract>, kind: 'stop' | 'take_profit'): string | null {
+    const base = contract.aliceId ?? contract.symbol
+    return base ? `${base}::${kind}` : null
+  }
+
+  private readProtectionIntent(
+    contract: Partial<Contract>,
+    kind: 'stop' | 'take_profit',
+  ): { side: 'buy' | 'sell'; triggerPrice: number; qty: number; orderId?: string } | undefined {
+    const key = this.contractIntentKey(contract, kind)
+    if (!key) return undefined
+
+    const intent = this.protectionIntentCache.get(key)
+    if (!intent) return undefined
+    if ((Date.now() - intent.updatedAt) > CcxtAccount.PROTECTION_INTENT_TTL_MS) {
+      this.protectionIntentCache.delete(key)
+      return undefined
+    }
+    return intent
+  }
+
+  private writeProtectionIntent(
+    contract: Partial<Contract>,
+    kind: 'stop' | 'take_profit',
+    intent: { side: 'buy' | 'sell'; triggerPrice: number; qty: number; orderId?: string },
+  ): void {
+    const key = this.contractIntentKey(contract, kind)
+    if (!key) return
+    this.protectionIntentCache.set(key, {
+      kind,
+      ...intent,
+      updatedAt: Date.now(),
+    })
+  }
+
+  private clearProtectionIntent(contract: Partial<Contract>, kind?: 'stop' | 'take_profit'): void {
+    if (kind) {
+      const key = this.contractIntentKey(contract, kind)
+      if (key) this.protectionIntentCache.delete(key)
+      return
+    }
+
+    for (const candidate of ['stop', 'take_profit'] as const) {
+      const key = this.contractIntentKey(contract, candidate)
+      if (key) this.protectionIntentCache.delete(key)
+    }
+  }
+
+  private clearProtectionIntentByOrderId(orderId: string): void {
+    for (const [key, intent] of this.protectionIntentCache) {
+      if (intent.orderId === orderId) {
+        this.protectionIntentCache.delete(key)
+      }
+    }
+  }
+
+  private async loadBinanceOpenAlgoOrders(): Promise<Order[]> {
+    if (this.exchange.id !== 'binance') return []
+
+    const ex = this.exchange as Exchange & {
+      fapiPrivateGetOpenAlgoOrders?: () => Promise<unknown>
+      markets_by_id?: Record<string, { symbol?: string } | Array<{ symbol?: string }>>
+    }
+    if (typeof ex.fapiPrivateGetOpenAlgoOrders !== 'function') return []
+
+    let raw: unknown
+    try {
+      raw = await ex.fapiPrivateGetOpenAlgoOrders()
+    } catch {
+      return []
+    }
+
+    if (!Array.isArray(raw)) return []
+
+    const result: Order[] = []
+
+    for (const item of raw) {
+      const row = item as Record<string, unknown>
+      const algoId = String(row.algoId ?? '')
+      const marketId = String(row.symbol ?? '')
+      if (!algoId || !marketId) continue
+
+      const marketEntry = ex.markets_by_id?.[marketId]
+      const candidateSymbols = Array.isArray(marketEntry)
+        ? marketEntry.map((entry) => entry?.symbol).filter((symbol): symbol is string => Boolean(symbol))
+        : [marketEntry?.symbol].filter((symbol): symbol is string => Boolean(symbol))
+
+      let market: CcxtMarket | undefined
+      let ccxtSymbol: string | undefined
+      for (const candidate of candidateSymbols) {
+        const found = this.markets[candidate]
+        if (found) {
+          market = found
+          ccxtSymbol = candidate
+          break
+        }
+      }
+      if (!market || !ccxtSymbol) continue
+
+      this.orderSymbolCache.set(algoId, ccxtSymbol)
+
+      const orderTypeRaw = String(row.orderType ?? '').toLowerCase()
+      const type: Order['type'] = orderTypeRaw.includes('take') && orderTypeRaw.includes('profit')
+        ? 'take_profit'
+        : orderTypeRaw.includes('stop')
+          ? 'stop'
+          : 'market'
+
+      const side = String(row.side ?? '').toLowerCase() === 'sell' ? 'sell' : 'buy'
+      const qty = parseFloat(String(row.quantity ?? 0))
+      const stopPrice = parseFloat(String(row.triggerPrice ?? 0))
+      const limitPrice = parseFloat(String(row.price ?? 0))
+      const statusRaw = String(row.algoStatus ?? '').toUpperCase()
+      const status: Order['status'] = statusRaw === 'NEW'
+        ? 'pending'
+        : statusRaw === 'TRIGGERED'
+          ? 'filled'
+          : statusRaw === 'CANCELED' || statusRaw === 'CANCELLED'
+            ? 'cancelled'
+            : statusRaw === 'EXPIRED' || statusRaw === 'REJECTED'
+              ? 'rejected'
+              : 'pending'
+
+      result.push({
+        id: algoId,
+        contract: marketToContract(market, this.exchangeName),
+        side,
+        type,
+        qty: Number.isFinite(qty) ? qty : 0,
+        price: Number.isFinite(limitPrice) && limitPrice > 0 ? limitPrice : undefined,
+        stopPrice: Number.isFinite(stopPrice) && stopPrice > 0 ? stopPrice : undefined,
+        reduceOnly: Boolean(row.reduceOnly),
+        status,
+        filledPrice: undefined,
+        filledQty: undefined,
+        filledAt: undefined,
+        createdAt: new Date(Number(row.createTime ?? Date.now())),
       })
     }
 
@@ -504,7 +944,7 @@ export class CcxtAccount implements ITradingAccount {
   getCapabilities(): AccountCapabilities {
     return {
       supportedSecTypes: ['CRYPTO'],
-      supportedOrderTypes: ['market', 'limit'],
+      supportedOrderTypes: ['market', 'limit', 'stop', 'stop_limit', 'take_profit'],
     }
   }
 

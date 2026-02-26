@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createOperationDispatcher } from './operation-dispatcher.js'
-import { MockTradingAccount, makeOrderResult } from './__test__/mock-account.js'
+import { MockTradingAccount, makeOrder, makeOrderResult, makePosition } from './__test__/mock-account.js'
 import type { Operation } from './git/types.js'
 
 describe('createOperationDispatcher', () => {
@@ -113,6 +113,166 @@ describe('createOperationDispatcher', () => {
       expect(result.success).toBe(false)
       expect(result.error).toBe('Insufficient funds')
       expect(result.order).toBeUndefined()
+    })
+
+    it('does not duplicate identical protection orders when broker order list is temporarily empty', async () => {
+      account.placeOrder
+        .mockResolvedValueOnce(makeOrderResult({ orderId: 'sl-1', filledPrice: undefined, filledQty: undefined }))
+        .mockResolvedValue(makeOrderResult({ orderId: 'sl-2', filledPrice: undefined, filledQty: undefined }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'sell',
+          type: 'stop',
+          qty: 0.5,
+          stopPrice: 88000,
+          reduceOnly: true,
+        },
+      }
+
+      const first = await dispatch(op) as Record<string, unknown>
+      const second = await dispatch(op) as Record<string, unknown>
+
+      expect(account.placeOrder).toHaveBeenCalledTimes(1)
+      expect(first.success).toBe(true)
+      expect(second.success).toBe(true)
+      expect((second.order as Record<string, unknown>).id).toBe('sl-1')
+    })
+
+    it('arms protection immediately for filled entries', async () => {
+      account.setPositions([
+        makePosition({
+          contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+          qty: 0.5,
+          avgEntryPrice: 90000,
+          currentPrice: 90000,
+          marketValue: 45000,
+          costBasis: 45000,
+        }),
+      ])
+
+      account.placeOrder
+        .mockResolvedValueOnce(makeOrderResult({ orderId: 'entry-1', filledPrice: 90000, filledQty: 0.5 }))
+        .mockResolvedValue(makeOrderResult({ orderId: 'prot-1', filledPrice: undefined, filledQty: undefined }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'market',
+          qty: 0.5,
+          protection: { stopLossPct: 0.8, takeProfitPct: 1.2, takeProfitSizeRatio: 0.5 },
+        },
+      }
+
+      await dispatch(op)
+
+      await vi.waitFor(() => {
+        expect(account.placeOrder).toHaveBeenCalledTimes(3)
+      })
+
+      expect(account.placeOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        side: 'sell',
+        type: 'stop',
+        qty: 0.5,
+        stopPrice: 89280,
+        reduceOnly: true,
+      }))
+      expect(account.placeOrder).toHaveBeenNthCalledWith(3, expect.objectContaining({
+        side: 'sell',
+        type: 'take_profit',
+        qty: 0.25,
+        stopPrice: 91080,
+        reduceOnly: true,
+      }))
+    })
+
+    it('arms protection after a pending limit order fills', async () => {
+      vi.useFakeTimers()
+      try {
+        account.setPositions([
+          makePosition({
+            contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+            qty: 0.5,
+            avgEntryPrice: 90000,
+            currentPrice: 90000,
+            marketValue: 45000,
+            costBasis: 45000,
+          }),
+        ])
+
+        account.placeOrder
+          .mockResolvedValueOnce(makeOrderResult({ orderId: 'entry-2', filledPrice: undefined, filledQty: undefined }))
+          .mockResolvedValue(makeOrderResult({ orderId: 'prot-2', filledPrice: undefined, filledQty: undefined }))
+
+        let getOrdersCall = 0
+        account.getOrders.mockImplementation(async () => {
+          getOrdersCall += 1
+          if (getOrdersCall === 1) {
+            return [makeOrder({
+              id: 'entry-2',
+              contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+              side: 'buy',
+              type: 'limit',
+              qty: 0.5,
+              price: 90000,
+              status: 'pending',
+            })]
+          }
+          if (getOrdersCall === 2) {
+            return [makeOrder({
+              id: 'entry-2',
+              contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+              side: 'buy',
+              type: 'limit',
+              qty: 0.5,
+              price: 90000,
+              stopPrice: undefined,
+              status: 'filled',
+              filledPrice: 90000,
+              filledQty: 0.5,
+            })]
+          }
+          return []
+        })
+
+        const op: Operation = {
+          action: 'placeOrder',
+          params: {
+            aliceId: 'binance-BTCUSDT',
+            symbol: 'BTCUSDT',
+            side: 'buy',
+            type: 'limit',
+            qty: 0.5,
+            price: 90000,
+            protection: { stopLossPct: 0.8, takeProfitPct: 1.2 },
+          },
+        }
+
+        await dispatch(op)
+        expect(account.placeOrder).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(3500)
+
+        expect(account.placeOrder).toHaveBeenCalledTimes(3)
+        expect(account.placeOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+          type: 'stop',
+          stopPrice: 89280,
+          reduceOnly: true,
+        }))
+        expect(account.placeOrder).toHaveBeenNthCalledWith(3, expect.objectContaining({
+          type: 'take_profit',
+          stopPrice: 91080,
+          reduceOnly: true,
+        }))
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

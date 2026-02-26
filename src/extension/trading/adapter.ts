@@ -530,6 +530,8 @@ Supports two modes:
 
 For SELLING holdings, use closePosition tool instead.
 
+For crypto entries, you can attach an optional protection plan so stop-loss and take-profit orders are armed automatically after the entry fills.
+
 NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
       inputSchema: z.object({
         source: z.string().describe(sourceDesc(true)),
@@ -537,7 +539,7 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
         symbol: z.string().optional().describe('Human-readable symbol for logging (e.g. "AAPL", "BTC"). Optional — extracted from aliceId if omitted.'),
         side: z.enum(['buy', 'sell']).describe('Buy or sell'),
         type: z
-          .enum(['market', 'limit', 'stop', 'stop_limit', 'trailing_stop', 'trailing_stop_limit', 'moc'])
+          .enum(['market', 'limit', 'stop', 'stop_limit', 'take_profit', 'trailing_stop', 'trailing_stop_limit', 'moc'])
           .describe('Order type'),
         qty: z
           .number()
@@ -579,6 +581,16 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
           .boolean()
           .optional()
           .describe('Only reduce position (close only)'),
+        protection: z
+          .object({
+            stopLossPct: z.number().positive().optional().describe('Stop-loss distance in percent, e.g. 0.8'),
+            takeProfitPct: z.number().positive().optional().describe('Take-profit distance in percent, e.g. 1.2'),
+            stopLossPrice: z.number().positive().optional().describe('Absolute stop-loss trigger price (overrides stopLossPct)'),
+            takeProfitPrice: z.number().positive().optional().describe('Absolute take-profit trigger price (overrides takeProfitPct)'),
+            takeProfitSizeRatio: z.number().positive().max(1).optional().describe('Take-profit size ratio (0-1), default 1'),
+          })
+          .optional()
+          .describe('Optional post-fill protection plan for crypto entries'),
         timeInForce: z
           .enum(['day', 'gtc', 'ioc', 'fok', 'opg', 'gtd'])
           .default('day')
@@ -618,6 +630,7 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
         extendedHours,
         parentId,
         ocaGroup,
+        protection,
       }) => {
         const { id } = resolveOne(accountManager, source)
         const git = requireGit(resolver, id)
@@ -640,6 +653,7 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
             extendedHours,
             parentId,
             ocaGroup,
+            protection,
           },
         })
       },
@@ -663,7 +677,7 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
         trailingAmount: z.number().positive().optional().describe('New trailing stop offset'),
         trailingPercent: z.number().positive().optional().describe('New trailing stop percentage'),
         type: z
-          .enum(['market', 'limit', 'stop', 'stop_limit', 'trailing_stop', 'trailing_stop_limit', 'moc'])
+          .enum(['market', 'limit', 'stop', 'stop_limit', 'take_profit', 'trailing_stop', 'trailing_stop_limit', 'moc'])
           .optional()
           .describe('New order type'),
         timeInForce: z
@@ -830,18 +844,70 @@ Use this after placing limit/stop orders to check if they've been filled.`,
           if (!gitState) continue
 
           const pendingOrders = git.getPendingOrderIds()
-          if (pendingOrders.length === 0) continue
+          const [brokerOrders, positions] = await Promise.all([
+            account.getOrders(),
+            account.getPositions(),
+          ])
 
-          const brokerOrders = await account.getOrders()
-          const updates: OrderStatusUpdate[] = []
+          const symbolsWithPosition = new Set(
+            positions.map((position) => position.contract.symbol ?? position.contract.aliceId ?? 'unknown'),
+          )
+          const pendingById = new Map(pendingOrders.map((pending) => [pending.orderId, pending]))
+          const updatesByOrderId = new Map<string, OrderStatusUpdate>()
+
+          const isProtectionOrder = (type: string): boolean => {
+            const lower = type.toLowerCase()
+            return lower.includes('stop') || (lower.includes('take') && lower.includes('profit'))
+          }
+
+          const setUpdate = (update: OrderStatusUpdate): void => {
+            if (!updatesByOrderId.has(update.orderId)) {
+              updatesByOrderId.set(update.orderId, update)
+            }
+          }
+
+          let orphanCancelled = 0
+          for (const order of brokerOrders) {
+            const orderSymbol = order.contract.symbol ?? order.contract.aliceId ?? 'unknown'
+            if (order.status !== 'pending' || order.reduceOnly !== true) continue
+            if (!isProtectionOrder(String(order.type ?? ''))) continue
+            if (symbolsWithPosition.has(orderSymbol)) continue
+
+            const cancelled = await account.cancelOrder(order.id)
+            if (!cancelled) continue
+
+            orphanCancelled += 1
+
+            const tracked = pendingById.get(order.id)
+            if (tracked) {
+              setUpdate({
+                orderId: order.id,
+                symbol: tracked.symbol,
+                previousStatus: 'pending',
+                currentStatus: 'cancelled',
+              })
+            }
+          }
 
           for (const { orderId, symbol } of pendingOrders) {
-            const brokerOrder = brokerOrders.find((o) => o.id === orderId)
-            if (!brokerOrder) continue
+            if (updatesByOrderId.has(orderId)) continue
+
+            const brokerOrder = brokerOrders.find((order) => order.id === orderId)
+            if (!brokerOrder) {
+              if (!symbolsWithPosition.has(symbol)) {
+                setUpdate({
+                  orderId,
+                  symbol,
+                  previousStatus: 'pending',
+                  currentStatus: 'cancelled',
+                })
+              }
+              continue
+            }
 
             const newStatus = brokerOrder.status
             if (newStatus !== 'pending') {
-              updates.push({
+              setUpdate({
                 orderId,
                 symbol,
                 previousStatus: 'pending',
@@ -852,11 +918,26 @@ Use this after placing limit/stop orders to check if they've been filled.`,
             }
           }
 
-          if (updates.length === 0) continue
+          const updates = Array.from(updatesByOrderId.values())
+
+          if (updates.length === 0) {
+            if (orphanCancelled > 0) {
+              results.push({
+                source: id,
+                message: `Cancelled ${orphanCancelled} orphan protective order(s).`,
+                updatedCount: 0,
+                orphanCancelled,
+              })
+              continue
+            }
+
+            if (pendingOrders.length === 0) continue
+            continue
+          }
 
           const state = await gitState
           const result = await git.sync(updates, state)
-          results.push({ source: id, ...result })
+          results.push(orphanCancelled > 0 ? { source: id, ...result, orphanCancelled } : { source: id, ...result })
         }
 
         if (results.length === 0) return { message: 'No pending orders to sync.', updatedCount: 0 }

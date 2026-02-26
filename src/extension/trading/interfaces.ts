@@ -37,6 +37,7 @@ export type OrderType =
   | 'limit'
   | 'stop'
   | 'stop_limit'
+  | 'take_profit'
   | 'trailing_stop'
   | 'trailing_stop_limit'
   | 'moc'
