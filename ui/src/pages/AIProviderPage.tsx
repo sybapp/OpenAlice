@@ -76,7 +76,7 @@ export function AIProviderPage() {
             {/* Backend */}
             <Section id="backend" title="Backend" description="Runtime switch between AI backends. Claude Code calls the local CLI; Vercel AI SDK calls the API directly. Changes take effect immediately.">
               <div className="flex border border-border rounded-lg overflow-hidden">
-                {(['claude-code', 'vercel-ai-sdk'] as const).map((b) => (
+                {(['claude-code', 'codex-cli', 'vercel-ai-sdk'] as const).map((b) => (
                   <button
                     key={b}
                     onClick={() => handleBackendSwitch(b)}
@@ -84,9 +84,9 @@ export function AIProviderPage() {
                       config.aiProvider.backend === b
                         ? 'bg-accent-dim text-accent'
                         : 'bg-bg text-text-muted hover:bg-bg-tertiary hover:text-text'
-                    } ${b === 'vercel-ai-sdk' ? 'border-l border-border' : ''}`}
+                    } ${b !== 'claude-code' ? 'border-l border-border' : ''}`}
                   >
-                    {b === 'claude-code' ? 'Claude Code' : 'Vercel AI SDK'}
+                    {b === 'claude-code' ? 'Claude Code' : b === 'codex-cli' ? 'Codex CLI' : 'Vercel AI SDK'}
                   </button>
                 ))}
               </div>

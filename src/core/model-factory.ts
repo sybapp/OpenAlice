@@ -18,25 +18,37 @@ export interface ModelFromConfig {
 
 export async function createModelFromConfig(): Promise<ModelFromConfig> {
   const config = await readAIProviderConfig()
-  const key = `${config.provider}:${config.model}:${config.baseUrl ?? ''}`
+  const baseKey = `${config.provider}:${config.model}:${config.baseUrl ?? ''}`
 
   switch (config.provider) {
     case 'anthropic': {
       const { createAnthropic } = await import('@ai-sdk/anthropic')
       const client = createAnthropic({ apiKey: config.apiKeys.anthropic || undefined, baseURL: config.baseUrl || undefined })
-      return { model: client(config.model), key }
+      return { model: client(config.model), key: baseKey }
     }
     case 'openai': {
       const { createOpenAI } = await import('@ai-sdk/openai')
       const client = createOpenAI({ apiKey: config.apiKeys.openai || undefined, baseURL: config.baseUrl || undefined })
-      return { model: client(config.model), key }
+
+      // RightCode Codex endpoint currently returns SSE for responses API calls.
+      // Force chat-completions path so Vercel AI SDK can parse responses reliably.
+      if (isRightCodeCodexBaseUrl(config.baseUrl)) {
+        return { model: client.chat(config.model), key: `${baseKey}:chat` }
+      }
+
+      return { model: client(config.model), key: `${baseKey}:responses` }
     }
     case 'google': {
       const { createGoogleGenerativeAI } = await import('@ai-sdk/google')
       const client = createGoogleGenerativeAI({ apiKey: config.apiKeys.google || undefined, baseURL: config.baseUrl || undefined })
-      return { model: client(config.model), key }
+      return { model: client(config.model), key: baseKey }
     }
     default:
       throw new Error(`Unsupported model provider: "${config.provider}". Supported: anthropic, openai, google`)
   }
+}
+
+function isRightCodeCodexBaseUrl(baseUrl?: string): boolean {
+  if (!baseUrl) return false
+  return /right\.codes\/codex\/v1\/?$/i.test(baseUrl)
 }

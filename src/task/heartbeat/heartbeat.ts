@@ -273,8 +273,8 @@ export interface ParsedHeartbeatResponse {
  *   REASON: <text>
  *   CONTENT: <text>       (only for CHAT_YES)
  *
- * If the response doesn't match the expected format, treats the entire
- * raw text as a CHAT_YES message (fail-open: deliver rather than swallow).
+ * If the response doesn't match the expected format, defaults to fail-open
+ * except obvious acknowledgement-only replies (which are treated as skip).
  */
 export function parseHeartbeatResponse(raw: string): ParsedHeartbeatResponse {
   const trimmed = raw.trim()
@@ -285,6 +285,12 @@ export function parseHeartbeatResponse(raw: string): ParsedHeartbeatResponse {
   // Extract STATUS field (case-insensitive, allows leading whitespace on the line)
   const statusMatch = /^\s*STATUS:\s*(HEARTBEAT_OK|CHAT_YES)\s*$/im.exec(trimmed)
   if (!statusMatch) {
+    // Suppress "ack only" heartbeat responses like
+    // "Got it — I'll read data/brain/heartbeat.md..."
+    if (isAckOnlyHeartbeatResponse(trimmed)) {
+      return { status: 'HEARTBEAT_OK', reason: 'ack-only response', content: '', unparsed: true }
+    }
+
     // Fail-open: can't parse → treat as a message to deliver
     return { status: 'CHAT_YES', reason: 'unparsed response', content: trimmed, unparsed: true }
   }
@@ -300,6 +306,25 @@ export function parseHeartbeatResponse(raw: string): ParsedHeartbeatResponse {
   const content = contentMatch?.[1]?.trim() ?? ''
 
   return { status, reason, content, unparsed: false }
+}
+
+function isAckOnlyHeartbeatResponse(text: string): boolean {
+  const compact = text.trim().toLowerCase()
+
+  // Keep this narrow: short acknowledgement + mentions heartbeat instruction/file.
+  if (compact.length > 240) return false
+
+  const mentionsHeartbeat =
+    compact.includes('heartbeat') ||
+    compact.includes('data/brain/heartbeat.md') ||
+    compact.includes('心跳')
+
+  if (!mentionsHeartbeat) return false
+
+  return [
+    /^got it\b/, /^ok\b/, /^okay\b/, /^understood\b/, /^roger\b/,
+    /^好的/, /^收到/, /^明白/, /^了解/, /^行[吧]?/, /^嗯[嗯哼]*/,
+  ].some((re) => re.test(compact))
 }
 
 // ==================== Active Hours ====================

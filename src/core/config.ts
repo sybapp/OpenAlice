@@ -14,7 +14,7 @@ const engineSchema = z.object({
 })
 
 export const aiProviderSchema = z.object({
-  backend: z.enum(['claude-code', 'vercel-ai-sdk']).default('claude-code'),
+  backend: z.enum(['claude-code', 'codex-cli', 'vercel-ai-sdk']).default('claude-code'),
   provider: z.string().default('anthropic'),
   model: z.string().default('claude-sonnet-4-6'),
   baseUrl: z.string().min(1).optional(),
@@ -47,6 +47,18 @@ const agentSchema = z.object({
       'mcp__claude_ai_Figma__*',
     ],
     maxTurns: 20,
+  }),
+  codexCli: z.object({
+    sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('workspace-write'),
+    approvalPolicy: z.enum(['untrusted', 'on-failure', 'on-request', 'never']).default('never'),
+    skipGitRepoCheck: z.boolean().default(true),
+    profile: z.string().optional(),
+    configOverrides: z.array(z.string()).default([]),
+  }).default({
+    sandbox: 'workspace-write',
+    approvalPolicy: 'never',
+    skipGitRepoCheck: true,
+    configOverrides: [],
   }),
 })
 

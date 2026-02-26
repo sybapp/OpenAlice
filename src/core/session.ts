@@ -36,7 +36,7 @@ export interface SessionEntry {
   sessionId: string
   timestamp: string
   /** Which provider generated this entry. */
-  provider?: 'engine' | 'claude-code' | 'human' | 'compaction'
+  provider?: 'engine' | 'claude-code' | 'codex-cli' | 'human' | 'compaction'
   cwd?: string
   /** Arbitrary metadata attached to the entry (e.g. { kind: 'notification', source: 'heartbeat' }). */
   metadata?: Record<string, unknown>

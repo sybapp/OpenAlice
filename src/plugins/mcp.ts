@@ -5,7 +5,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { Tool } from 'ai'
 import type { Plugin, EngineContext } from '../core/types.js'
-import type { ToolCenter } from '../core/tool-center.js'
 
 type McpContent =
   | { type: 'text'; text: string }
@@ -13,12 +12,6 @@ type McpContent =
 
 /**
  * Convert a tool result to MCP content blocks.
- *
- * If the result has a `.content` array (OpenClaw AgentToolResult format),
- * map each item to native MCP text/image blocks. This avoids stringify-ing
- * base64 image data into a giant JSON text blob.
- *
- * Otherwise, fall back to JSON.stringify as before.
  */
 function toMcpContent(result: unknown): McpContent[] {
   if (
@@ -38,7 +31,6 @@ function toMcpContent(result: unknown): McpContent[] {
         blocks.push({ type: 'text', text: JSON.stringify(item) })
       }
     }
-    // Also include details as text if present
     if ('details' in result && (result as { details: unknown }).details != null) {
       blocks.push({ type: 'text', text: JSON.stringify((result as { details: unknown }).details) })
     }
@@ -50,29 +42,29 @@ function toMcpContent(result: unknown): McpContent[] {
 /**
  * MCP Plugin — exposes tools via Streamable HTTP.
  *
- * Holds a reference to ToolCenter and queries it per-request, so tool
- * changes (reconnect, disable/enable) are picked up automatically.
+ * Uses stateful HTTP transport so clients like Codex can initialize once,
+ * then call tools/list and tools/call with mcp-session-id.
  */
 export class McpPlugin implements Plugin {
   name = 'mcp'
   private server: ReturnType<typeof serve> | null = null
+  private transports = new Map<string, WebStandardStreamableHTTPServerTransport>()
 
   constructor(
-    private toolCenter: ToolCenter,
+    private getTools: (() => Promise<Record<string, Tool>> | Record<string, Tool>) | Record<string, Tool>,
     private port: number,
   ) {}
 
   async start(_ctx: EngineContext) {
-    const toolCenter = this.toolCenter
+    const resolveTools = async () =>
+      typeof this.getTools === 'function' ? await this.getTools() : this.getTools
 
     const createMcpServer = async () => {
-      const tools = await toolCenter.getMcpTools()
       const mcp = new McpServer({ name: 'open-alice', version: '1.0.0' })
 
-      for (const [name, t] of Object.entries(tools)) {
+      for (const [name, t] of Object.entries(await resolveTools())) {
         if (!t.execute) continue
 
-        // Extract raw shape from z.object() for MCP's inputSchema
         const shape = (t.inputSchema as any)?.shape ?? {}
 
         mcp.registerTool(name, {
@@ -107,9 +99,35 @@ export class McpPlugin implements Plugin {
     }))
 
     app.all('/mcp', async (c) => {
-      const transport = new WebStandardStreamableHTTPServerTransport()
-      const mcp = await createMcpServer()
-      await mcp.connect(transport)
+      const sessionId = c.req.header('mcp-session-id')
+      let transport = sessionId ? this.transports.get(sessionId) : undefined
+
+      if (sessionId && !transport) {
+        return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Invalid MCP session id' }, id: null }, 404)
+      }
+
+      if (!transport) {
+        let initializedSessionId: string | undefined
+        transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: () => crypto.randomUUID(),
+          onsessioninitialized: (sid) => {
+            initializedSessionId = sid
+            this.transports.set(sid, transport!)
+          },
+          onsessionclosed: (sid) => {
+            this.transports.delete(sid)
+          },
+        })
+
+        const mcp = await createMcpServer()
+        await mcp.connect(transport)
+
+        // Fallback safety in case callbacks are not triggered by client flow.
+        if (initializedSessionId && !this.transports.has(initializedSessionId)) {
+          this.transports.set(initializedSessionId, transport)
+        }
+      }
+
       return transport.handleRequest(c.req.raw)
     })
 
@@ -119,6 +137,7 @@ export class McpPlugin implements Plugin {
   }
 
   async stop() {
+    this.transports.clear()
     this.server?.close()
   }
 }

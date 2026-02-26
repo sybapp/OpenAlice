@@ -18,6 +18,12 @@ export function createAgent(
     model,
     tools,
     instructions,
+    // Force higher reasoning depth for OpenAI-compatible backends.
+    providerOptions: {
+      openai: {
+        reasoningEffort: 'high',
+      },
+    },
     stopWhen: stepCountIs(maxSteps),
     onStepFinish: (step) => {
       for (const tc of step.toolCalls) {

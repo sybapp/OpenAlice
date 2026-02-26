@@ -41,12 +41,16 @@ export class ProviderRouter implements AIProvider {
   constructor(
     private vercel: AIProvider,
     private claudeCode: AIProvider | null,
+    private codexCli: AIProvider | null,
   ) {}
 
   async ask(prompt: string): Promise<ProviderResult> {
     const config = await readAIProviderConfig()
     if (config.backend === 'claude-code' && this.claudeCode) {
       return this.claudeCode.ask(prompt)
+    }
+    if (config.backend === 'codex-cli' && this.codexCli) {
+      return this.codexCli.ask(prompt)
     }
     return this.vercel.ask(prompt)
   }
@@ -55,6 +59,9 @@ export class ProviderRouter implements AIProvider {
     const config = await readAIProviderConfig()
     if (config.backend === 'claude-code' && this.claudeCode) {
       return this.claudeCode.askWithSession(prompt, session, opts)
+    }
+    if (config.backend === 'codex-cli' && this.codexCli) {
+      return this.codexCli.askWithSession(prompt, session, opts)
     }
     return this.vercel.askWithSession(prompt, session, opts)
   }

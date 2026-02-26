@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { readAIProviderConfig } from './config.js'
 
-export type AIBackend = 'claude-code' | 'vercel-ai-sdk'
+export type AIBackend = 'claude-code' | 'codex-cli' | 'vercel-ai-sdk'
 
 const CONFIG_PATH = resolve('data/config/ai-provider.json')
 
