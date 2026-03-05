@@ -67,12 +67,7 @@ const cryptoSchema = z.object({
       type: z.literal('none'),
     }),
   ]).default({
-    type: 'ccxt', exchange: 'bybit', sandbox: false, demoTrading: true, defaultMarketType: 'swap',
-    // Only load linear (USDT-margined) markets from ccxt.
-    // Default is ['spot', 'linear', 'inverse', 'option'] — the extra categories
-    // add unnecessary parallel requests during loadMarkets(), and any single failure
-    // (common on bybit demo API) aborts the entire init.
-    options: { fetchMarkets: { types: ['linear'] } },
+    type: 'ccxt', exchange: 'binance', sandbox: false, demoTrading: true, defaultMarketType: 'swap',
   }),
   guards: z.array(z.object({
     type: z.string(),
