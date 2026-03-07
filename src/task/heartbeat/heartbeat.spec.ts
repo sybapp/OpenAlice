@@ -202,6 +202,29 @@ describe('heartbeat', () => {
       expect(eventLog.recent({ type: 'heartbeat.done' })).toHaveLength(0)
     })
 
+    it('should skip CHAT_NO responses', async () => {
+      mockEngine.setResponse('STATUS: CHAT_NO\nREASON: Nothing actionable.')
+
+      heartbeat = createHeartbeat({
+        config: makeConfig(),
+        connectorCenter, cronEngine, eventLog,
+        engine: mockEngine as any,
+        session,
+      })
+      await heartbeat.start()
+
+      await cronEngine.runNow(cronEngine.list()[0].id)
+
+      await vi.waitFor(() => {
+        const skips = eventLog.recent({ type: 'heartbeat.skip' })
+        expect(skips).toHaveLength(1)
+      })
+
+      const skips = eventLog.recent({ type: 'heartbeat.skip' })
+      expect(skips[0].payload).toMatchObject({ reason: 'chat-no', parsedReason: 'Nothing actionable.' })
+      expect(eventLog.recent({ type: 'heartbeat.done' })).toHaveLength(0)
+    })
+
     it('should deliver unparsed responses (fail-open)', async () => {
       const delivered: string[] = []
       connectorCenter.register({
@@ -251,6 +274,26 @@ describe('heartbeat', () => {
       await new Promise((r) => setTimeout(r, 50))
 
       expect(mockEngine.askWithSession).not.toHaveBeenCalled()
+    })
+
+    it('should append runtime guard requiring fresh positions/orders checks', async () => {
+      heartbeat = createHeartbeat({
+        config: makeConfig({ prompt: 'Custom heartbeat prompt.' }),
+        connectorCenter, cronEngine, eventLog,
+        engine: mockEngine as any,
+        session,
+      })
+      await heartbeat.start()
+      await cronEngine.runNow(cronEngine.list()[0].id)
+
+      await vi.waitFor(() => {
+        expect(mockEngine.askWithSession).toHaveBeenCalledTimes(1)
+      })
+
+      const firstPrompt = mockEngine.askWithSession.mock.calls[0][0] as string
+      expect(firstPrompt).toContain("cryptoGetPositions({ symbol: 'BTC/USD' })")
+      expect(firstPrompt).toContain('cryptoGetOrders()')
+      expect(firstPrompt).toContain('数据不可用')
     })
   })
 
@@ -490,8 +533,16 @@ describe('parseHeartbeatResponse', () => {
 
   it('should treat former CHAT_NO as unparsed (fail-open to CHAT_YES)', () => {
     const r = parseHeartbeatResponse('STATUS: CHAT_NO\nREASON: Nothing worth reporting.')
-    expect(r.status).toBe('CHAT_YES')
-    expect(r.unparsed).toBe(true)
+    expect(r.status).toBe('CHAT_NO')
+    expect(r.reason).toBe('Nothing worth reporting.')
+    expect(r.unparsed).toBe(false)
+  })
+
+  it('should parse STATUS template line with options as HEARTBEAT_OK', () => {
+    const r = parseHeartbeatResponse('STATUS: HEARTBEAT_OK | CHAT_YES | CHAT_NO\nREASON: template-like output')
+    expect(r.status).toBe('HEARTBEAT_OK')
+    expect(r.reason).toBe('template-like output')
+    expect(r.unparsed).toBe(false)
   })
 
   it('should parse CHAT_YES with content', () => {

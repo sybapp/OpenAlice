@@ -186,6 +186,94 @@ describe('cron listener', () => {
         expect(done).toHaveLength(1)
       })
     })
+
+    it('should suppress delivery when STATUS is CHAT_NO', async () => {
+      const delivered: string[] = []
+      connectorCenter.register({
+        channel: 'test',
+        to: 'user1',
+        capabilities: { push: true, media: false },
+        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
+      })
+
+      mockEngine.setResponse('STATUS: CHAT_NO\nREASON: no-op')
+      listener.start()
+
+      await eventLog.append('cron.fire', {
+        jobId: 'abc12345',
+        jobName: 'test-job',
+        payload: 'Hello',
+      } satisfies CronFirePayload)
+
+      await vi.waitFor(() => {
+        const done = eventLog.recent({ type: 'cron.done' })
+        expect(done).toHaveLength(1)
+      })
+
+      expect(delivered).toHaveLength(0)
+      const done = eventLog.recent({ type: 'cron.done' })
+      expect(done[0].payload).toMatchObject({ status: 'CHAT_NO', delivered: false })
+    })
+
+    it('should suppress delivery on bare NO_REPLY', async () => {
+      const delivered: string[] = []
+      connectorCenter.register({
+        channel: 'test',
+        to: 'user1',
+        capabilities: { push: true, media: false },
+        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
+      })
+
+      mockEngine.setResponse('NO_REPLY')
+      listener.start()
+
+      await eventLog.append('cron.fire', {
+        jobId: 'abc12345',
+        jobName: 'test-job',
+        payload: 'Hello',
+      } satisfies CronFirePayload)
+
+      await vi.waitFor(() => {
+        const done = eventLog.recent({ type: 'cron.done' })
+        expect(done).toHaveLength(1)
+      })
+
+      expect(delivered).toHaveLength(0)
+      const done = eventLog.recent({ type: 'cron.done' })
+      expect(done[0].payload).toMatchObject({ status: 'CHAT_NO', delivered: false, reason: 'no-reply' })
+    })
+
+    it('should deliver CONTENT when STATUS is CHAT_YES', async () => {
+      const delivered: string[] = []
+      connectorCenter.register({
+        channel: 'test',
+        to: 'user1',
+        capabilities: { push: true, media: false },
+        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
+      })
+
+      mockEngine.setResponse('STATUS: CHAT_YES\nREASON: triggered\nCONTENT: send this')
+      listener.start()
+
+      await eventLog.append('cron.fire', {
+        jobId: 'abc12345',
+        jobName: 'test-job',
+        payload: 'Hello',
+      } satisfies CronFirePayload)
+
+      await vi.waitFor(() => {
+        expect(delivered).toHaveLength(1)
+      })
+
+      await vi.waitFor(() => {
+        const done = eventLog.recent({ type: 'cron.done' })
+        expect(done).toHaveLength(1)
+      })
+
+      expect(delivered[0]).toBe('send this')
+      const done = eventLog.recent({ type: 'cron.done' })
+      expect(done[0].payload).toMatchObject({ status: 'CHAT_YES', delivered: true, reason: 'triggered' })
+    })
   })
 
   // ==================== Error handling ====================

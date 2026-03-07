@@ -4,6 +4,8 @@ Read this file at the start of every heartbeat to recall what you should be payi
 
 ## Watch List
 
+- Always verify live state first with `cryptoGetPositions(symbol='BTC/USD')` and `cryptoGetOrders()` before any position/order statement.
+- If either check fails or returns unusable data, do not claim flat/no orders; use HEARTBEAT_OK and include "数据不可用" in REASON.
 - Scan for significant price movements across tracked pairs (>3% in the last few hours)
 - Check if any pair is approaching key support/resistance levels
 - Look for potential entry opportunities based on technical signals (RSI oversold/overbought, Bollinger Band breakouts, MACD crossovers)
@@ -13,7 +15,7 @@ Read this file at the start of every heartbeat to recall what you should be payi
 ## Response Format
 
 ```
-STATUS: HEARTBEAT_OK | CHAT_YES 
+STATUS: HEARTBEAT_OK | CHAT_YES | CHAT_NO
 REASON: <why you made this decision>
 CONTENT: <message to deliver, only for CHAT_YES>
 ```

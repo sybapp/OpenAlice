@@ -4,7 +4,8 @@
  *
  * Flow:
  *   eventLog 'cron.fire' → engine.askWithSession(payload, session)
- *                         → connectorCenter.notify(reply)
+ *                         → parse STATUS (CHAT_YES/CHAT_NO, optional)
+ *                         → connectorCenter.notify(reply) when CHAT_YES
  *                         → eventLog 'cron.done' / 'cron.error'
  *
  * The listener owns a dedicated SessionStore for cron conversations,
@@ -17,6 +18,54 @@ import { SessionStore } from '../../core/session.js'
 import type { ConnectorCenter } from '../../core/connector-center.js'
 import type { CronFirePayload } from './engine.js'
 import { HEARTBEAT_JOB_NAME } from '../heartbeat/heartbeat.js'
+
+export type CronChatStatus = 'CHAT_YES' | 'CHAT_NO'
+
+interface ParsedCronResponse {
+  status: CronChatStatus
+  reason: string
+  content: string
+  unparsed: boolean
+}
+
+/**
+ * Parse optional structured cron responses.
+ *
+ * Expected format:
+ *   STATUS: CHAT_YES | CHAT_NO
+ *   REASON: <text>
+ *   CONTENT: <text>  (only for CHAT_YES)
+ *
+ * Also accepts a bare NO_REPLY as an explicit silent ack.
+ *
+ * Backward compatible: if STATUS is missing, treat the whole raw text as CHAT_YES.
+ */
+export function parseCronResponse(raw: string): ParsedCronResponse {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return { status: 'CHAT_NO', reason: 'empty response', content: '', unparsed: false }
+  }
+
+  if (trimmed === 'NO_REPLY') {
+    return { status: 'CHAT_NO', reason: 'no-reply', content: '', unparsed: false }
+  }
+
+  const statusMatch = /^\s*STATUS:\s*(CHAT_YES|CHAT_NO)\s*$/im.exec(trimmed)
+  if (!statusMatch) {
+    return { status: 'CHAT_YES', reason: 'unparsed response', content: trimmed, unparsed: true }
+  }
+
+  const status = statusMatch[1].toUpperCase() as CronChatStatus
+  const reasonMatch = /^\s*REASON:\s*(.+?)(?=\n\s*(?:STATUS|CONTENT):|\s*$)/ims.exec(trimmed)
+  const contentMatch = /^\s*CONTENT:\s*(.+)/ims.exec(trimmed)
+
+  return {
+    status,
+    reason: reasonMatch?.[1]?.trim() ?? '',
+    content: contentMatch?.[1]?.trim() ?? '',
+    unparsed: false,
+  }
+}
 
 // ==================== Types ====================
 
@@ -63,21 +112,31 @@ export function createCronListener(opts: CronListenerOpts): CronListener {
         historyPreamble: 'The following is the recent cron session conversation. This is an automated cron job execution.',
       })
 
-      // Send notification through the last-interacted connector
-      try {
-        await connectorCenter.notify(result.text, {
-          media: result.media,
-          source: 'cron',
-        })
-      } catch (sendErr) {
-        console.warn(`cron-listener: send failed for job ${payload.jobId}:`, sendErr)
+      const parsed = parseCronResponse(result.text)
+      const text = parsed.content || result.text
+
+      let delivered = false
+      if (parsed.status === 'CHAT_YES' && text.trim()) {
+        // Send notification through the last-interacted connector
+        try {
+          const sendResult = await connectorCenter.notify(text, {
+            media: result.media,
+            source: 'cron',
+          })
+          delivered = sendResult.delivered
+        } catch (sendErr) {
+          console.warn(`cron-listener: send failed for job ${payload.jobId}:`, sendErr)
+        }
       }
 
       // Log success
       await eventLog.append('cron.done', {
         jobId: payload.jobId,
         jobName: payload.jobName,
-        reply: result.text,
+        reply: text,
+        status: parsed.status,
+        reason: parsed.reason,
+        delivered,
         durationMs: Date.now() - startMs,
       })
     } catch (err) {

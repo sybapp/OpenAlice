@@ -25,6 +25,20 @@ import type { CronEngine, CronFirePayload } from '../cron/engine.js'
 // ==================== Constants ====================
 
 export const HEARTBEAT_JOB_NAME = '__heartbeat__'
+const HEARTBEAT_RUNTIME_GUARD = `
+
+## Runtime Guard (mandatory)
+
+Before deciding STATUS, you MUST call these tools and base your judgement on fresh results from this heartbeat run:
+- cryptoGetPositions({ symbol: 'BTC/USD' })
+- cryptoGetOrders()
+
+Hard requirements:
+- Do NOT infer position/order state from memory or previous messages.
+- If either tool call fails, times out, or returns unusable data, do NOT claim "no position/no orders".
+- In that case, return HEARTBEAT_OK and set REASON to include "数据不可用" explicitly.
+- If you mention position/order status, it must come from the tool results above.
+`
 
 // ==================== Config ====================
 
@@ -49,7 +63,7 @@ export const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
 
 ## Response Format
 
-STATUS: HEARTBEAT_OK | CHAT_YES
+STATUS: HEARTBEAT_OK | CHAT_YES | CHAT_NO
 REASON: <brief explanation of your decision>
 CONTENT: <message to deliver, only when STATUS is CHAT_YES>
 
@@ -63,6 +77,10 @@ CONTENT: <message to deliver, only when STATUS is CHAT_YES>
 If nothing to report:
 STATUS: HEARTBEAT_OK
 REASON: All systems normal, no alerts or notable changes.
+
+Also acceptable:
+STATUS: CHAT_NO
+REASON: No actionable update right now.
 
 If you want to send a message:
 STATUS: CHAT_YES
@@ -130,7 +148,8 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       }
 
       // 2. Call AI
-      const result = await engine.askWithSession(payload.payload, session, {
+      const guardedPrompt = appendRuntimeGuard(payload.payload)
+      const result = await engine.askWithSession(guardedPrompt, session, {
         historyPreamble: 'The following is the recent heartbeat conversation history.',
       })
       const durationMs = now() - startMs
@@ -138,10 +157,10 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       // 3. Parse structured response
       const parsed = parseHeartbeatResponse(result.text)
 
-      if (parsed.status === 'HEARTBEAT_OK') {
+      if (parsed.status === 'HEARTBEAT_OK' || parsed.status === 'CHAT_NO') {
         console.log(`heartbeat: HEARTBEAT_OK — ${parsed.reason || 'no reason'} (${durationMs}ms)`)
         await eventLog.append('heartbeat.skip', {
-          reason: 'ack',
+          reason: parsed.status === 'CHAT_NO' ? 'chat-no' : 'ack',
           parsedReason: parsed.reason,
         })
         return
@@ -255,7 +274,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
 
 // ==================== Response Parser ====================
 
-export type HeartbeatStatus = 'HEARTBEAT_OK' | 'CHAT_YES'
+export type HeartbeatStatus = 'HEARTBEAT_OK' | 'CHAT_YES' | 'CHAT_NO'
 
 export interface ParsedHeartbeatResponse {
   status: HeartbeatStatus
@@ -269,7 +288,7 @@ export interface ParsedHeartbeatResponse {
  * Parse a structured heartbeat response from the AI.
  *
  * Expected format:
- *   STATUS: HEARTBEAT_OK | CHAT_YES
+ *   STATUS: HEARTBEAT_OK | CHAT_YES | CHAT_NO
  *   REASON: <text>
  *   CONTENT: <text>       (only for CHAT_YES)
  *
@@ -283,7 +302,7 @@ export function parseHeartbeatResponse(raw: string): ParsedHeartbeatResponse {
   }
 
   // Extract STATUS field (case-insensitive, allows leading whitespace on the line)
-  const statusMatch = /^\s*STATUS:\s*(HEARTBEAT_OK|CHAT_YES)\s*$/im.exec(trimmed)
+  const statusMatch = /^\s*STATUS:\s*(HEARTBEAT_OK|CHAT_YES|CHAT_NO)(?:\s*\|.*)?\s*$/im.exec(trimmed)
   if (!statusMatch) {
     // Suppress "ack only" heartbeat responses like
     // "Got it — I'll read data/brain/heartbeat.md..."
@@ -325,6 +344,14 @@ function isAckOnlyHeartbeatResponse(text: string): boolean {
     /^got it\b/, /^ok\b/, /^okay\b/, /^understood\b/, /^roger\b/,
     /^好的/, /^收到/, /^明白/, /^了解/, /^行[吧]?/, /^嗯[嗯哼]*/,
   ].some((re) => re.test(compact))
+}
+
+function appendRuntimeGuard(prompt: string): string {
+  const trimmed = prompt.trimEnd()
+  if (trimmed.includes('cryptoGetPositions') && trimmed.includes('cryptoGetOrders')) {
+    return trimmed
+  }
+  return `${trimmed}${HEARTBEAT_RUNTIME_GUARD}`
 }
 
 // ==================== Active Hours ====================
