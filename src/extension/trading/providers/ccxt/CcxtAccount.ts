@@ -253,16 +253,37 @@ export class CcxtAccount implements ITradingAccount {
       return { success: false, error: 'Either qty or notional must be provided' }
     }
 
+    const requiresPrice = order.type === 'limit' || order.type === 'stop_limit' || order.type === 'trailing_stop_limit'
+    if (requiresPrice && order.price == null) {
+      return { success: false, error: `Order type ${order.type} requires price` }
+    }
+
+    const requiresStopPrice = order.type === 'stop' || order.type === 'stop_limit'
+    if (requiresStopPrice && order.stopPrice == null) {
+      return { success: false, error: `Order type ${order.type} requires stopPrice` }
+    }
+
+    const requiresTrailing = order.type === 'trailing_stop' || order.type === 'trailing_stop_limit'
+    if (requiresTrailing && order.trailingAmount == null && order.trailingPercent == null) {
+      return { success: false, error: `Order type ${order.type} requires trailingAmount or trailingPercent` }
+    }
+
     try {
       const params: Record<string, unknown> = {}
       if (order.reduceOnly) params.reduceOnly = true
+      if (order.stopPrice != null) {
+        params.stopPrice = order.stopPrice
+        params.triggerPrice = order.stopPrice
+      }
+      if (order.trailingAmount != null) params.trailingAmount = order.trailingAmount
+      if (order.trailingPercent != null) params.trailingPercent = order.trailingPercent
 
       const ccxtOrder = await this.exchange.createOrder(
         ccxtSymbol,
         order.type,
         order.side,
         size,
-        order.type === 'limit' ? order.price : undefined,
+        requiresPrice ? order.price : undefined,
         params,
       )
 
