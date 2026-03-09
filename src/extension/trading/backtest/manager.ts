@@ -103,14 +103,16 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         eventLog,
         strategyDriver,
         onStep: async (snapshot) => {
-          await storage.appendEquityPoint(runId, {
-            step: snapshot.step,
-            ts: snapshot.ts,
-            equity: snapshot.equity,
-            realizedPnL: snapshot.realizedPnL,
-            unrealizedPnL: snapshot.unrealizedPnL,
-          })
-          await storage.updateManifest(runId, { currentStep: snapshot.step })
+          await Promise.all([
+            storage.appendEquityPoint(runId, {
+              step: snapshot.step,
+              ts: snapshot.ts,
+              equity: snapshot.equity,
+              realizedPnL: snapshot.realizedPnL,
+              unrealizedPnL: snapshot.unrealizedPnL,
+            }),
+            storage.updateManifest(runId, { currentStep: snapshot.step }),
+          ])
         },
       })
 
