@@ -1,4 +1,4 @@
-import type { AccountManager } from '../extension/trading/index.js'
+import type { AccountManager, BacktestRunManager } from '../extension/trading/index.js'
 import type { ITradingGit } from '../extension/trading/git/interfaces.js'
 import type { CronEngine } from '../task/cron/engine.js'
 import type { Heartbeat } from '../task/heartbeat/index.js'
@@ -33,6 +33,7 @@ export interface EngineContext {
 
   // Trading (unified account model)
   accountManager: AccountManager
+  backtest: BacktestRunManager
   /** Get the TradingGit instance for an account by ID. */
   getAccountGit: (accountId: string) => ITradingGit | undefined
   /** Reconnect a specific trading account by ID. */

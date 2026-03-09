@@ -105,3 +105,41 @@ export type { AlpacaAccountConfig } from './providers/alpaca/index.js'
 export { CcxtAccount } from './providers/ccxt/index.js'
 export { createCcxtProviderTools } from './providers/ccxt/index.js'
 export type { CcxtAccountConfig } from './providers/ccxt/index.js'
+
+// Backtest
+export { HistoricalMarketReplay } from './backtest/HistoricalMarketReplay.js'
+export { BacktestAccount } from './backtest/BacktestAccount.js'
+export { BacktestRunner } from './backtest/BacktestRunner.js'
+export { ScriptedBacktestStrategyDriver } from './backtest/strategy-scripted.js'
+export { AIBacktestStrategyDriver } from './backtest/strategy-ai.js'
+export { createBacktestStorage } from './backtest/storage.js'
+export { createBacktestRunManager } from './backtest/manager.js'
+export type {
+  BacktestBar,
+  ReplayQuoteView,
+  HistoricalMarketReplayOptions,
+  BacktestAccountOptions,
+  BacktestStrategyContext,
+  BacktestStrategyDecision,
+  BacktestStrategyDriver,
+  ScriptedStrategyDriverOptions,
+  AIBacktestStrategyDriverOptions,
+  BacktestRunSummary,
+  BacktestRunStepSnapshot,
+  BacktestRunnerOptions,
+  BacktestHolding,
+  BacktestRunMode,
+  BacktestRunStatus,
+  BacktestDecisionPlanEntry,
+  ScriptedBacktestRunStrategyConfig,
+  AIBacktestRunStrategyConfig,
+  BacktestRunStrategyConfig,
+  BacktestRunConfig,
+  BacktestRunManifest,
+  BacktestEquityPoint,
+  BacktestRunRecord,
+  BacktestStorage,
+  BacktestRunManager,
+  BacktestRunManagerOptions,
+} from './backtest/types.js'
+export { createBacktestRunId } from './backtest/types.js'
