@@ -16,6 +16,7 @@ import { createTradingRoutes } from './routes/trading.js'
 import { createTradingConfigRoutes } from './routes/trading-config.js'
 import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
+import { createBacktestRoutes } from './routes/backtest.js'
 
 export interface WebConfig {
   port: number
@@ -58,6 +59,7 @@ export class WebPlugin implements Plugin {
     app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
     app.route('/api/trading/config', createTradingConfigRoutes(ctx))
     app.route('/api/trading', createTradingRoutes(ctx))
+    app.route('/api/backtest', createBacktestRoutes(ctx))
     app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
     app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
 
