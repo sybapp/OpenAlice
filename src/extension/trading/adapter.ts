@@ -16,6 +16,7 @@ import type { AccountManager } from './account-manager.js'
 import type { ITradingAccount } from './interfaces.js'
 import type { ITradingGit } from './git/interfaces.js'
 import type { GitState, OrderStatusUpdate } from './git/types.js'
+import { calculateRiskPositionSize } from './risk-position-size.js'
 
 // ==================== Resolver interface ====================
 
@@ -511,6 +512,49 @@ IMPORTANT: This is READ-ONLY - it does NOT modify your actual holdings.`,
           results.push({ source: id, ...result })
         }
         return results.length === 1 ? results[0] : results
+      },
+    }),
+
+    calculateRiskPositionSize: tool({
+      description: `Calculate a risk-based order size from account equity and stop distance.
+
+Use this before stop-entry trades so position sizing is based on the setup invalidation,
+not on guesswork. Returns both raw size and exposure-capped size.
+
+Typical intraday workflow:
+- identify stop-entry trigger price
+- identify structural stop-loss price
+- call this tool
+- use returned qty for placeOrder`,
+      inputSchema: z.object({
+        source: z.string().describe(sourceDesc(true)),
+        side: z.enum(['buy', 'sell']).describe('Trade direction'),
+        entryPrice: z.number().positive().describe('Expected entry or stop-entry trigger price'),
+        stopPrice: z.number().positive().describe('Structural stop-loss price'),
+        riskPercent: z.number().positive().default(0.5).describe('Percent of equity to risk, e.g. 0.5'),
+        maxExposurePercent: z.number().positive().default(5).describe('Max position notional as percent of equity'),
+      }),
+      execute: async ({ source, side, entryPrice, stopPrice, riskPercent, maxExposurePercent }) => {
+        const { account, id } = resolveOne(accountManager, source)
+        const accountInfo = await account.getAccount()
+        const result = calculateRiskPositionSize({
+          accountEquity: accountInfo.equity,
+          entryPrice,
+          stopPrice,
+          side,
+          riskPercent,
+          maxExposurePercent,
+        })
+        return {
+          source: id,
+          equity: accountInfo.equity,
+          side,
+          entryPrice,
+          stopPrice,
+          riskPercent,
+          maxExposurePercent,
+          ...result,
+        }
       },
     }),
 
