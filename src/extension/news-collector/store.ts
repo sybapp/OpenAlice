@@ -74,7 +74,9 @@ export class NewsCollectorStore implements INewsProvider {
 
     if (!raw.trim()) return
 
-    const retentionCutoff = Date.now() - this.retentionDays * 24 * 60 * 60 * 1000
+    const retentionCutoff = this.retentionDays > 0
+      ? Date.now() - this.retentionDays * 24 * 60 * 60 * 1000
+      : Number.NEGATIVE_INFINITY
     const lines = raw.split('\n')
 
     for (const line of lines) {
