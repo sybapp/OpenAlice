@@ -8,8 +8,9 @@ export class BacktestRunner {
     let maxEquity = startState.equity
     let maxDrawdown = 0
     let tradeCount = 0
+    let closedTradeCount = 0
     let guardRejectionCount = 0
-    let winCount = 0
+    let winningClosedTradeCount = 0
     let step = 1
 
     await this.options.eventLog.append('backtest.run.started', {
@@ -28,7 +29,9 @@ export class BacktestRunner {
         await this.options.git.sync(syncUpdates, syncState)
         const syncFills = syncUpdates.filter((update) => update.currentStatus === 'filled')
         tradeCount += syncFills.length
-        winCount += syncFills.length
+        const closedFills = syncFills.filter((update) => update.realizedPnLDelta != null)
+        closedTradeCount += closedFills.length
+        winningClosedTradeCount += closedFills.filter((update) => (update.realizedPnLDelta ?? 0) > 0).length
       }
 
       const [account, positions, orders] = await Promise.all([
@@ -56,7 +59,6 @@ export class BacktestRunner {
         const pushResult = await this.options.git.push()
         tradeCount += pushResult.filled.length
         guardRejectionCount += pushResult.rejected.length
-        winCount += pushResult.filled.filter((result) => result.status === 'filled').length
       }
 
       const state = await this.options.getGitState()
@@ -90,7 +92,7 @@ export class BacktestRunner {
       unrealizedPnL: endState.unrealizedPnL,
       maxDrawdown,
       tradeCount,
-      winRate: tradeCount > 0 ? winCount / tradeCount : 0,
+      winRate: closedTradeCount > 0 ? winningClosedTradeCount / closedTradeCount : 0,
       guardRejectionCount,
     }
 

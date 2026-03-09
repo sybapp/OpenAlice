@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createBacktestStorage } from './storage.js'
 import { createBacktestRunManager } from './manager.js'
 import type { Engine } from '../../../core/engine.js'
+import { SessionStore } from '../../../core/session.js'
 
 function tempDir(name: string) {
   return join(tmpdir(), `backtest-manager-${name}-${randomUUID()}`)
@@ -52,23 +53,38 @@ describe('createBacktestRunManager', () => {
     expect(engine.askWithSession).not.toHaveBeenCalled()
   })
 
-  it('runs ai backtests and persists session transcript', async () => {
+  it('rejects invalid external runIds', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('invalid-runid') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.startRun({
+      runId: '../escape',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })).rejects.toThrow('Invalid backtest runId:')
+  })
+
+  it('runs ai backtests and persists one user/assistant entry per decision', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('ai') })
     const engine = {
       ask: vi.fn(),
-      askWithSession: vi
-        .fn()
-        .mockResolvedValueOnce({
-          text: JSON.stringify({
-            text: 'buy one lot',
-            operations: [{ action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 1 } }],
-          }),
-          media: [],
-        })
-        .mockResolvedValue({
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        await session.appendAssistant(JSON.stringify({ text: 'hold', operations: [] }), 'engine')
+        return {
           text: JSON.stringify({ text: 'hold', operations: [] }),
           media: [],
-        }),
+        }
+      }),
     } as unknown as Engine
 
     const manager = createBacktestRunManager({ storage, engine })
@@ -87,8 +103,10 @@ describe('createBacktestRunManager', () => {
 
     expect(manifest.status).toBe('completed')
     expect(manifest.sessionId).toBeDefined()
-    expect(sessionEntries.length).toBeGreaterThan(0)
-    expect(summary?.tradeCount).toBe(1)
-    expect(engine.askWithSession).toHaveBeenCalled()
+    expect(summary?.tradeCount).toBe(0)
+    expect(engine.askWithSession).toHaveBeenCalledTimes(3)
+    expect(sessionEntries).toHaveLength(6)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'user')).toHaveLength(3)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
   })
 })

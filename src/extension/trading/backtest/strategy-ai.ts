@@ -4,14 +4,7 @@ export class AIBacktestStrategyDriver {
   constructor(private readonly options: AIBacktestStrategyDriverOptions) {}
 
   async decide(context: BacktestStrategyContext): Promise<BacktestStrategyDecision> {
-    const prompt = JSON.stringify(context)
-    await this.options.session.appendUser(prompt)
-
     const response = await this.options.ask(context)
-    await this.options.session.appendAssistant(response.text ?? '', 'engine', {
-      kind: 'backtest-ai-decision',
-      operationCount: response.operations?.length ?? 0,
-    })
 
     await this.options.eventLog.append('backtest.strategy.ai.decision', {
       runId: context.runId,

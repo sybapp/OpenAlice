@@ -51,14 +51,38 @@ describe('createBacktestRoutes', () => {
     expect(await res.json()).toEqual({ runId: 'run-2' })
   })
 
-  it('returns 404 for missing run summary', async () => {
+  it('rejects invalid runId on create', async () => {
+    const startRun = vi.fn()
     const app = createBacktestRoutes({
-      backtest: makeBacktestManager({
-        getSummary: vi.fn().mockResolvedValue(null),
+      backtest: makeBacktestManager({ startRun }),
+    })
+
+    const res = await app.request('/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId: '../escape',
+        initialCash: 10_000,
+        bars: [
+          { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        ],
+        strategy: { mode: 'scripted', decisions: [] },
       }),
     })
 
-    const res = await app.request('/runs/missing/summary')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(400)
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid runId in path params', async () => {
+    const getSummary = vi.fn()
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({ getSummary }),
+    })
+
+    const res = await app.request('/runs/..%2Fescape/summary')
+
+    expect(res.status).toBe(400)
+    expect(getSummary).not.toHaveBeenCalled()
   })
 })

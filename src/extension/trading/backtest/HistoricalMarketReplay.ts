@@ -4,6 +4,8 @@ import type { BacktestBar, HistoricalMarketReplayOptions } from './types.js'
 export class HistoricalMarketReplay {
   private readonly bars: BacktestBar[]
   private currentIndex = 0
+  private currentBars: BacktestBar[] = []
+  private currentBarsBySymbol = new Map<string, BacktestBar>()
   private initialized = false
 
   constructor(private readonly options: HistoricalMarketReplayOptions) {
@@ -21,6 +23,7 @@ export class HistoricalMarketReplay {
       this.currentIndex = index >= 0 ? index : this.bars.length - 1
     }
 
+    this.refreshCurrentBars()
     this.initialized = true
   }
 
@@ -31,8 +34,7 @@ export class HistoricalMarketReplay {
 
   getCurrentBars(): BacktestBar[] {
     this.ensureInitialized()
-    const ts = this.bars[this.currentIndex]?.ts
-    return this.bars.filter((bar) => bar.ts === ts)
+    return [...this.currentBars]
   }
 
   getCurrentIndex(): number {
@@ -47,7 +49,7 @@ export class HistoricalMarketReplay {
 
   getCurrentQuote(symbol: string): Quote {
     this.ensureInitialized()
-    const bar = this.getCurrentBars().find((entry) => entry.symbol === symbol)
+    const bar = this.currentBarsBySymbol.get(symbol)
     if (!bar) {
       throw new Error(`No bar for symbol: ${symbol}`)
     }
@@ -68,13 +70,40 @@ export class HistoricalMarketReplay {
     if (this.currentIndex >= this.bars.length - 1) {
       return false
     }
-    this.currentIndex += 1
+
+    const currentTs = this.bars[this.currentIndex].ts
+    let nextIndex = this.currentIndex + 1
+    while (nextIndex < this.bars.length && this.bars[nextIndex].ts === currentTs) {
+      nextIndex += 1
+    }
+    if (nextIndex >= this.bars.length) {
+      return false
+    }
+
+    this.currentIndex = nextIndex
+    this.refreshCurrentBars()
     return true
   }
 
   isFinished(): boolean {
     this.ensureInitialized()
     return this.currentIndex >= this.bars.length - 1
+  }
+
+  private refreshCurrentBars(): void {
+    const ts = this.bars[this.currentIndex]?.ts
+    const currentBars: BacktestBar[] = []
+    const currentBarsBySymbol = new Map<string, BacktestBar>()
+
+    for (let index = this.currentIndex; index < this.bars.length; index += 1) {
+      const bar = this.bars[index]
+      if (bar.ts !== ts) break
+      currentBars.push(bar)
+      currentBarsBySymbol.set(bar.symbol, bar)
+    }
+
+    this.currentBars = currentBars
+    this.currentBarsBySymbol = currentBarsBySymbol
   }
 
   private ensureInitialized(): void {

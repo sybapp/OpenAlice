@@ -72,10 +72,6 @@ export interface ScriptedStrategyDriverOptions {
 
 export interface AIBacktestStrategyDriverOptions {
   ask: (context: BacktestStrategyContext) => Promise<{ text?: string; operations?: Operation[] }>
-  session: {
-    appendUser(content: string): Promise<unknown>
-    appendAssistant(content: string, provider?: 'engine' | 'claude-code' | 'human' | 'compaction', metadata?: Record<string, unknown>): Promise<unknown>
-  }
   eventLog: {
     append<T>(type: string, payload: T): Promise<unknown>
   }

@@ -6,6 +6,7 @@ import { createEventLog } from '../../../core/event-log.js'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 
 function tempPath(name: string) {
   return join(tmpdir(), `backtest-${name}-${randomUUID()}.jsonl`)
@@ -32,7 +33,7 @@ describe('backtest strategy drivers', () => {
     expect(first).toEqual(second)
   })
 
-  it('ai driver writes audit trail to session and event log', async () => {
+  it('ai driver writes audit trail to event log without touching session storage', async () => {
     const session = new SessionStore(`backtest/test-${randomUUID()}`)
     const eventLog = await createEventLog({ logPath: tempPath('events') })
     const ask = vi.fn().mockResolvedValue({
@@ -44,7 +45,6 @@ describe('backtest strategy drivers', () => {
 
     const driver = new AIBacktestStrategyDriver({
       ask,
-      session,
       eventLog,
     })
 
@@ -58,8 +58,8 @@ describe('backtest strategy drivers', () => {
 
     expect(result.operations).toHaveLength(1)
 
-    const sessionEntries = await session.readAll()
-    expect(sessionEntries.length).toBeGreaterThan(0)
+    const sessionPath = join(process.cwd(), 'data', 'sessions', `${session.id}.jsonl`)
+    await expect(readFile(sessionPath, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' })
 
     const events = await eventLog.read()
     expect(events.some((entry) => entry.type === 'backtest.strategy.ai.decision')).toBe(true)

@@ -150,7 +150,9 @@ export class BacktestAccount implements ITradingAccount {
   async getQuote(contract: Contract): Promise<Quote> {
     const symbol = contract.symbol ?? contract.aliceId
     if (!symbol) throw new Error('Missing contract symbol')
-    return this.options.replay.getCurrentQuote(contract.symbol ?? this.parseSymbolFromAliceId(symbol))
+    const resolvedSymbol = contract.symbol ?? this.parseSymbolFromAliceId(symbol)
+    if (!resolvedSymbol) throw new Error('Missing contract symbol')
+    return this.options.replay.getCurrentQuote(resolvedSymbol)
   }
 
   async getMarketClock(): Promise<MarketClock> {
@@ -179,6 +181,13 @@ export class BacktestAccount implements ITradingAccount {
       const fill = this.resolveFillForCurrentBar(order)
       if (!fill) continue
 
+      const holding = order.side === 'sell'
+        ? this.holdings.get(this.contractKey(order.contract))
+        : undefined
+      const realizedPnLDelta = holding
+        ? (fill.price - holding.avgEntryPrice) * order.qty
+        : undefined
+
       this.applyFill(order, fill.price, currentTime)
       updates.push({
         orderId: order.id,
@@ -187,6 +196,7 @@ export class BacktestAccount implements ITradingAccount {
         currentStatus: 'filled',
         filledPrice: fill.price,
         filledQty: order.filledQty,
+        realizedPnLDelta,
       })
     }
 

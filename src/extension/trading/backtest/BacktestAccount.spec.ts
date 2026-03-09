@@ -156,6 +156,7 @@ describe('BacktestAccount', () => {
     expect(updates).toHaveLength(1)
     expect(updates[0].filledQty).toBe(10)
     expect(updates[0].filledPrice).toBe(99)
+    expect(updates[0].realizedPnLDelta).toBe(-40)
   })
 
   it('supports modifying and cancelling orders while they are still pending', async () => {

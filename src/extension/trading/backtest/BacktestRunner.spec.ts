@@ -156,6 +156,92 @@ describe('BacktestRunner integration', () => {
     await eventLog._resetForTest()
   })
 
+  it('reports winRate as 0 for losing closed trades', async () => {
+    const eventLog = await createEventLog({ logPath: tempPath('losing-win-rate') })
+    const replay = new HistoricalMarketReplay({
+      bars: [
+        { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        { ts: '2025-01-01T09:31:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        { ts: '2025-01-01T09:32:00.000Z', symbol: 'AAPL', open: 90, high: 91, low: 89, close: 90, volume: 1_000 },
+      ],
+    })
+    await replay.init()
+    const account = new BacktestAccount({ id: 'backtest-paper', label: 'Backtest Paper', replay, initialCash: 10_000 })
+    await account.init()
+    const setup = wireAccountTrading(account, {})
+
+    const runner = new BacktestRunner({
+      runId: 'run-loss',
+      replay,
+      account,
+      git: setup.git,
+      getGitState: setup.getGitState,
+      eventLog,
+      strategyDriver: new ScriptedBacktestStrategyDriver({
+        strategy: async ({ step }) => {
+          if (step === 1) {
+            return [{ action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 10 } }]
+          }
+          if (step === 2) {
+            return [{ action: 'closePosition', params: { symbol: 'AAPL', qty: 10 } }]
+          }
+          return []
+        },
+      }),
+    })
+
+    const summary = await runner.run()
+
+    expect(summary.realizedPnL).toBeLessThan(0)
+    expect(summary.tradeCount).toBe(2)
+    expect(summary.winRate).toBe(0)
+
+    await eventLog._resetForTest()
+  })
+
+  it('reports winRate as 1 for profitable closed trades', async () => {
+    const eventLog = await createEventLog({ logPath: tempPath('winning-win-rate') })
+    const replay = new HistoricalMarketReplay({
+      bars: [
+        { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        { ts: '2025-01-01T09:31:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        { ts: '2025-01-01T09:32:00.000Z', symbol: 'AAPL', open: 110, high: 111, low: 109, close: 110, volume: 1_000 },
+      ],
+    })
+    await replay.init()
+    const account = new BacktestAccount({ id: 'backtest-paper', label: 'Backtest Paper', replay, initialCash: 10_000 })
+    await account.init()
+    const setup = wireAccountTrading(account, {})
+
+    const runner = new BacktestRunner({
+      runId: 'run-win',
+      replay,
+      account,
+      git: setup.git,
+      getGitState: setup.getGitState,
+      eventLog,
+      strategyDriver: new ScriptedBacktestStrategyDriver({
+        strategy: async ({ step }) => {
+          if (step === 1) {
+            return [{ action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 10 } }]
+          }
+          if (step === 2) {
+            return [{ action: 'closePosition', params: { symbol: 'AAPL', qty: 10 } }]
+          }
+          return []
+        },
+      }),
+    })
+
+    const summary = await runner.run()
+
+    expect(summary.realizedPnL).toBeGreaterThan(0)
+    expect(summary.tradeCount).toBe(2)
+    expect(summary.winRate).toBe(1)
+
+    await eventLog._resetForTest()
+  })
+
   it('records guard rejections in commit history and summary', async () => {
     const eventLog = await createEventLog({ logPath: tempPath('guard-events') })
     const replay = new HistoricalMarketReplay({ bars: makeBars() })

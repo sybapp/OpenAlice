@@ -112,7 +112,7 @@ export { BacktestAccount } from './backtest/BacktestAccount.js'
 export { BacktestRunner } from './backtest/BacktestRunner.js'
 export { ScriptedBacktestStrategyDriver } from './backtest/strategy-scripted.js'
 export { AIBacktestStrategyDriver } from './backtest/strategy-ai.js'
-export { createBacktestStorage } from './backtest/storage.js'
+export { createBacktestStorage, normalizeBacktestRunId } from './backtest/storage.js'
 export { createBacktestRunManager } from './backtest/manager.js'
 export type {
   BacktestBar,

@@ -1,13 +1,12 @@
-import { resolve } from 'node:path'
 import { createEventLog } from '../../../core/event-log.js'
 import { SessionStore } from '../../../core/session.js'
-import type { Engine } from '../../../core/engine.js'
 import { wireAccountTrading } from '../factory.js'
 import { HistoricalMarketReplay } from './HistoricalMarketReplay.js'
 import { BacktestAccount } from './BacktestAccount.js'
 import { BacktestRunner } from './BacktestRunner.js'
 import { ScriptedBacktestStrategyDriver } from './strategy-scripted.js'
 import { AIBacktestStrategyDriver } from './strategy-ai.js'
+import { normalizeBacktestRunId } from './storage.js'
 import {
   createBacktestRunId,
   type BacktestRunManager,
@@ -21,7 +20,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
   const running = new Map<string, Promise<BacktestRunManifest>>()
 
   async function executeRun(config: BacktestRunConfig): Promise<BacktestRunManifest> {
-    const runId = config.runId ?? createBacktestRunId()
+    const runId = normalizeBacktestRunId(config.runId ?? createBacktestRunId())
     const storage = options.storage
     const accountId = config.accountId ?? `${runId}-paper`
     const accountLabel = config.accountLabel ?? 'Backtest Paper'
@@ -76,18 +75,18 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         },
       })
 
-      const strategyDriver = mode === 'scripted'
+      const strategyConfig = config.strategy
+      const strategyDriver = strategyConfig.mode === 'scripted'
         ? new ScriptedBacktestStrategyDriver({
-            strategy: ({ step }) => config.strategy.decisions.find((entry) => entry.step === step)?.operations ?? [],
+            strategy: ({ step }) => strategyConfig.decisions.find((entry) => entry.step === step)?.operations ?? [],
           })
         : new AIBacktestStrategyDriver({
-            session: session!,
             eventLog,
             ask: async (context) => {
-              const prompt = buildAIBacktestPrompt(config.strategy.prompt, context)
+              const prompt = buildAIBacktestPrompt(strategyConfig.prompt, context)
               const result = await options.engine.askWithSession(prompt, session!, {
-                systemPrompt: config.strategy.systemPrompt,
-                maxHistoryEntries: config.strategy.maxHistoryEntries,
+                systemPrompt: strategyConfig.systemPrompt,
+                maxHistoryEntries: strategyConfig.maxHistoryEntries,
                 historyPreamble: 'The following is the prior backtest decision history for this run.',
               })
               return parseAIBacktestResponse(result.text)
@@ -144,7 +143,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
 
   return {
     async startRun(config) {
-      const runId = config.runId ?? createBacktestRunId()
+      const runId = normalizeBacktestRunId(config.runId ?? createBacktestRunId())
       const promise = executeRun({ ...config, runId })
         .finally(() => {
           running.delete(runId)

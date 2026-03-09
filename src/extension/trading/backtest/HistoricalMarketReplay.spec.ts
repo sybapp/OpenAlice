@@ -32,20 +32,31 @@ describe('HistoricalMarketReplay', () => {
     expect(quote.low).toBe(99)
   })
 
-  it('advances one bar at a time', async () => {
+  it('advances to the next timestamp snapshot for multi-symbol bars', async () => {
     const replay = new HistoricalMarketReplay({
       bars: [
-        makeBar(),
-        makeBar({ ts: '2025-01-01T09:31:00.000Z', open: 102, high: 106, low: 101, close: 105 }),
+        makeBar({ symbol: 'AAPL', ts: '2025-01-01T09:30:00.000Z', close: 101 }),
+        makeBar({ symbol: 'MSFT', ts: '2025-01-01T09:30:00.000Z', close: 201 }),
+        makeBar({ symbol: 'AAPL', ts: '2025-01-01T09:31:00.000Z', close: 102 }),
+        makeBar({ symbol: 'MSFT', ts: '2025-01-01T09:31:00.000Z', close: 202 }),
       ],
     })
 
     await replay.init()
+
+    expect(replay.getCurrentBars().map((bar) => `${bar.symbol}@${bar.ts}`)).toEqual([
+      'AAPL@2025-01-01T09:30:00.000Z',
+      'MSFT@2025-01-01T09:30:00.000Z',
+    ])
+
     const moved = replay.step()
 
     expect(moved).toBe(true)
-    expect(replay.getCurrentIndex()).toBe(1)
     expect(replay.getCurrentTime().toISOString()).toBe('2025-01-01T09:31:00.000Z')
+    expect(replay.getCurrentBars().map((bar) => `${bar.symbol}@${bar.ts}`)).toEqual([
+      'AAPL@2025-01-01T09:31:00.000Z',
+      'MSFT@2025-01-01T09:31:00.000Z',
+    ])
   })
 
   it('returns false when stepping past the end', async () => {
