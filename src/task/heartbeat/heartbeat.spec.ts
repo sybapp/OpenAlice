@@ -291,8 +291,8 @@ describe('heartbeat', () => {
       })
 
       const firstPrompt = mockEngine.askWithSession.mock.calls[0][0] as string
-      expect(firstPrompt).toContain("cryptoGetPositions({ symbol: 'BTC/USD' })")
-      expect(firstPrompt).toContain('cryptoGetOrders()')
+      expect(firstPrompt).toContain('getPortfolio()')
+      expect(firstPrompt).toContain('getOrders()')
       expect(firstPrompt).toContain('数据不可用')
     })
   })

@@ -129,6 +129,7 @@ export interface OrderStatusUpdate {
   currentStatus: OperationStatus
   filledPrice?: number
   filledQty?: number
+  realizedPnLDelta?: number
 }
 
 export interface SyncResult {

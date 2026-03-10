@@ -30,8 +30,8 @@ const HEARTBEAT_RUNTIME_GUARD = `
 ## Runtime Guard (mandatory)
 
 Before deciding STATUS, you MUST call these tools and base your judgement on fresh results from this heartbeat run:
-- cryptoGetPositions({ symbol: 'BTC/USD' })
-- cryptoGetOrders()
+- getPortfolio()
+- getOrders()
 
 Hard requirements:
 - Do NOT infer position/order state from memory or previous messages.
@@ -348,7 +348,7 @@ function isAckOnlyHeartbeatResponse(text: string): boolean {
 
 function appendRuntimeGuard(prompt: string): string {
   const trimmed = prompt.trimEnd()
-  if (trimmed.includes('cryptoGetPositions') && trimmed.includes('cryptoGetOrders')) {
+  if (trimmed.includes('getPortfolio') && trimmed.includes('getOrders')) {
     return trimmed
   }
   return `${trimmed}${HEARTBEAT_RUNTIME_GUARD}`

@@ -289,6 +289,21 @@ export class CcxtAccount implements ITradingAccount {
       return { success: false, error: 'Either qty or notional must be provided' }
     }
 
+    const requiresPrice = order.type === 'limit' || order.type === 'stop_limit' || order.type === 'trailing_stop_limit'
+    if (requiresPrice && order.price == null) {
+      return { success: false, error: `Order type ${order.type} requires price` }
+    }
+
+    const requiresStopPrice = order.type === 'stop' || order.type === 'stop_limit'
+    if (requiresStopPrice && order.stopPrice == null) {
+      return { success: false, error: `Order type ${order.type} requires stopPrice` }
+    }
+
+    const requiresTrailing = order.type === 'trailing_stop' || order.type === 'trailing_stop_limit'
+    if (requiresTrailing && order.trailingAmount == null && order.trailingPercent == null) {
+      return { success: false, error: `Order type ${order.type} requires trailingAmount or trailingPercent` }
+    }
+
     try {
       const protectionKind =
         order.reduceOnly && order.type === 'stop'
@@ -369,15 +384,22 @@ export class CcxtAccount implements ITradingAccount {
         params.stopPrice = order.stopPrice
         params.triggerPrice = order.stopPrice
       }
+      if (order.trailingAmount != null) params.trailingAmount = order.trailingAmount
+      if (order.trailingPercent != null) params.trailingPercent = order.trailingPercent
 
       const ccxtOrderType =
         order.type === 'stop'
           ? 'stop_market'
           : order.type === 'take_profit'
             ? 'take_profit_market'
-            : order.type
+            : order.type === 'trailing_stop'
+              ? 'trailing_stop_market'
+              : order.type === 'trailing_stop_limit'
+                ? 'trailing_stop_limit'
+                : order.type
+
       const priceArg =
-        order.type === 'limit' || order.type === 'stop_limit'
+        order.type === 'limit' || order.type === 'stop_limit' || order.type === 'trailing_stop_limit'
           ? order.price
           : order.type === 'stop' || order.type === 'take_profit'
             ? order.stopPrice

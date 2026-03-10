@@ -17,6 +17,8 @@ import {
   createPlatformFromConfig,
   createAccountFromConfig,
   validatePlatformRefs,
+  createBacktestStorage,
+  createBacktestRunManager,
 } from './extension/trading/index.js'
 import type { AccountSetup, GitExportState, ITradingGit, IPlatform } from './extension/trading/index.js'
 import { Brain, createBrainTools } from './extension/brain/index.js'
@@ -285,6 +287,14 @@ async function main() {
   const agentCenter = new AgentCenter(router)
   const engine = new Engine({ agentCenter })
 
+  // ==================== Backtest ====================
+
+  const backtestStorage = createBacktestStorage()
+  const backtest = createBacktestRunManager({
+    storage: backtestStorage,
+    engine,
+  })
+
   // ==================== Connector Center ====================
 
   const connectorCenter = new ConnectorCenter(eventLog)
@@ -477,6 +487,7 @@ async function main() {
   const ctx: EngineContext = {
     config, connectorCenter, engine, eventLog, heartbeat, cronEngine, toolCenter,
     accountManager,
+    backtest,
     getAccountGit: (id: string): ITradingGit | undefined => accountSetups.get(id)?.git,
     reconnectAccount,
     reconnectConnectors,
