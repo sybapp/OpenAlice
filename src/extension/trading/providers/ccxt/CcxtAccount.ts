@@ -387,30 +387,12 @@ export class CcxtAccount implements ITradingAccount {
       if (order.trailingAmount != null) params.trailingAmount = order.trailingAmount
       if (order.trailingPercent != null) params.trailingPercent = order.trailingPercent
 
-      const ccxtOrderType =
-        order.type === 'stop'
-          ? 'stop_market'
-          : order.type === 'take_profit'
-            ? 'take_profit_market'
-            : order.type === 'trailing_stop'
-              ? 'trailing_stop_market'
-              : order.type === 'trailing_stop_limit'
-                ? 'trailing_stop_limit'
-                : order.type
-
-      const priceArg =
-        order.type === 'limit' || order.type === 'stop_limit' || order.type === 'trailing_stop_limit'
-          ? order.price
-          : order.type === 'stop' || order.type === 'take_profit'
-            ? order.stopPrice
-            : undefined
-
       const ccxtOrder = await this.exchange.createOrder(
         ccxtSymbol,
-        ccxtOrderType,
+        order.type,
         order.side,
         size,
-        priceArg,
+        requiresPrice ? order.price : undefined,
         params,
       )
 
