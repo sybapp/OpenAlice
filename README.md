@@ -33,7 +33,7 @@ Your one-person Wall Street. Alice is an AI trading agent that gives you your ow
 
 **Provider** — The AI backend that powers Alice. Claude Code (subprocess) or Vercel AI SDK (in-process). Switchable at runtime via `ai-provider.json`.
 
-**Extension** — A self-contained tool package registered in ToolCenter. Each extension owns its tools, state, and persistence. Examples: trading, brain, analysis-kit.
+**Extension** — A self-contained tool package registered in ToolCenter. Each extension owns its tools, state, and persistence. Examples: trading, brain, indicator-tools.
 
 **Trading** — A git-like workflow for trading operations. You stage orders, commit with a message, then push to execute. Every commit gets an 8-char hash. Full history is reviewable via `tradingLog` / `tradingShow`.
 
@@ -70,7 +70,9 @@ graph LR
 
   subgraph Extensions
     OBB[OpenBB Data]
-    AK[Analysis Kit]
+    IK[Indicator Kit]
+    IT[Indicator Tools]
+    BPA[Brooks PA]
     TR[Trading]
     GD[Guards]
     NC[News Collector]
@@ -97,9 +99,11 @@ graph LR
   E --> S
   TC -->|Vercel tools| VS
   TC -->|MCP tools| MCP
-  OBB --> AK
+  OBB --> IK
   OBB --> NC
-  AK --> TC
+  IK --> IT
+  IT --> TC
+  IT --> BPA
   TR --> TC
   GD --> TR
   NC --> TC
@@ -202,7 +206,9 @@ src/
     claude-code/             # Claude Code CLI subprocess wrapper
     vercel-ai-sdk/           # Vercel AI SDK ToolLoopAgent wrapper
   extension/
-    analysis-kit/            # Indicator calculator and market data tools
+    indicator-kit/           # Indicator formulas + OHLCV fetch strategies (library)
+    indicator-tools/         # Indicator tool surface (calculateIndicator)
+    brooks-pa/               # Brooks price action analysis tool
     equity/                  # Equity fundamentals and data adapter
     market/                  # Unified symbol search across equity, crypto, currency
     news/                    # OpenBB news tools (world + company headlines)

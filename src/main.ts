@@ -33,7 +33,8 @@ import { OpenBBCommodityClient } from './openbb/commodity/index.js'
 import { OpenBBNewsClient } from './openbb/news/index.js'
 import { createMarketSearchTools } from './extension/market/index.js'
 import { createNewsTools } from './extension/news/index.js'
-import { createAnalysisTools } from './extension/analysis-kit/index.js'
+import { createIndicatorTools } from './extension/indicator-tools/index.js'
+import { createBrooksPaTools } from './extension/brooks-pa/index.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -268,7 +269,8 @@ async function main() {
   if (config.newsCollector.enabled) {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news-archive')
   }
-  toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient), 'analysis')
+  toolCenter.register(createIndicatorTools(equityClient, cryptoClient, currencyClient), 'analysis')
+  toolCenter.register(createBrooksPaTools(equityClient, cryptoClient, currencyClient), 'analysis')
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
 
