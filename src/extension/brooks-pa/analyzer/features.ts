@@ -1,21 +1,19 @@
 import type { OhlcvData } from '@/extension/indicator-kit/index'
 import type { BarFeatureSummary, BarType, BrooksMidpointAvoidance, BrooksNoTradeReason } from '../types'
 
-export function classifyBarType(bar: OhlcvData): BarType {
-  const body = Math.abs(bar.close - bar.open)
-  const tr = bar.high - bar.low
-
-  if (tr === 0) return 'doji'
-  const bodyPct = body / tr
-  if (bodyPct < 0.2) return 'doji'
-  return bar.close >= bar.open ? 'bull' : 'bear'
-}
-
 export function summarizeBarFeatures(bar: OhlcvData): BarFeatureSummary {
   const tr = bar.high - bar.low
   const body = Math.abs(bar.close - bar.open)
   const bodyPct = tr === 0 ? 0 : body / tr
   return { tr, body, bodyPct }
+}
+
+export function classifyBarType(bar: OhlcvData): BarType {
+  const { tr, bodyPct } = summarizeBarFeatures(bar)
+
+  if (tr === 0) return 'doji'
+  if (bodyPct < 0.2) return 'doji'
+  return bar.close >= bar.open ? 'bull' : 'bear'
 }
 
 /**
@@ -32,7 +30,7 @@ export function checkMidpointAvoidance(params: {
   if (bars.length === 0) return []
 
   const last = bars[bars.length - 1]
-  const tr = last.high - last.low
+  const { tr } = summarizeBarFeatures(last)
   if (tr === 0) return []
 
   const mid = (last.high + last.low) / 2

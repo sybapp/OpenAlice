@@ -6,7 +6,7 @@ import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
 import { IndicatorCalculator, fetchOhlcvByCalendarDays, createOhlcvTtlCache, getCalendarDaysForInterval } from '@/extension/indicator-kit/index'
 import type { IndicatorContext, OhlcvData } from '@/extension/indicator-kit/index'
 
-const ohlcvCache = createOhlcvTtlCache({ ttlMs: 2 * 60 * 1000, maxSize: 50 })
+const ohlcvCache = createOhlcvTtlCache()
 
 function getCacheKey(asset: string, symbol: string, interval: string): string {
   return `${asset}:${symbol}:${interval}`

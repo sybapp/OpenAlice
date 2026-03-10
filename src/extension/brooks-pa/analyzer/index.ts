@@ -15,7 +15,7 @@ export function analyzeBrooksPa(params: {
   const execTf = timeframes.execution
   const execBars = dataByTf[execTf] ?? []
 
-  const latestIndex = Math.max(0, execBars.length - 1)
+  const latestIndex = execBars.length - 1
 
   const recent = execBars
     .slice(-recentBars)

@@ -4,8 +4,11 @@ import { analyzeBrooksPa } from '../analyzer'
 
 describe('analyzeBrooksPa', () => {
   it('enforces recentBars length and midpoint no-trade', () => {
+    const start = new Date('2026-01-01T00:00:00.000Z').getTime()
+    const stepMs = 5 * 60 * 1000
+
     const bars: OhlcvData[] = Array.from({ length: 300 }, (_, i) => ({
-      date: `2026-01-01T${String(i).padStart(2, '0')}:00:00Z`,
+      date: new Date(start + i * stepMs).toISOString(),
       open: 100,
       high: 110,
       low: 90,
