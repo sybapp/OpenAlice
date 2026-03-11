@@ -16,6 +16,36 @@ export function classifyBarType(bar: OhlcvData): BarType {
   return bar.close >= bar.open ? 'bull' : 'bear'
 }
 
+export function round(value: number, digits = 4): number {
+  const factor = 10 ** digits
+  return Math.round(value * factor) / factor
+}
+
+export function highestHigh(bars: OhlcvData[]): number | null {
+  if (bars.length === 0) return null
+  return Math.max(...bars.map((bar) => bar.high))
+}
+
+export function lowestLow(bars: OhlcvData[]): number | null {
+  if (bars.length === 0) return null
+  return Math.min(...bars.map((bar) => bar.low))
+}
+
+export function averageTrueRange(bars: OhlcvData[], period = 14): number {
+  if (bars.length === 0) return 0
+  const slice = bars.slice(-period)
+  const sum = slice.reduce((acc, bar) => acc + (bar.high - bar.low), 0)
+  return sum / slice.length
+}
+
+export function countDirectionalBars(bars: OhlcvData[]): { bull: number; bear: number; doji: number } {
+  return bars.reduce((acc, bar) => {
+    const type = classifyBarType(bar)
+    acc[type] += 1
+    return acc
+  }, { bull: 0, bear: 0, doji: 0 })
+}
+
 /**
  * Midpoint avoidance (simplified / deterministic):
  * If the latest bar close is too close to the midpoint of its own range,

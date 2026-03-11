@@ -45,6 +45,46 @@ export type BrooksNoTradeReason = {
   details?: Record<string, unknown>
 }
 
+export type BrooksFrame = {
+  tf: string
+  bars: RecentBar[]
+  latestIndex: number
+  latestClose: number | null
+  rangeHigh: number | null
+  rangeLow: number | null
+}
+
+export type BrooksStructureSignal = {
+  tf: string
+  direction: 'long' | 'short' | 'neutral'
+  marketType: 'trend' | 'range' | 'breakout' | 'channel' | 'unknown'
+  confidence: number
+  breakoutDirection?: 'up' | 'down'
+  followThrough?: boolean
+  failedBreakout?: boolean
+  secondEntry?: 'long' | 'short' | null
+  channel?: 'bull' | 'bear' | null
+  wedge?: 'bull' | 'bear' | null
+}
+
+export type BrooksDecisionWindowSummary = {
+  tf: string
+  bars: RecentBar[]
+  summary: {
+    barCount: number
+    bullBars: number
+    bearBars: number
+    dojiBars: number
+    netChange: number
+    rangeHigh: number | null
+    rangeLow: number | null
+    latestClose: number | null
+    dominantSide: 'bull' | 'bear' | 'balanced'
+    breakoutState: 'up' | 'down' | 'inside'
+    notes: string[]
+  }
+}
+
 export type BrooksPaAnalyzeOutput = {
   indexing: { oldest: number; latest: number }
   marketTypeByTf: Record<string, { marketType: string; confidence: number }>
@@ -54,4 +94,5 @@ export type BrooksPaAnalyzeOutput = {
   noTrade: BrooksNoTradeReason[]
   recentBars: RecentBar[]
   keyBars: Array<{ tf: string; index: number; date: string; note: string }>
+  decisionWindow: BrooksDecisionWindowSummary
 }
