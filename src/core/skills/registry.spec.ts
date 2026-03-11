@@ -35,6 +35,7 @@ describe('skill registry', () => {
       'ops-cron-maintainer',
       'research-news-fundamental',
       'ta-brooks',
+      'ta-brooks-ict-smc',
       'ta-ict-smc',
     ])
     expect(skills.every((skill) => skill.sourcePath.endsWith('/SKILL.md'))).toBe(true)
@@ -52,6 +53,12 @@ describe('skill registry', () => {
       preferredTools: expect.arrayContaining(['ictSmcAnalyze', 'ictSmc*']),
       toolAllow: expect.arrayContaining(['ictSmcAnalyze', 'ictSmc*']),
       instructions: expect.stringContaining('Run deterministic ICT/SMC structure tools first'),
+    })
+    expect(skills.find((skill) => skill.id === 'ta-brooks-ict-smc')).toMatchObject({
+      label: 'Brooks + ICT / SMC Confluence',
+      preferredTools: expect.arrayContaining(['brooksPaAnalyze', 'ictSmcAnalyze']),
+      toolAllow: expect.arrayContaining(['brooksPa*', 'ictSmc*']),
+      instructions: expect.stringContaining('highlights agreement and disagreement between the two frameworks'),
     })
   })
 

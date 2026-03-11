@@ -6,12 +6,10 @@ compatibility:
     preferred:
       - ictSmcAnalyze
       - ictSmc*
-      - analysis*
       - market-search*
     allow:
       - ictSmcAnalyze
       - ictSmc*
-      - analysis*
       - market-search*
     deny:
       - trading*

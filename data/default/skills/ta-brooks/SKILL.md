@@ -6,13 +6,11 @@ compatibility:
     preferred:
       - brooksPaAnalyze
       - brooksPa*
-      - analysis*
       - market-search*
       - equity*
     allow:
       - brooksPaAnalyze
       - brooksPa*
-      - analysis*
       - market-search*
       - equity*
     deny:
