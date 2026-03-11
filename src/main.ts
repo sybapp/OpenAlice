@@ -35,6 +35,7 @@ import { createMarketSearchTools } from './extension/market/index.js'
 import { createNewsTools } from './extension/news/index.js'
 import { createIndicatorTools } from './extension/indicator-tools/index.js'
 import { createBrooksPaTools } from './extension/brooks-pa/index.js'
+import { createIctSmcTools } from './extension/ict-smc/index.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -47,7 +48,8 @@ import { createEventLog } from './core/event-log.js'
 import { createCronEngine, createCronListener, createCronTools } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
 import { NewsCollectorStore, NewsCollector, wrapNewsToolsForPiggyback, createNewsArchiveTools } from './extension/news-collector/index.js'
-import { ensureDefaultSkillPacks } from './core/skills/registry.js'
+import { ensureDefaultSkillPacks, listSkillPacks } from './core/skills/registry.js'
+import { validateSkillToolReferences } from './core/skills/policy.js'
 
 // ==================== Persistence paths ====================
 
@@ -273,13 +275,20 @@ async function main() {
   }
   toolCenter.register(createIndicatorTools(equityClient, cryptoClient, currencyClient), 'analysis')
   toolCenter.register(createBrooksPaTools(equityClient, cryptoClient, currencyClient), 'analysis')
+  toolCenter.register(createIctSmcTools(equityClient, cryptoClient, currencyClient), 'analysis')
+
+  for (const skill of await listSkillPacks()) {
+    for (const warning of validateSkillToolReferences(skill, toolCenter.getInventory())) {
+      console.warn(warning)
+    }
+  }
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
 
   // ==================== AI Provider Chain ====================
 
   const vercelProvider = new VercelAIProvider(
-    () => toolCenter.getVercelTools(),
+    (policy) => toolCenter.getVercelTools(policy),
     instructions,
     config.agent.maxSteps,
     config.compaction,
