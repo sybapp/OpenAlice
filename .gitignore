@@ -4,6 +4,8 @@ logs/
 /data/*
 !/data/default/
 !/data/default/**
+!/data/skills/
+!/data/skills/**
 state.json
 *.log
 

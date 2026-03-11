@@ -32,7 +32,6 @@ describe('skill registry', () => {
 
     const skills = await listSkillPacks()
     expect(skills.map((skill) => skill.id)).toEqual([
-      'docx-writer',
       'ops-cron-maintainer',
       'research-news-fundamental',
       'ta-brooks',
