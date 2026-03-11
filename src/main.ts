@@ -47,6 +47,7 @@ import { createEventLog } from './core/event-log.js'
 import { createCronEngine, createCronListener, createCronTools } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
 import { NewsCollectorStore, NewsCollector, wrapNewsToolsForPiggyback, createNewsArchiveTools } from './extension/news-collector/index.js'
+import { ensureDefaultSkillPacks } from './core/skills/registry.js'
 
 // ==================== Persistence paths ====================
 
@@ -105,6 +106,7 @@ async function loadGitState(accountId: string): Promise<GitExportState | undefin
 
 async function main() {
   const config = await loadConfig()
+  await ensureDefaultSkillPacks()
 
   // ==================== Trading Account Manager ====================
 

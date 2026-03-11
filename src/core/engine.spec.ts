@@ -7,6 +7,8 @@ import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from './compaction.j
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { createModelFromConfig } from './model-factory.js'
 import type { SessionStore, SessionEntry } from './session.js'
+import { getSessionSkillIdFromEntries } from './skills/session-skill.js'
+import { toChatHistory, toModelMessages, toTextHistory } from './session.js'
 
 // ==================== Helpers ====================
 
@@ -54,7 +56,7 @@ function makeSessionMock(entries: SessionEntry[] = []): SessionStore {
   const store: SessionEntry[] = [...entries]
   return {
     id: 'test-session',
-    appendUser: vi.fn(async (content: string) => {
+    appendUser: vi.fn(async (content: string, _provider?: string, metadata?: Record<string, unknown>) => {
       const e: SessionEntry = {
         type: 'user',
         message: { role: 'user', content },
@@ -62,11 +64,12 @@ function makeSessionMock(entries: SessionEntry[] = []): SessionStore {
         parentUuid: null,
         sessionId: 'test-session',
         timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
       }
       store.push(e)
       return e
     }),
-    appendAssistant: vi.fn(async (content: string) => {
+    appendAssistant: vi.fn(async (content: string, _provider?: string, metadata?: Record<string, unknown>) => {
       const e: SessionEntry = {
         type: 'assistant',
         message: { role: 'assistant', content },
@@ -74,11 +77,25 @@ function makeSessionMock(entries: SessionEntry[] = []): SessionStore {
         parentUuid: null,
         sessionId: 'test-session',
         timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
       }
       store.push(e)
       return e
     }),
-    appendRaw: vi.fn(async () => {}),
+    appendSystem: vi.fn(async (content: string, _provider?: string, metadata?: Record<string, unknown>) => {
+      const e: SessionEntry = {
+        type: 'system',
+        message: { role: 'system', content },
+        uuid: `s-${store.length}`,
+        parentUuid: null,
+        sessionId: 'test-session',
+        timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
+      }
+      store.push(e)
+      return e
+    }),
+    appendRaw: vi.fn(async (entry: SessionEntry) => { store.push(entry) }),
     readAll: vi.fn(async () => [...store]),
     readActive: vi.fn(async () => [...store]),
     restore: vi.fn(async () => {}),
@@ -90,6 +107,18 @@ function makeSessionMock(entries: SessionEntry[] = []): SessionStore {
 
 vi.mock('./model-factory.js', () => ({
   createModelFromConfig: vi.fn(),
+}))
+
+vi.mock('./skills/registry.js', () => ({
+  listSkillPacks: vi.fn(async () => [
+    { id: 'ta-brooks', label: 'Brooks Price Action' },
+    { id: 'ta-ict-smc', label: 'ICT / SMC' },
+  ]),
+  getSkillPack: vi.fn(async (id: string) => {
+    if (id === 'ta-brooks') return { id: 'ta-brooks', label: 'Brooks Price Action' }
+    if (id === 'ta-ict-smc') return { id: 'ta-ict-smc', label: 'ICT / SMC' }
+    return null
+  }),
 }))
 
 // ==================== Mock compaction ====================
@@ -164,6 +193,21 @@ describe('Engine', () => {
   // -------------------- askWithSession() --------------------
 
   describe('askWithSession()', () => {
+    it('short-circuits /skill commands without calling provider', async () => {
+      const model = makeMockModel('session response')
+      const engine = makeEngine({ model })
+      const session = makeSessionMock()
+      const askSpy = vi.spyOn(AgentCenter.prototype, 'askWithSession')
+
+      const result = await engine.askWithSession('/skill list', session)
+
+      expect(result.text).toContain('Available skills:')
+      expect(result.media).toEqual([])
+      expect(askSpy).not.toHaveBeenCalled()
+      expect(session.appendUser).toHaveBeenCalledWith('/skill list', 'human', { kind: 'local_command' })
+      expect(session.appendAssistant).toHaveBeenCalledWith(expect.stringContaining('Available skills:'), 'engine', { kind: 'local_command' })
+    })
+
     it('appends user message to session before generating', async () => {
       const model = makeMockModel('session response')
       const engine = makeEngine({ model })
@@ -254,6 +298,91 @@ describe('Engine', () => {
 
       await engine.askWithSession('test', session)
       expect(session.readActive).toHaveBeenCalled()
+    })
+  })
+
+  // -------------------- session skill state --------------------
+
+  describe('session skill markers', () => {
+    it('uses the last skill marker when set/off happens multiple times', () => {
+      const entries: SessionEntry[] = [
+        {
+          type: 'system',
+          message: { role: 'system', content: 'skill:ta-brooks' },
+          uuid: '1',
+          parentUuid: null,
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+          metadata: { kind: 'skill', profileId: 'ta-brooks' },
+        },
+        {
+          type: 'system',
+          message: { role: 'system', content: 'skill:off' },
+          uuid: '2',
+          parentUuid: '1',
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+          metadata: { kind: 'skill', profileId: null },
+        },
+        {
+          type: 'system',
+          message: { role: 'system', content: 'skill:ta-ict-smc' },
+          uuid: '3',
+          parentUuid: '2',
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+          metadata: { kind: 'skill', profileId: 'ta-ict-smc' },
+        },
+      ]
+
+      expect(getSessionSkillIdFromEntries(entries)).toBe('ta-ict-smc')
+    })
+  })
+
+  // -------------------- local command visibility --------------------
+
+  describe('local command filtering', () => {
+    it('keeps local commands out of model/text history but visible in chat history', () => {
+      const entries: SessionEntry[] = [
+        {
+          type: 'user',
+          message: { role: 'user', content: '/skill ta-brooks' },
+          uuid: 'u1',
+          parentUuid: null,
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+          metadata: { kind: 'local_command' },
+        },
+        {
+          type: 'assistant',
+          message: { role: 'assistant', content: 'Active skill set to ta-brooks.' },
+          uuid: 'a1',
+          parentUuid: 'u1',
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+          metadata: { kind: 'local_command' },
+        },
+        {
+          type: 'user',
+          message: { role: 'user', content: 'Analyze BTCUSD' },
+          uuid: 'u2',
+          parentUuid: 'a1',
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+        },
+      ]
+
+      expect(toModelMessages(entries)).toEqual([
+        { role: 'user', content: 'Analyze BTCUSD' },
+      ])
+      expect(toTextHistory(entries)).toEqual([
+        { role: 'user', text: 'Analyze BTCUSD' },
+      ])
+      expect(toChatHistory(entries)).toEqual([
+        expect.objectContaining({ kind: 'text', text: '/skill ta-brooks', metadata: { kind: 'local_command' } }),
+        expect.objectContaining({ kind: 'text', text: 'Active skill set to ta-brooks.', metadata: { kind: 'local_command' } }),
+        expect.objectContaining({ kind: 'text', text: 'Analyze BTCUSD' }),
+      ])
     })
   })
 

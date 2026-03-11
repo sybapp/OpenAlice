@@ -16,6 +16,9 @@ import type { ClaudeCodeConfig } from './types.js'
 import { readAgentConfig } from '../../core/config.js'
 import { askClaudeCode } from './provider.js'
 import { askClaudeCodeWithSession } from './session.js'
+import { getSkillPack } from '../../core/skills/registry.js'
+import { buildSkillPromptText, mapSkillDenyToClaudeTools } from '../../core/skills/policy.js'
+import { getSessionSkillId } from '../../core/skills/session-skill.js'
 
 export class ClaudeCodeProvider implements AIProvider {
   constructor(
@@ -41,8 +44,22 @@ export class ClaudeCodeProvider implements AIProvider {
 
   async askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): Promise<ProviderResult> {
     const config = await this.resolveConfig()
+    const skillId = await getSessionSkillId(session)
+    const skill = skillId ? await getSkillPack(skillId) : null
+    const appendSystemPrompt = [
+      opts?.appendSystemPrompt,
+      buildSkillPromptText(skill),
+    ].filter(Boolean).join('\n\n') || undefined
+    const disallowedTools = [
+      ...(config.disallowedTools ?? []),
+      ...mapSkillDenyToClaudeTools(skill?.toolDeny),
+    ]
     return askClaudeCodeWithSession(prompt, session, {
-      claudeCode: config,
+      claudeCode: {
+        ...config,
+        disallowedTools,
+        appendSystemPrompt,
+      },
       compaction: this.compaction,
       ...opts,
       systemPrompt: opts?.systemPrompt ?? this.systemPrompt,

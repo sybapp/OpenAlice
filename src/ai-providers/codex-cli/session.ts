@@ -69,6 +69,7 @@ export async function askCodexCliWithSession(
   const result = await askCodexCli(fullPrompt, {
     ...config.codexCli,
     systemPrompt: config.systemPrompt,
+    appendSystemPrompt: config.codexCli.appendSystemPrompt,
   })
 
   const text = result.ok ? result.text : `[error] ${result.text}`

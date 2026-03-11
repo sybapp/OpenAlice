@@ -12,6 +12,9 @@ import type { CodexCliConfig } from './types.js'
 import { readAgentConfig, readAIProviderConfig } from '../../core/config.js'
 import { askCodexCli } from './provider.js'
 import { askCodexCliWithSession } from './session.js'
+import { getSkillPack } from '../../core/skills/registry.js'
+import { buildSkillPromptText } from '../../core/skills/policy.js'
+import { getSessionSkillId } from '../../core/skills/session-skill.js'
 
 export class CodexCliProvider implements AIProvider {
   constructor(
@@ -38,6 +41,16 @@ export class CodexCliProvider implements AIProvider {
     }
   }
 
+  private mergeSkillConfig(config: CodexCliConfig, skill: Awaited<ReturnType<typeof getSkillPack>>, appendFromOpts?: string): CodexCliConfig {
+    const appendSystemPrompt = [appendFromOpts, buildSkillPromptText(skill)].filter(Boolean).join('\n\n') || undefined
+    const extraOverrides = (skill?.toolDeny ?? []).map((pattern) => `tools.exclude=${JSON.stringify(pattern)}`)
+    return {
+      ...config,
+      configOverrides: [...(config.configOverrides ?? []), ...extraOverrides],
+      appendSystemPrompt,
+    }
+  }
+
   async ask(prompt: string): Promise<ProviderResult> {
     const config = await this.resolveConfig()
     const result = await askCodexCli(prompt, config)
@@ -46,8 +59,11 @@ export class CodexCliProvider implements AIProvider {
 
   async askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): Promise<ProviderResult> {
     const config = await this.resolveConfig()
+    const skillId = await getSessionSkillId(session)
+    const skill = skillId ? await getSkillPack(skillId) : null
+    const skillAwareConfig = this.mergeSkillConfig(config, skill, opts?.appendSystemPrompt)
     return askCodexCliWithSession(prompt, session, {
-      codexCli: config,
+      codexCli: skillAwareConfig,
       compaction: this.compaction,
       ...opts,
       systemPrompt: opts?.systemPrompt ?? this.systemPrompt,

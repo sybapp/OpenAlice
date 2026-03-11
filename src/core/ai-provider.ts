@@ -17,6 +17,8 @@ export interface AskOptions {
   historyPreamble?: string
   /** System prompt override (Claude Code only). */
   systemPrompt?: string
+  /** Extra appended system prompt content (Claude Code only). */
+  appendSystemPrompt?: string
   /** Max text history entries in <chat_history>. Default: 50 (Claude Code only). */
   maxHistoryEntries?: number
 }

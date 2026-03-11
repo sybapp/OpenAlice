@@ -76,11 +76,16 @@ export class SessionStore {
   }
 
   /** Append a user message to the session. */
-  async appendUser(content: string | ContentBlock[], provider: SessionEntry['provider'] = 'human'): Promise<SessionEntry> {
+  async appendUser(
+    content: string | ContentBlock[],
+    provider: SessionEntry['provider'] = 'human',
+    metadata?: Record<string, unknown>,
+  ): Promise<SessionEntry> {
     return this.append({
       type: 'user',
       message: { role: 'user', content },
       provider,
+      ...(metadata ? { metadata } : {}),
     })
   }
 
@@ -93,6 +98,20 @@ export class SessionStore {
     return this.append({
       type: 'assistant',
       message: { role: 'assistant', content },
+      provider,
+      ...(metadata ? { metadata } : {}),
+    })
+  }
+
+  /** Append a system entry to the session. */
+  async appendSystem(
+    content: string | ContentBlock[],
+    provider: SessionEntry['provider'] = 'engine',
+    metadata?: Record<string, unknown>,
+  ): Promise<SessionEntry> {
+    return this.append({
+      type: 'system',
+      message: { role: 'system', content },
       provider,
       ...(metadata ? { metadata } : {}),
     })
@@ -208,6 +227,7 @@ export function toModelMessages(entries: SessionEntry[]): SDKModelMessage[] {
   for (const entry of entries) {
     // Skip compact boundary markers — they are metadata, not conversation
     if (entry.type === 'system' && entry.subtype === 'compact_boundary') continue
+    if (entry.metadata?.kind === 'local_command') continue
 
     const { message } = entry
 
@@ -305,6 +325,7 @@ export function toTextHistory(entries: SessionEntry[]): Array<{ role: 'user' | '
   for (const entry of entries) {
     // Skip system entries (compact boundaries)
     if (entry.type === 'system') continue
+    if (entry.metadata?.kind === 'local_command') continue
 
     const { message } = entry
     if (message.role !== 'user' && message.role !== 'assistant') continue

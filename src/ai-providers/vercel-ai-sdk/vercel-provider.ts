@@ -6,6 +6,7 @@
  * automatically (hot-reload).
  */
 
+import { createHash } from 'node:crypto'
 import type { ModelMessage, Tool } from 'ai'
 import type { AIProvider, AskOptions, ProviderResult } from '../../core/ai-provider.js'
 import type { Agent } from './agent.js'
@@ -17,11 +18,12 @@ import { compactIfNeeded } from '../../core/compaction.js'
 import { extractMediaFromToolOutput } from '../../core/media.js'
 import { createModelFromConfig } from '../../core/model-factory.js'
 import { createAgent } from './agent.js'
+import { getSkillPack } from '../../core/skills/registry.js'
+import { filterToolsBySkillPolicy, buildSkillPromptText } from '../../core/skills/policy.js'
+import { getSessionSkillId } from '../../core/skills/session-skill.js'
 
 export class VercelAIProvider implements AIProvider {
-  private cachedKey: string | null = null
-  private cachedToolCount: number = 0
-  private cachedAgent: Agent | null = null
+  private cachedAgents = new Map<string, Agent>()
 
   constructor(
     private getTools: () => Promise<Record<string, Tool>>,
@@ -30,22 +32,42 @@ export class VercelAIProvider implements AIProvider {
     private compaction: CompactionConfig,
   ) {}
 
+  private hash(value: string): string {
+    return createHash('sha1').update(value).digest('hex').slice(0, 12)
+  }
+
+  private buildSkillInstructions(baseInstructions: string, skill: Awaited<ReturnType<typeof getSkillPack>>): string {
+    const skillPrompt = buildSkillPromptText(skill)
+    if (!skillPrompt) return baseInstructions
+    return [baseInstructions, '---', skillPrompt].join('\n\n')
+  }
+
   /** Lazily create or return the cached agent, re-creating when config or tools change. */
-  private async resolveAgent(): Promise<Agent> {
-    const { model, key } = await createModelFromConfig()
-    const tools = await this.getTools()
-    const toolCount = Object.keys(tools).length
-    if (key !== this.cachedKey || toolCount !== this.cachedToolCount) {
-      this.cachedAgent = createAgent(model, tools, this.instructions, this.maxSteps)
-      this.cachedKey = key
-      this.cachedToolCount = toolCount
-      console.log(`vercel-ai: model loaded → ${key} (${toolCount} tools)`)
+  private async resolveAgentForSession(session?: SessionStore): Promise<{ agent: Agent; tools: Record<string, Tool>; skillId: string | null }> {
+    const { model, key: modelKey } = await createModelFromConfig()
+    const skillId = session ? await getSessionSkillId(session) : null
+    const skill = skillId ? await getSkillPack(skillId) : null
+    const tools = filterToolsBySkillPolicy(await this.getTools(), skill?.toolAllow, skill?.toolDeny)
+    const finalInstructions = this.buildSkillInstructions(this.instructions, skill)
+    const toolsSignature = Object.keys(tools).sort().join(',')
+    const instructionsHash = this.hash(finalInstructions)
+    const toolsHash = this.hash(toolsSignature)
+    const cacheKey = [modelKey, skill?.id ?? 'off', instructionsHash, toolsHash, String(this.maxSteps)].join('|')
+    let agent = this.cachedAgents.get(cacheKey)
+    if (!agent) {
+      agent = createAgent(model, tools, finalInstructions, this.maxSteps)
+      this.cachedAgents.set(cacheKey, agent)
+      if (this.cachedAgents.size > 16) {
+        const oldestKey = this.cachedAgents.keys().next().value
+        if (oldestKey) this.cachedAgents.delete(oldestKey)
+      }
+      console.log(`vercel-ai: model loaded → ${modelKey} (${Object.keys(tools).length} tools, skill=${skill?.id ?? 'off'})`)
     }
-    return this.cachedAgent!
+    return { agent, tools, skillId: skill?.id ?? null }
   }
 
   async ask(prompt: string): Promise<ProviderResult> {
-    const agent = await this.resolveAgent()
+    const { agent } = await this.resolveAgentForSession()
     const media: MediaAttachment[] = []
     const result = await agent.generate({
       prompt,
@@ -59,7 +81,7 @@ export class VercelAIProvider implements AIProvider {
   }
 
   async askWithSession(prompt: string, session: SessionStore, _opts?: AskOptions): Promise<ProviderResult> {
-    const agent = await this.resolveAgent()
+    const { agent } = await this.resolveAgentForSession(session)
 
     await session.appendUser(prompt, 'human')
 
