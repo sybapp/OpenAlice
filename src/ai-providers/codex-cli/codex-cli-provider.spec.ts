@@ -20,13 +20,17 @@ vi.mock('../../core/skills/registry.js', () => ({
   getSkillPack: vi.fn(async () => ({
     id: 'ta-brooks',
     label: 'Brooks',
+    description: 'Brooks mode',
     preferredTools: ['brooksPaAnalyze', 'calculateIndicator'],
     toolAllow: undefined,
     toolDeny: ['trading*', 'cronAdd'],
     outputSchema: 'AnalysisReport',
+    decisionWindowBars: 10,
+    analysisMode: 'tool-first',
     whenToUse: 'Use for Brooks analysis',
     instructions: 'Use Brooks terminology',
     safetyNotes: 'No trades',
+    examples: '- example',
   })),
 }))
 
@@ -78,5 +82,6 @@ describe('CodexCliProvider skill integration', () => {
     const config = vi.mocked(askCodexCliWithSession).mock.calls[0][2]
     expect(config.codexCli.appendSystemPrompt).toContain('caller prompt')
     expect(config.codexCli.appendSystemPrompt).toContain('Use Brooks terminology')
+    expect(config.codexCli.appendSystemPrompt).toContain('most recent decision window of 10 bars')
   })
 })

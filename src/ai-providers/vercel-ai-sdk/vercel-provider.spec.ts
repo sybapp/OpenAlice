@@ -22,26 +22,34 @@ vi.mock('../../core/skills/registry.js', () => ({
       return {
         id: 'ta-brooks',
         label: 'Brooks',
+        description: 'Brooks mode',
         preferredTools: ['newsGetWorld'],
         toolAllow: undefined,
         toolDeny: ['trading*'],
         outputSchema: 'AnalysisReport',
+        decisionWindowBars: 10,
+        analysisMode: 'tool-first',
         whenToUse: 'Brooks mode',
         instructions: 'Use Brooks terms',
         safetyNotes: 'No trading',
+        examples: '- example',
       }
     }
     if (id === 'research-news-fundamental') {
       return {
         id: 'research-news-fundamental',
         label: 'Research',
+        description: 'Research mode',
         preferredTools: ['newsGetWorld'],
         toolAllow: ['news*'],
         toolDeny: ['trading*'],
         outputSchema: 'AnalysisReport',
+        decisionWindowBars: 10,
+        analysisMode: 'tool-first',
         whenToUse: 'Research mode',
         instructions: 'Use news and fundamentals',
         safetyNotes: 'No trading',
+        examples: '- example',
       }
     }
     return null
@@ -59,7 +67,12 @@ describe('VercelAIProvider skill cache isolation', () => {
       newsGetWorld: {} as Tool,
       tradingCommit: {} as Tool,
     }
-    const provider = new VercelAIProvider(async () => tools, 'base instructions', 3, {
+    const provider = new VercelAIProvider(async (policy) => {
+      if (policy?.deny?.includes('trading*')) {
+        return { newsGetWorld: tools.newsGetWorld }
+      }
+      return tools
+    }, 'base instructions', 3, {
       maxContextTokens: 1000,
       maxOutputTokens: 100,
       autoCompactBuffer: 50,
@@ -90,7 +103,12 @@ describe('VercelAIProvider skill cache isolation', () => {
       newsGetWorld: {} as Tool,
       tradingCommit: {} as Tool,
     }
-    const provider = new VercelAIProvider(async () => tools, 'base instructions', 3, {
+    const provider = new VercelAIProvider(async (policy) => {
+      if (policy?.allow?.includes('news*')) {
+        return { newsGetWorld: tools.newsGetWorld }
+      }
+      return tools
+    }, 'base instructions', 3, {
       maxContextTokens: 1000,
       maxOutputTokens: 100,
       autoCompactBuffer: 50,

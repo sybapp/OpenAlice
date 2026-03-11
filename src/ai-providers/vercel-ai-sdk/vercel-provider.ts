@@ -13,20 +13,21 @@ import type { Agent } from './agent.js'
 import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
 import type { MediaAttachment } from '../../core/types.js'
+import type { ToolPolicy } from '../../core/tool-center.js'
 import { toModelMessages } from '../../core/session.js'
 import { compactIfNeeded } from '../../core/compaction.js'
 import { extractMediaFromToolOutput } from '../../core/media.js'
 import { createModelFromConfig } from '../../core/model-factory.js'
 import { createAgent } from './agent.js'
 import { getSkillPack } from '../../core/skills/registry.js'
-import { filterToolsBySkillPolicy, buildSkillPromptText } from '../../core/skills/policy.js'
+import { buildSkillPromptText, getSkillToolPolicy } from '../../core/skills/policy.js'
 import { getSessionSkillId } from '../../core/skills/session-skill.js'
 
 export class VercelAIProvider implements AIProvider {
   private cachedAgents = new Map<string, Agent>()
 
   constructor(
-    private getTools: () => Promise<Record<string, Tool>>,
+    private getTools: (policy?: ToolPolicy) => Promise<Record<string, Tool>>,
     private instructions: string,
     private maxSteps: number,
     private compaction: CompactionConfig,
@@ -47,7 +48,7 @@ export class VercelAIProvider implements AIProvider {
     const { model, key: modelKey } = await createModelFromConfig()
     const skillId = session ? await getSessionSkillId(session) : null
     const skill = skillId ? await getSkillPack(skillId) : null
-    const tools = filterToolsBySkillPolicy(await this.getTools(), skill?.toolAllow, skill?.toolDeny)
+    const tools = await this.getTools(getSkillToolPolicy(skill))
     const finalInstructions = this.buildSkillInstructions(this.instructions, skill)
     const toolsSignature = Object.keys(tools).sort().join(',')
     const instructionsHash = this.hash(finalInstructions)

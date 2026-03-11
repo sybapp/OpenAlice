@@ -8,10 +8,22 @@
 
 import type { Tool } from 'ai'
 import { readToolsConfig } from './config.js'
+import { createGlobPolicyMatcher } from './tool-policy-match.js'
 
 interface ToolEntry {
   tool: Tool
   group: string
+}
+
+export interface ToolPolicy {
+  allow?: string[]
+  deny?: string[]
+}
+
+export interface ToolInventoryItem {
+  name: string
+  group: string
+  description: string
 }
 
 export class ToolCenter {
@@ -24,31 +36,51 @@ export class ToolCenter {
     }
   }
 
-  /** Vercel AI SDK format — returns only enabled tools (reads disabled list from disk). */
-  async getVercelTools(): Promise<Record<string, Tool>> {
+  private async getEnabledEntries(): Promise<Array<[string, ToolEntry]>> {
     const { disabled } = await readToolsConfig()
-    const result: Record<string, Tool> = {}
-    if (disabled.length === 0) {
-      for (const [name, entry] of Object.entries(this.tools)) {
-        result[name] = entry.tool
-      }
-      return result
-    }
     const disabledSet = new Set(disabled)
-    for (const [name, entry] of Object.entries(this.tools)) {
-      if (!disabledSet.has(name)) result[name] = entry.tool
+    return Object.entries(this.tools).filter(([name]) => !disabledSet.has(name))
+  }
+
+  private applyPolicy(entries: Array<[string, ToolEntry]>, policy?: ToolPolicy): Array<[string, ToolEntry]> {
+    const allow = createGlobPolicyMatcher(policy?.allow)
+    const deny = createGlobPolicyMatcher(policy?.deny)
+    const hasAllow = Boolean(policy?.allow?.length)
+    return entries.filter(([name, entry]) => {
+      const ref = [name, entry.group]
+      if (deny(ref)) return false
+      if (!hasAllow) return true
+      return allow(ref)
+    })
+  }
+
+  /** Vercel AI SDK format — returns enabled tools after global + skill policy filtering. */
+  async getVercelTools(policy?: ToolPolicy): Promise<Record<string, Tool>> {
+    const result: Record<string, Tool> = {}
+    const entries = this.applyPolicy(await this.getEnabledEntries(), policy)
+    for (const [name, entry] of entries) {
+      result[name] = entry.tool
     }
     return result
   }
 
   /** MCP format — same filtering as Vercel. Kept separate for future divergence. */
-  async getMcpTools(): Promise<Record<string, Tool>> {
-    return this.getVercelTools()
+  async getMcpTools(policy?: ToolPolicy): Promise<Record<string, Tool>> {
+    return this.getVercelTools(policy)
   }
 
   /** Full tool inventory with group metadata (for frontend / API). */
-  getInventory(): Array<{ name: string; group: string; description: string }> {
+  getInventory(): ToolInventoryItem[] {
     return Object.entries(this.tools).map(([name, entry]) => ({
+      name,
+      group: entry.group,
+      description: (entry.tool.description ?? '').slice(0, 200),
+    }))
+  }
+
+  /** Skill-filtered tool inventory after policy is applied. */
+  async getSkillInventory(policy?: ToolPolicy): Promise<ToolInventoryItem[]> {
+    return this.applyPolicy(await this.getEnabledEntries(), policy).map(([name, entry]) => ({
       name,
       group: entry.group,
       description: (entry.tool.description ?? '').slice(0, 200),
