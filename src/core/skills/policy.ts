@@ -71,6 +71,7 @@ export function buildSkillPromptText(skill: SkillPack | null | undefined): strin
     skill.whenToUse ? `When to use:\n${skill.whenToUse}` : '',
     skill.instructions ? `Instructions:\n${skill.instructions}` : '',
     skill.safetyNotes ? `Safety notes:\n${skill.safetyNotes}` : '',
+    skill.examples ? `Examples:\n${skill.examples}` : '',
     buildPreferredToolsText(skill.preferredTools),
     buildToolPolicyText(skill),
     buildDecisionWindowText(skill),

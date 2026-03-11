@@ -22,7 +22,7 @@ const baseSkill: SkillPack = {
   instructions: 'Use Brooks terminology',
   safetyNotes: 'No trades',
   examples: '- example',
-  body: 'body',
+  body: '# Brooks\n\n## Instructions\nUse Brooks terminology',
   sourcePath: '/tmp/ta-brooks/SKILL.md',
 }
 
@@ -55,10 +55,13 @@ describe('skill tool policy', () => {
     ])
   })
 
-  it('builds market skill prompts with the 10-bar decision window rule', () => {
+  it('builds skill prompts from normalized plugin-style content', () => {
     const prompt = buildSkillPromptText(baseSkill)
     expect(prompt).toContain('Active skill: ta-brooks (Brooks)')
     expect(prompt).toContain('Preferred tools: brooksPaAnalyze, analysis*.')
+    expect(prompt).toContain('Instructions:\nUse Brooks terminology')
+    expect(prompt).toContain('Safety notes:\nNo trades')
+    expect(prompt).toContain('Examples:\n- example')
     expect(prompt).toContain('most recent decision window of 10 bars')
     expect(prompt).toContain('prefer the skill-specific deterministic aggregate tool first')
     expect(prompt).toContain('Output schema: AnalysisReport.')

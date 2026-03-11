@@ -30,9 +30,11 @@ vi.mock('../../core/skills/registry.js', () => ({
         decisionWindowBars: 10,
         analysisMode: 'tool-first',
         whenToUse: 'Brooks mode',
-        instructions: 'Use Brooks terms',
+        instructions: '# Brooks\n\n## Instructions\nUse Brooks terms',
         safetyNotes: 'No trading',
         examples: '- example',
+        body: '# Brooks\n\n## Instructions\nUse Brooks terms',
+        sourcePath: '/tmp/ta-brooks/SKILL.md',
       }
     }
     if (id === 'research-news-fundamental') {
@@ -47,9 +49,11 @@ vi.mock('../../core/skills/registry.js', () => ({
         decisionWindowBars: 10,
         analysisMode: 'tool-first',
         whenToUse: 'Research mode',
-        instructions: 'Use news and fundamentals',
+        instructions: '# Research\n\n## Instructions\nUse news and fundamentals',
         safetyNotes: 'No trading',
         examples: '- example',
+        body: '# Research\n\n## Instructions\nUse news and fundamentals',
+        sourcePath: '/tmp/research-news-fundamental/SKILL.md',
       }
     }
     return null

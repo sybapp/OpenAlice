@@ -233,10 +233,10 @@ src/
     heartbeat/               # Periodic heartbeat with structured response protocol
   plugins/
     mcp.ts                   # MCP server for tool exposure
-  skills/                    # Agent skill definitions
+  skills/                    # Agent skill definitions (Claude Code-style SKILL.md files)
 data/
   config/                    # JSON configuration files
-  default/                   # Factory defaults (persona, heartbeat prompts)
+  default/                   # Factory defaults (persona, heartbeat prompts, bundled skills)
   sessions/                  # JSONL conversation histories
   brain/                     # Agent memory and emotion logs
   cache/                     # API response caches

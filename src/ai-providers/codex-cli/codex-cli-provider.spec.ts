@@ -28,9 +28,11 @@ vi.mock('../../core/skills/registry.js', () => ({
     decisionWindowBars: 10,
     analysisMode: 'tool-first',
     whenToUse: 'Use for Brooks analysis',
-    instructions: 'Use Brooks terminology',
+    instructions: '# Brooks\n\n## Instructions\nUse Brooks terminology',
     safetyNotes: 'No trades',
     examples: '- example',
+    body: '# Brooks\n\n## Instructions\nUse Brooks terminology',
+    sourcePath: '/tmp/ta-brooks/SKILL.md',
   })),
 }))
 

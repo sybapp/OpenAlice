@@ -5,6 +5,9 @@ import { ANALYSIS_REPORT_NAME } from './analysis-report.js'
 
 const SKILL_FILE_NAME = 'SKILL.md'
 
+type FrontmatterValue = string | number | boolean | FrontmatterObject | FrontmatterValue[]
+type FrontmatterObject = Record<string, FrontmatterValue>
+
 function getUserSkillsDir(): string {
   return resolve('data/skills')
 }
@@ -13,7 +16,7 @@ function getDefaultSkillsDir(): string {
   return resolve('data/default/skills')
 }
 
-const skillFrontmatterSchema = z.object({
+const normalizedSkillSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string().min(1),
@@ -23,18 +26,123 @@ const skillFrontmatterSchema = z.object({
   outputSchema: z.string().default(ANALYSIS_REPORT_NAME),
   decisionWindowBars: z.number().int().positive().default(10),
   analysisMode: z.enum(['tool-first']).default('tool-first'),
+  whenToUse: z.string().default(''),
+  instructions: z.string().default(''),
+  safetyNotes: z.string().default(''),
+  examples: z.string().default(''),
+  body: z.string(),
+  sourcePath: z.string().min(1),
 })
 
-export type SkillPack = z.infer<typeof skillFrontmatterSchema> & {
-  whenToUse: string
-  instructions: string
-  safetyNotes: string
-  examples: string
-  body: string
-  sourcePath: string
+export type SkillPack = z.infer<typeof normalizedSkillSchema>
+
+function parseScalar(rawValue: string): FrontmatterValue {
+  const value = rawValue.trim()
+  if (!value) return ''
+  if (value === 'true' || value === 'false') {
+    return value === 'true'
+  }
+  if (/^-?\d+$/.test(value)) {
+    return Number(value)
+  }
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const inner = value.slice(1, -1).trim()
+    return inner
+      ? inner.split(',').map((part) => part.trim().replace(/^['"]|['"]$/g, ''))
+      : []
+  }
+  return value.replace(/^['"]|['"]$/g, '')
 }
 
-function parseFrontmatter(markdown: string): { frontmatter: Record<string, unknown>; body: string } {
+function nextMeaningfulLine(lines: string[], start: number): { indent: number; trimmed: string } | null {
+  for (let i = start; i < lines.length; i++) {
+    const rawLine = lines[i]
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    return {
+      indent: rawLine.match(/^\s*/)![0].length,
+      trimmed,
+    }
+  }
+  return null
+}
+
+function parseArray(lines: string[], startIndex: number, indent: number): { value: FrontmatterValue[]; nextIndex: number } {
+  const value: FrontmatterValue[] = []
+  let index = startIndex
+
+  while (index < lines.length) {
+    const rawLine = lines[index]
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      index += 1
+      continue
+    }
+
+    const currentIndent = rawLine.match(/^\s*/)![0].length
+    if (currentIndent < indent) break
+    if (currentIndent !== indent || !trimmed.startsWith('- ')) break
+
+    value.push(parseScalar(trimmed.slice(2)))
+    index += 1
+  }
+
+  return { value, nextIndex: index }
+}
+
+function parseObject(lines: string[], startIndex: number, indent: number): { value: FrontmatterObject; nextIndex: number } {
+  const value: FrontmatterObject = {}
+  let index = startIndex
+
+  while (index < lines.length) {
+    const rawLine = lines[index]
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      index += 1
+      continue
+    }
+
+    const currentIndent = rawLine.match(/^\s*/)![0].length
+    if (currentIndent < indent) break
+    if (currentIndent !== indent) {
+      throw new Error(`Invalid frontmatter indentation near: ${trimmed}`)
+    }
+
+    const kvMatch = trimmed.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
+    if (!kvMatch) {
+      throw new Error(`Invalid frontmatter entry: ${trimmed}`)
+    }
+
+    const [, key, rawValue] = kvMatch
+    if (rawValue) {
+      value[key] = parseScalar(rawValue)
+      index += 1
+      continue
+    }
+
+    const next = nextMeaningfulLine(lines, index + 1)
+    if (!next || next.indent <= currentIndent) {
+      value[key] = []
+      index += 1
+      continue
+    }
+
+    if (next.trimmed.startsWith('- ')) {
+      const parsed = parseArray(lines, index + 1, next.indent)
+      value[key] = parsed.value
+      index = parsed.nextIndex
+      continue
+    }
+
+    const parsed = parseObject(lines, index + 1, next.indent)
+    value[key] = parsed.value
+    index = parsed.nextIndex
+  }
+
+  return { value, nextIndex: index }
+}
+
+function parseFrontmatter(markdown: string): { frontmatter: FrontmatterObject; body: string } {
   const normalized = markdown.replace(/^\uFEFF/, '')
   if (!normalized.startsWith('---\n')) {
     throw new Error('Skill markdown must start with frontmatter')
@@ -45,54 +153,14 @@ function parseFrontmatter(markdown: string): { frontmatter: Record<string, unkno
   }
   const rawFrontmatter = normalized.slice(4, end)
   const body = normalized.slice(end + 5)
-  const frontmatter: Record<string, unknown> = {}
-  let currentKey: string | null = null
-
-  for (const rawLine of rawFrontmatter.split('\n')) {
-    const line = rawLine.trimEnd()
-    if (!line.trim()) continue
-    if (/^\s*#/.test(line)) continue
-    const listMatch = line.match(/^\s*[-*]\s+(.*)$/)
-    if (listMatch && currentKey) {
-      const current = frontmatter[currentKey]
-      const arr = Array.isArray(current) ? current : []
-      arr.push(listMatch[1].trim())
-      frontmatter[currentKey] = arr
-      continue
-    }
-    const kvMatch = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
-    if (!kvMatch) continue
-    const [, key, rawValue] = kvMatch
-    currentKey = key
-    const value = rawValue.trim()
-    if (!value) {
-      frontmatter[key] = []
-      continue
-    }
-    if (value === 'true' || value === 'false') {
-      frontmatter[key] = value === 'true'
-      continue
-    }
-    if (/^-?\d+$/.test(value)) {
-      frontmatter[key] = Number(value)
-      continue
-    }
-    if (value.startsWith('[') && value.endsWith(']')) {
-      const inner = value.slice(1, -1).trim()
-      frontmatter[key] = inner
-        ? inner.split(',').map((part) => part.trim().replace(/^['"]|['"]$/g, ''))
-        : []
-      continue
-    }
-    frontmatter[key] = value.replace(/^['"]|['"]$/g, '')
-  }
-
-  return { frontmatter, body }
+  const parsed = parseObject(rawFrontmatter.split('\n'), 0, 0)
+  return { frontmatter: parsed.value, body }
 }
 
 function extractSection(body: string, heading: string): string {
+  const normalizedHeading = heading.trim().toLowerCase()
   const lines = body.split('\n')
-  const start = lines.findIndex((line) => line.trim().toLowerCase() === `## ${heading.toLowerCase()}`)
+  const start = lines.findIndex((line) => line.trim().toLowerCase() === `## ${normalizedHeading}`)
   if (start === -1) return ''
   const collected: string[] = []
   for (let i = start + 1; i < lines.length; i++) {
@@ -101,6 +169,112 @@ function extractSection(body: string, heading: string): string {
     collected.push(line)
   }
   return collected.join('\n').trim()
+}
+
+function extractFirstHeading(body: string): string {
+  const match = body.match(/^#\s+(.+)$/m)
+  return match?.[1]?.trim() ?? ''
+}
+
+function slugifySkillName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function asStringArray(value: FrontmatterValue | undefined): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function asObject(value: FrontmatterValue | undefined): FrontmatterObject | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  return value
+}
+
+function asNonEmptyString(value: FrontmatterValue | undefined): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, filePath: string): SkillPack {
+  const name = asNonEmptyString(frontmatter.name)
+  const description = asNonEmptyString(frontmatter.description)
+
+  if (!name) {
+    throw new Error('Plugin-style skill frontmatter must include a non-empty "name" field')
+  }
+  if (!description) {
+    throw new Error('Plugin-style skill frontmatter must include a non-empty "description" field')
+  }
+
+  const compatibility = asObject(frontmatter.compatibility)
+  const compatibilityTools = compatibility ? compatibility.tools : undefined
+  const compatibilityToolObject = asObject(compatibilityTools)
+  const whenToUse = extractSection(body, 'whenToUse') || extractSection(body, 'when to use')
+  const instructions = extractSection(body, 'instructions') || extractSection(body, 'instruction') || body.trim()
+  const safetyNotes = extractSection(body, 'safetyNotes') || extractSection(body, 'safety notes')
+  const examples = extractSection(body, 'examples')
+
+  const preferredTools = [
+    ...asStringArray(frontmatter.preferredTools),
+    ...asStringArray(compatibilityToolObject?.preferred),
+  ]
+  const toolAllow = [
+    ...asStringArray(frontmatter.toolAllow),
+    ...asStringArray(Array.isArray(compatibilityTools) ? compatibilityTools : undefined),
+    ...asStringArray(compatibilityToolObject?.allow),
+  ]
+  const toolDeny = [
+    ...asStringArray(frontmatter.toolDeny),
+    ...asStringArray(compatibilityToolObject?.deny),
+  ]
+
+  const title = extractFirstHeading(body)
+  return normalizedSkillSchema.parse({
+    id: slugifySkillName(name),
+    label: asNonEmptyString(frontmatter.label) ?? title ?? name,
+    description,
+    preferredTools: [...new Set(preferredTools)],
+    toolAllow: toolAllow.length ? [...new Set(toolAllow)] : undefined,
+    toolDeny: toolDeny.length ? [...new Set(toolDeny)] : undefined,
+    outputSchema: asNonEmptyString(frontmatter.outputSchema) ?? ANALYSIS_REPORT_NAME,
+    decisionWindowBars: typeof frontmatter.decisionWindowBars === 'number' ? frontmatter.decisionWindowBars : 10,
+    analysisMode: 'tool-first',
+    whenToUse,
+    instructions,
+    safetyNotes,
+    examples,
+    body,
+    sourcePath: filePath,
+  })
+}
+
+function normalizeLegacySkill(frontmatter: FrontmatterObject, body: string, filePath: string): SkillPack {
+  const toolAllow = asStringArray(frontmatter.toolAllow)
+  const toolDeny = asStringArray(frontmatter.toolDeny)
+
+  return normalizedSkillSchema.parse({
+    id: frontmatter.id,
+    label: frontmatter.label,
+    description: frontmatter.description,
+    preferredTools: asStringArray(frontmatter.preferredTools),
+    toolAllow: toolAllow.length ? toolAllow : undefined,
+    toolDeny: toolDeny.length ? toolDeny : undefined,
+    outputSchema: asNonEmptyString(frontmatter.outputSchema) ?? ANALYSIS_REPORT_NAME,
+    decisionWindowBars: typeof frontmatter.decisionWindowBars === 'number' ? frontmatter.decisionWindowBars : 10,
+    analysisMode: 'tool-first',
+    whenToUse: extractSection(body, 'whenToUse'),
+    instructions: extractSection(body, 'instructions'),
+    safetyNotes: extractSection(body, 'safetyNotes'),
+    examples: extractSection(body, 'examples'),
+    body,
+    sourcePath: filePath,
+  })
 }
 
 async function listSkillFiles(dir: string): Promise<string[]> {
@@ -132,17 +306,18 @@ async function listSkillFiles(dir: string): Promise<string[]> {
 }
 
 async function readSkillFile(filePath: string): Promise<SkillPack> {
-  const markdown = await readFile(filePath, 'utf-8')
-  const { frontmatter, body } = parseFrontmatter(markdown)
-  const parsed = skillFrontmatterSchema.parse(frontmatter)
-  return {
-    ...parsed,
-    whenToUse: extractSection(body, 'whenToUse'),
-    instructions: extractSection(body, 'instructions'),
-    safetyNotes: extractSection(body, 'safetyNotes'),
-    examples: extractSection(body, 'examples'),
-    body,
-    sourcePath: filePath,
+  try {
+    const markdown = await readFile(filePath, 'utf-8')
+    const { frontmatter, body } = parseFrontmatter(markdown)
+    if ('name' in frontmatter) {
+      return normalizePluginSkill(frontmatter, body, filePath)
+    }
+    return normalizeLegacySkill(frontmatter, body, filePath)
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to load skill at ${filePath}: ${error.message}`)
+    }
+    throw error
   }
 }
 
@@ -151,14 +326,16 @@ export async function listSkillPacks(): Promise<SkillPack[]> {
     listSkillFiles(getDefaultSkillsDir()),
     listSkillFiles(getUserSkillsDir()),
   ])
+  const [defaultPacks, userPacks] = await Promise.all([
+    Promise.all(defaultFiles.map((filePath) => readSkillFile(filePath))),
+    Promise.all(userFiles.map((filePath) => readSkillFile(filePath))),
+  ])
 
   const packs = new Map<string, SkillPack>()
-  for (const filePath of defaultFiles) {
-    const pack = await readSkillFile(filePath)
+  for (const pack of defaultPacks) {
     packs.set(pack.id, pack)
   }
-  for (const filePath of userFiles) {
-    const pack = await readSkillFile(filePath)
+  for (const pack of userPacks) {
     packs.set(pack.id, pack)
   }
   return [...packs.values()].sort((a, b) => a.id.localeCompare(b.id))
@@ -186,13 +363,13 @@ function buildSkillTemplate(params: {
 }): string {
   const frontmatter = [
     '---',
-    `id: ${params.id}`,
-    `label: ${params.label}`,
+    `name: ${params.id}`,
     `description: ${params.description}`,
-    'preferredTools:',
-    ...params.preferredTools.map((tool) => `  - ${tool}`),
-    ...(params.toolAllow ? ['toolAllow:', ...params.toolAllow.map((tool) => `  - ${tool}`)] : []),
-    ...(params.toolDeny ? ['toolDeny:', ...params.toolDeny.map((tool) => `  - ${tool}`)] : []),
+    'compatibility:',
+    '  tools:',
+    ...(params.preferredTools.length ? ['    preferred:', ...params.preferredTools.map((tool) => `      - ${tool}`)] : []),
+    ...(params.toolAllow?.length ? ['    allow:', ...params.toolAllow.map((tool) => `      - ${tool}`)] : []),
+    ...(params.toolDeny?.length ? ['    deny:', ...params.toolDeny.map((tool) => `      - ${tool}`)] : []),
     `outputSchema: ${params.outputSchema}`,
     `decisionWindowBars: ${params.decisionWindowBars ?? 10}`,
     `analysisMode: ${params.analysisMode ?? 'tool-first'}`,
@@ -201,16 +378,18 @@ function buildSkillTemplate(params: {
 
   return [
     frontmatter,
-    '## whenToUse',
+    `# ${params.label}`,
+    '',
+    '## When to use',
     params.whenToUse,
     '',
-    '## instructions',
+    '## Instructions',
     params.instructions,
     '',
-    '## safetyNotes',
+    '## Safety notes',
     params.safetyNotes,
     '',
-    '## examples',
+    '## Examples',
     params.examples,
     '',
   ].join('\n')
