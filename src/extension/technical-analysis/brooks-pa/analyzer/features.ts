@@ -1,4 +1,4 @@
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 import type { BarFeatureSummary, BarType, BrooksMidpointAvoidance, BrooksNoTradeReason } from '../types'
 
 export function summarizeBarFeatures(bar: OhlcvData): BarFeatureSummary {

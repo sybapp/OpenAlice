@@ -3,8 +3,8 @@ import { z } from 'zod'
 import type { OpenBBEquityClient } from '@/openbb/equity/client'
 import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
 import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
-import { IndicatorCalculator, fetchOhlcvByCalendarDays, createOhlcvTtlCache, getCalendarDaysForInterval } from '@/extension/indicator-kit/index'
-import type { IndicatorContext, OhlcvData } from '@/extension/indicator-kit/index'
+import { IndicatorCalculator, fetchOhlcvByCalendarDays, createOhlcvTtlCache, getCalendarDaysForInterval } from '@/extension/technical-analysis/indicator-kit/index'
+import type { IndicatorContext, OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 
 const ohlcvCache = createOhlcvTtlCache()
 

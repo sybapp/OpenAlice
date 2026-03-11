@@ -33,7 +33,7 @@ Your one-person Wall Street. Alice is an AI trading agent that gives you your ow
 
 **Provider** — The AI backend that powers Alice. Claude Code (subprocess) or Vercel AI SDK (in-process). Switchable at runtime via `ai-provider.json`.
 
-**Extension** — A self-contained tool package registered in ToolCenter. Each extension owns its tools, state, and persistence. Examples: trading, brain, indicator-tools.
+**Extension** — A self-contained tool package registered in ToolCenter. Each extension owns its tools, state, and persistence. Extensions are grouped by function such as cognition, research, technical analysis, and trading.
 
 **Trading** — A git-like workflow for trading operations. You stage orders, commit with a message, then push to execute. Every commit gets an 8-char hash. Full history is reviewable via `tradingLog` / `tradingShow`.
 
@@ -122,7 +122,7 @@ graph LR
 
 **Core** — `Engine` is a thin facade that delegates to `AgentCenter`, which routes all calls (both stateless and session-aware) through `ProviderRouter`. `ToolCenter` is a centralized tool registry — extensions register tools there, and it exports them in Vercel AI SDK and MCP formats. `EventLog` provides persistent append-only event storage (JSONL) with real-time subscriptions and crash recovery. `ConnectorCenter` tracks which channel the user last spoke through and handles delivery.
 
-**Extensions** — domain-specific tool sets registered in `ToolCenter`. Each extension owns its tools, state, and persistence. `Guards` enforce pre-execution safety checks (position size limits, trade cooldowns, symbol whitelist) on all trading operations. `NewsCollector` runs background RSS fetches and piggybacks OpenBB news calls into a persistent archive searchable by the agent.
+**Extensions** — domain-specific tool sets registered in `ToolCenter`, grouped under cognition, research, technical analysis, and trading. `Guards` enforce pre-execution safety checks (position size limits, trade cooldowns, symbol whitelist) on all trading operations. `NewsCollector` runs background RSS fetches and piggybacks OpenBB news calls into a persistent archive searchable by the agent.
 
 **Tasks** — scheduled background work. `CronEngine` manages jobs and fires `cron.fire` events into the EventLog on schedule; a listener picks them up, runs them through the AI engine, and delivers replies via the ConnectorCenter. `Heartbeat` is a periodic health-check that uses a structured response protocol (HEARTBEAT_OK / CHAT_NO / CHAT_YES).
 
@@ -203,16 +203,20 @@ src/
     codex-cli/               # Codex CLI subprocess wrapper
     vercel-ai-sdk/           # Vercel AI SDK provider wrapper
   extension/
-    indicator-kit/           # Indicator formulas + OHLCV fetch strategies (library)
-    indicator-tools/         # Indicator tool surface (calculateIndicator)
-    brooks-pa/               # Brooks price action analysis tool
-    equity/                  # Equity fundamentals and data adapter
-    market/                  # Unified symbol search across equity, crypto, currency
-    news/                    # OpenBB news tools (world + company headlines)
-    news-collector/          # RSS collector, piggyback wrapper, archive search tools
+    cognition/
+      brain/                 # Cognitive state (memory, emotion)
+      thinking-kit/          # Reasoning and calculation tools
+    research/
+      equity/                # Equity fundamentals and data adapter
+      market/                # Unified symbol search across equity, crypto, currency
+      news/                  # OpenBB news tools (world + company headlines)
+      news-collector/        # RSS collector, piggyback wrapper, archive search tools
+    technical-analysis/
+      indicator-kit/         # Indicator formulas + OHLCV fetch strategies (library)
+      indicator-tools/       # Indicator tool surface (calculateIndicator)
+      brooks-pa/             # Brooks price action analysis tool
+      ict-smc/               # ICT / SMC market-structure analysis tools
     trading/                 # Unified multi-account trading (CCXT + Alpaca), guard pipeline, git-like commit history
-    thinking-kit/            # Reasoning and calculation tools
-    brain/                   # Cognitive state (memory, emotion)
   openbb/
     equity/                  # OpenBB equity data layer (price, fundamentals, estimates, etc.)
     crypto/                  # OpenBB crypto data layer

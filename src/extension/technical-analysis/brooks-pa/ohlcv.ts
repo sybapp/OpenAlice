@@ -2,8 +2,8 @@ import type { OpenBBEquityClient } from '@/openbb/equity/client'
 import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
 import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
 import type { AssetClass, Timeframes } from './types'
-import { fetchOhlcvByBars } from '@/extension/indicator-kit/index'
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import { fetchOhlcvByBars } from '@/extension/technical-analysis/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 
 type ClientByAsset = {
   equityClient: OpenBBEquityClient

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 import { detectFairValueGaps } from './analyzer/fvg'
 import { detectLiquidityPools } from './analyzer/liquidity'
 import { detectBosChoch, detectStructure, summarizeIctDecisionWindow } from './analyzer/structure'

@@ -1,4 +1,4 @@
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 import type { IctSmcFairValueGap } from '../types'
 
 export function detectFairValueGaps(bars: OhlcvData[]): IctSmcFairValueGap[] {

@@ -1,4 +1,4 @@
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 import type { IctSmcSwing } from '../types'
 
 export function detectSwings(bars: OhlcvData[], lookback = 2): IctSmcSwing[] {

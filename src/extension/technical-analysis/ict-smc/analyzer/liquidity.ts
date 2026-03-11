@@ -1,4 +1,4 @@
-import type { OhlcvData } from '@/extension/indicator-kit/index'
+import type { OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 import type { IctSmcLiquidityPool, IctSmcSwing } from '../types'
 
 function nearlyEqual(a: number, b: number, tolerance: number): boolean {
