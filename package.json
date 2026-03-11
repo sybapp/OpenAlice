@@ -47,18 +47,14 @@
     "hono": "^4.12.5",
     "json5": "^2.2.3",
     "pino": "^10.3.1",
-    "playwright-core": "1.58.2",
-    "sharp": "^0.34.5",
     "tslog": "^4.10.2",
     "undici": "^7.22.0",
-    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.8",
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.3",
-    "@types/ws": "^8.18.1",
     "node-addon-api": "^8.5.0",
     "node-gyp": "^11.5.0",
     "tsup": "^8.5.1",
@@ -69,8 +65,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "ccxt",
-      "esbuild",
-      "sharp"
+      "esbuild"
     ]
   }
 }

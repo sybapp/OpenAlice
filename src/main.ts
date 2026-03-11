@@ -23,7 +23,6 @@ import {
 import type { AccountSetup, GitExportState, ITradingGit, IPlatform } from './extension/trading/index.js'
 import { Brain, createBrainTools } from './extension/brain/index.js'
 import type { BrainExportState } from './extension/brain/index.js'
-import { createBrowserTools } from './extension/browser/index.js'
 import { OpenBBEquityClient, SymbolIndex } from './openbb/equity/index.js'
 import { createEquityTools } from './extension/equity/index.js'
 import { OpenBBCryptoClient } from './openbb/crypto/index.js'
@@ -258,7 +257,6 @@ async function main() {
   )
 
   toolCenter.register(createBrainTools(brain), 'brain')
-  toolCenter.register(createBrowserTools(), 'browser')
   toolCenter.register(createCronTools(cronEngine), 'cron')
   toolCenter.register(createMarketSearchTools(symbolIndex, cryptoClient, currencyClient), 'market-search')
   toolCenter.register(createEquityTools(equityClient), 'equity')

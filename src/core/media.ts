@@ -3,7 +3,7 @@ import type { MediaAttachment } from './types.js'
 /**
  * Extract media file paths from a Vercel AI SDK tool result output.
  *
- * Handles the OpenClaw AgentToolResult format:
+ * Handles tool results that return text/image content blocks plus optional details:
  *   { content: [{ type: "text", text: "MEDIA:/path/..." }, ...], details: { path: "..." } }
  *
  * Prefers `details.path`, falls back to parsing `MEDIA:` prefix from text blocks.

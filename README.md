@@ -12,7 +12,7 @@ Your one-person Wall Street. Alice is an AI trading agent that gives you your ow
 
 - **File-driven** — Markdown defines persona and tasks, JSON defines config, JSONL stores conversations. Both humans and AI control Alice by reading and modifying files. The same read/write primitives that power vibe coding transfer directly to vibe trading. No database, no containers, just files.
 - **Reasoning-driven** — every trading decision is based on continuous reasoning and signal mixing.
-- **OS-native** — Alice can interact with your operating system. Search the web through your browser, send messages via Telegram, and connect to local devices.
+- **OS-native** — Alice can interact with your operating system, send messages via Telegram, and connect to local devices.
 
 ## Features
 
@@ -77,7 +77,6 @@ graph LR
     GD[Guards]
     NC[News Collector]
     BR[Brain]
-    BW[Browser]
   end
 
   subgraph Tasks
@@ -108,7 +107,6 @@ graph LR
   GD --> TR
   NC --> TC
   BR --> TC
-  BW --> TC
   CRON --> EL
   HB --> CRON
   EL --> CRON
@@ -216,7 +214,6 @@ src/
     trading/                 # Unified multi-account trading (CCXT + Alpaca), guard pipeline, git-like commit history
     thinking-kit/            # Reasoning and calculation tools
     brain/                   # Cognitive state (memory, emotion)
-    browser/                 # Browser automation bridge (via OpenClaw)
   openbb/
     equity/                  # OpenBB equity data layer (price, fundamentals, estimates, etc.)
     crypto/                  # OpenBB crypto data layer
@@ -235,7 +232,6 @@ src/
     http.ts                  # HTTP health/status endpoint
     mcp.ts                   # MCP server for tool exposure
   skills/                    # Agent skill definitions
-  openclaw/                  # Browser automation subsystem (frozen)
 data/
   config/                    # JSON configuration files
   default/                   # Factory defaults (persona, heartbeat prompts)
