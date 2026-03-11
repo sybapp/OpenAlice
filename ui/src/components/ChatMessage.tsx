@@ -1,23 +1,5 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import type { ToolCall } from '../api'
-import { Marked } from 'marked'
-import { markedHighlight } from 'marked-highlight'
-import hljs from 'highlight.js'
-import DOMPurify from 'dompurify'
-import 'highlight.js/styles/github-dark.min.css'
-
-const marked = new Marked(
-  markedHighlight({
-    langPrefix: 'hljs language-',
-    highlight(code, lang) {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value
-      }
-      return hljs.highlightAuto(code).value
-    },
-  }),
-  { breaks: true },
-)
 
 interface ChatMessageProps {
   role: 'user' | 'assistant' | 'notification'
@@ -28,8 +10,10 @@ interface ChatMessageProps {
   media?: Array<{ type: string; url: string }>
 }
 
-const COPY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
-const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+const MarkdownMessage = lazy(async () => {
+  const mod = await import('./MarkdownMessage')
+  return { default: mod.MarkdownMessage }
+})
 
 function AliceAvatar() {
   return (
@@ -41,57 +25,14 @@ function AliceAvatar() {
   )
 }
 
-function addCodeBlockWrappers(html: string): string {
-  return html.replace(
-    /<pre><code class="hljs language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
-    (_, lang, code) =>
-      `<div class="code-block-wrapper"><div class="code-header"><span>${lang}</span><button class="code-copy-btn" data-code>${COPY_ICON} Copy</button></div><pre><code class="hljs language-${lang}">${code}</code></pre></div>`,
-  ).replace(
-    /<pre><code class="hljs">([\s\S]*?)<\/code><\/pre>/g,
-    (_, code) =>
-      `<div class="code-block-wrapper"><div class="code-header"><span>code</span><button class="code-copy-btn" data-code>${COPY_ICON} Copy</button></div><pre><code class="hljs">${code}</code></pre></div>`,
-  )
-}
-
 export function ChatMessage({ role, text, timestamp, isGrouped, media }: ChatMessageProps) {
-  const contentRef = useRef<HTMLDivElement>(null)
-
-  const html = useMemo(() => {
-    if (role === 'user') return null
-    const raw = DOMPurify.sanitize(marked.parse(text) as string)
-    return addCodeBlockWrappers(raw)
-  }, [role, text])
-
-  const handleCopyClick = useCallback((e: MouseEvent) => {
-    const btn = (e.target as HTMLElement).closest('.code-copy-btn') as HTMLButtonElement | null
-    if (!btn) return
-    const wrapper = btn.closest('.code-block-wrapper')
-    const code = wrapper?.querySelector('code')?.textContent ?? ''
-    navigator.clipboard.writeText(code).then(() => {
-      btn.innerHTML = `${CHECK_ICON} Copied!`
-      btn.classList.add('copied')
-      setTimeout(() => {
-        btn.innerHTML = `${COPY_ICON} Copy`
-        btn.classList.remove('copied')
-      }, 2000)
-    })
-  }, [])
-
-  useEffect(() => {
-    const el = contentRef.current
-    if (!el) return
-    el.addEventListener('click', handleCopyClick)
-    return () => el.removeEventListener('click', handleCopyClick)
-  }, [handleCopyClick])
-
   if (role === 'notification') {
     return (
       <div className="flex flex-col items-center message-enter">
         <div className="max-w-[90%] px-4 py-2.5 bg-notification-bg border border-notification-border rounded-lg text-[13px] break-words">
-          <div className="markdown-content" dangerouslySetInnerHTML={{ __html: `\ud83d\udd14 ${html}` }} />
-          {media?.map((m, i) => (
-            <img key={i} src={m.url} alt="" className="max-w-full rounded-lg mt-2" />
-          ))}
+          <Suspense fallback={<div className="whitespace-pre-wrap leading-relaxed">{text}</div>}>
+            <MarkdownMessage text={text} media={media} prefixText={'🔔 '} />
+          </Suspense>
         </div>
       </div>
     )
@@ -121,11 +62,10 @@ export function ChatMessage({ role, text, timestamp, isGrouped, media }: ChatMes
           <span className="text-[12px] text-text-muted font-medium">Alice</span>
         </div>
       )}
-      <div ref={contentRef} className={`max-w-[90%] break-words leading-relaxed ${isGrouped ? 'ml-8' : 'ml-8'}`}>
-        <div className="markdown-content" dangerouslySetInnerHTML={{ __html: html! }} />
-        {media?.map((m, i) => (
-          <img key={i} src={m.url} alt="" className="max-w-full rounded-lg mt-2" />
-        ))}
+      <div className="max-w-[90%] break-words leading-relaxed ml-8">
+        <Suspense fallback={<div className="whitespace-pre-wrap leading-relaxed">{text}</div>}>
+          <MarkdownMessage text={text} media={media} />
+        </Suspense>
       </div>
       {timestamp && (
         <div className="text-[11px] text-text-muted mt-1 ml-8 opacity-0 group-hover:opacity-100 transition-opacity">

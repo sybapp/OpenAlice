@@ -1,17 +1,51 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
-import { ChatPage } from './pages/ChatPage'
-import { PortfolioPage } from './pages/PortfolioPage'
-import { EventsPage } from './pages/EventsPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { AIProviderPage } from './pages/AIProviderPage'
-import { DataSourcesPage } from './pages/DataSourcesPage'
-import { TradingPage } from './pages/TradingPage'
-import { ConnectorsPage } from './pages/ConnectorsPage'
-import { DevPage } from './pages/DevPage'
-import { HeartbeatPage } from './pages/HeartbeatPage'
-import { ToolsPage } from './pages/ToolsPage'
+
+const ChatPage = lazy(async () => {
+  const mod = await import('./pages/ChatPage')
+  return { default: mod.ChatPage }
+})
+const PortfolioPage = lazy(async () => {
+  const mod = await import('./pages/PortfolioPage')
+  return { default: mod.PortfolioPage }
+})
+const EventsPage = lazy(async () => {
+  const mod = await import('./pages/EventsPage')
+  return { default: mod.EventsPage }
+})
+const SettingsPage = lazy(async () => {
+  const mod = await import('./pages/SettingsPage')
+  return { default: mod.SettingsPage }
+})
+const AIProviderPage = lazy(async () => {
+  const mod = await import('./pages/AIProviderPage')
+  return { default: mod.AIProviderPage }
+})
+const DataSourcesPage = lazy(async () => {
+  const mod = await import('./pages/DataSourcesPage')
+  return { default: mod.DataSourcesPage }
+})
+const TradingPage = lazy(async () => {
+  const mod = await import('./pages/TradingPage')
+  return { default: mod.TradingPage }
+})
+const ConnectorsPage = lazy(async () => {
+  const mod = await import('./pages/ConnectorsPage')
+  return { default: mod.ConnectorsPage }
+})
+const DevPage = lazy(async () => {
+  const mod = await import('./pages/DevPage')
+  return { default: mod.DevPage }
+})
+const HeartbeatPage = lazy(async () => {
+  const mod = await import('./pages/HeartbeatPage')
+  return { default: mod.HeartbeatPage }
+})
+const ToolsPage = lazy(async () => {
+  const mod = await import('./pages/ToolsPage')
+  return { default: mod.ToolsPage }
+})
 
 export type Page =
   | 'chat' | 'portfolio' | 'events' | 'heartbeat' | 'data-sources' | 'connectors'
@@ -31,6 +65,14 @@ export const ROUTES: Record<Page, string> = {
   'ai-provider': '/ai-provider',
   'settings': '/settings',
   'dev': '/dev',
+}
+
+function RouteFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center px-6 text-sm text-text-muted">
+      Loading...
+    </div>
+  )
 }
 
 export function App() {
@@ -58,20 +100,22 @@ export function App() {
           </button>
           <span className="text-sm font-semibold text-text">Open Alice</span>
         </div>
-        <Routes>
-          <Route path="/" element={<ChatPage onSSEStatus={setSseConnected} />} />
-          <Route path="/portfolio" element={<PortfolioPage />} />
-          <Route path="/events" element={<EventsPage />} />
-          <Route path="/heartbeat" element={<HeartbeatPage />} />
-          <Route path="/data-sources" element={<DataSourcesPage />} />
-          <Route path="/connectors" element={<ConnectorsPage />} />
-          <Route path="/tools" element={<ToolsPage />} />
-          <Route path="/trading" element={<TradingPage />} />
-          <Route path="/ai-provider" element={<AIProviderPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/dev" element={<DevPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<ChatPage onSSEStatus={setSseConnected} />} />
+            <Route path="/portfolio" element={<PortfolioPage />} />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/heartbeat" element={<HeartbeatPage />} />
+            <Route path="/data-sources" element={<DataSourcesPage />} />
+            <Route path="/connectors" element={<ConnectorsPage />} />
+            <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/trading" element={<TradingPage />} />
+            <Route path="/ai-provider" element={<AIProviderPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/dev" element={<DevPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )

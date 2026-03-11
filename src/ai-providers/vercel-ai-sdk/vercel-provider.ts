@@ -1,9 +1,8 @@
 /**
- * VercelAIProvider — AIProvider implementation backed by Vercel AI SDK's ToolLoopAgent.
+ * VercelAIProvider — AIProvider implementation backed by a Vercel AI SDK tool loop.
  *
- * The model is lazily created from config and cached.  When model.json or
- * api-keys.json changes on disk, the next request picks up the new model
- * automatically (hot-reload).
+ * The model is lazily created from config and cached. When ai-provider.json
+ * changes on disk, the next request picks up the new model automatically.
  */
 
 import { createHash } from 'node:crypto'
