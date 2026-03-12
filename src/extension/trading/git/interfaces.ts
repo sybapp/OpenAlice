@@ -54,4 +54,8 @@ export interface TradingGitConfig {
   executeOperation: (operation: Operation) => Promise<unknown>
   getGitState: () => Promise<GitState>
   onCommit?: (state: GitExportState) => void | Promise<void>
+  /** Path to JSONL archive file. If set, enables commit archiving. */
+  archivePath?: string
+  /** Max commits to keep in active memory. Default: 200 */
+  maxActiveCommits?: number
 }

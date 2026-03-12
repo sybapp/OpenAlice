@@ -15,8 +15,9 @@ import { z } from 'zod'
 import type { AccountManager } from './account-manager.js'
 import type { ITradingAccount } from './interfaces.js'
 import type { ITradingGit } from './git/interfaces.js'
-import type { GitState, OrderStatusUpdate } from './git/types.js'
+import type { GitState, GitCommit, OrderStatusUpdate } from './git/types.js'
 import { calculateRiskPositionSize } from './risk-position-size.js'
+import { computeTradingStats } from './stats.js'
 
 // ==================== Resolver interface ====================
 
@@ -992,6 +993,49 @@ Use this after placing limit/stop orders to check if they've been filled.`,
         }
 
         if (results.length === 0) return { message: 'No pending orders to sync.', updatedCount: 0 }
+        return results.length === 1 ? results[0] : results
+      },
+    }),
+
+    // ==================== Trading Stats ====================
+
+    tradingStats: tool({
+      description: `Compute trading performance statistics from commit history.
+
+Returns:
+- winRate, avgWin, avgLoss, profitFactor
+- maxDrawdown (from equity curve)
+- Per-symbol PnL breakdown
+
+Use this to evaluate trading performance over time.`,
+      inputSchema: z.object({
+        source: z.string().optional().describe(sourceDesc(false)),
+        period: z.enum(['all', '7d', '30d', '90d']).default('all').describe('Time period to analyze'),
+      }),
+      execute: ({ source, period }) => {
+        const targets = resolveAccounts(accountManager, source)
+        if (targets.length === 0) return { error: 'No accounts available.' }
+
+        const cutoff = period === 'all' ? 0 : Date.now() - (
+          period === '7d' ? 7 * 86400000 :
+          period === '30d' ? 30 * 86400000 :
+          90 * 86400000
+        )
+
+        const results: Array<Record<string, unknown>> = []
+        for (const { id } of targets) {
+          const git = resolver.getGit(id)
+          if (!git) continue
+          const exported = git.exportState()
+          let commits = exported.commits
+          if (cutoff > 0) {
+            commits = commits.filter((c) => new Date(c.timestamp).getTime() >= cutoff)
+          }
+          if (commits.length === 0) continue
+          results.push({ source: id, ...computeTradingStats(commits) })
+        }
+
+        if (results.length === 0) return { message: 'No trading history found.' }
         return results.length === 1 ? results[0] : results
       },
     }),

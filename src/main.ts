@@ -1,394 +1,55 @@
-import { readFile, writeFile, appendFile, mkdir } from 'fs/promises'
-import { resolve, dirname } from 'path'
-import { Engine } from './core/engine.js'
-import { loadConfig, loadTradingConfig } from './core/config.js'
-import type { Plugin, EngineContext, ReconnectResult } from './core/types.js'
-import { McpPlugin } from './plugins/mcp.js'
-import { TelegramPlugin } from './connectors/telegram/index.js'
-import { WebPlugin } from './connectors/web/index.js'
-import { McpAskPlugin } from './connectors/mcp-ask/index.js'
-import { createThinkingTools } from './extension/cognition/thinking-kit/index.js'
-import {
-  AccountManager,
-  type BacktestBar,
-  CcxtAccount,
-  createCcxtProviderTools,
-  wireAccountTrading,
-  createTradingTools,
-  createPlatformFromConfig,
-  createAccountFromConfig,
-  validatePlatformRefs,
-  createBacktestStorage,
-  createBacktestRunManager,
-} from './extension/trading/index.js'
-import type { AccountSetup, GitExportState, ITradingGit, IPlatform } from './extension/trading/index.js'
-import { Brain, createBrainTools } from './extension/cognition/brain/index.js'
-import type { BrainExportState } from './extension/cognition/brain/index.js'
-import { OpenBBEquityClient, SymbolIndex } from './openbb/equity/index.js'
-import { createEquityTools } from './extension/research/equity/index.js'
-import { OpenBBCryptoClient } from './openbb/crypto/index.js'
-import { OpenBBCurrencyClient } from './openbb/currency/index.js'
-import { OpenBBEconomyClient } from './openbb/economy/index.js'
-import { OpenBBCommodityClient } from './openbb/commodity/index.js'
-import { OpenBBNewsClient } from './openbb/news/index.js'
-import { createMarketSearchTools } from './extension/research/market/index.js'
-import { createNewsTools } from './extension/research/news/index.js'
-import { createIndicatorTools } from './extension/technical-analysis/indicator-tools/index.js'
-import { createBrooksPaTools } from './extension/technical-analysis/brooks-pa/index.js'
-import { createIctSmcTools } from './extension/technical-analysis/ict-smc/index.js'
+/**
+ * Main entry point — thin orchestrator.
+ *
+ * All heavy lifting is delegated to bootstrap modules under src/bootstrap/.
+ */
+
+import { loadConfig } from './core/config.js'
+import type { EngineContext } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
-import { ToolCenter } from './core/tool-center.js'
-import { AgentCenter } from './core/agent-center.js'
-import { ProviderRouter } from './core/ai-provider.js'
-import { VercelAIProvider } from './ai-providers/vercel-ai-sdk/vercel-provider.js'
-import { ClaudeCodeProvider } from './ai-providers/claude-code/claude-code-provider.js'
-import { CodexCliProvider } from './ai-providers/codex-cli/index.js'
-import { createEventLog } from './core/event-log.js'
-import { createCronEngine, createCronListener, createCronTools } from './task/cron/index.js'
+import { CcxtAccount, createCcxtProviderTools } from './extension/trading/index.js'
+import { createCronListener } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
-import { NewsCollectorStore, NewsCollector, wrapNewsToolsForPiggyback, createNewsArchiveTools } from './extension/research/news-collector/index.js'
-import { ensureDefaultSkillPacks, listSkillPacks } from './core/skills/registry.js'
-import { validateSkillToolReferences } from './core/skills/policy.js'
+import { NewsCollector } from './extension/research/news-collector/index.js'
+import { ensureDefaultSkillPacks } from './core/skills/registry.js'
 
-// ==================== Persistence paths ====================
-
-const BRAIN_FILE = resolve('data/brain/commit.json')
-
-/** Per-account git state path. Falls back to legacy paths for backward compat.
- *  TODO: remove LEGACY_GIT_PATHS before v1.0 */
-function gitFilePath(accountId: string): string {
-  return resolve(`data/trading/${accountId}/commit.json`)
-}
-const LEGACY_GIT_PATHS: Record<string, string> = {
-  'bybit-main': resolve('data/crypto-trading/commit.json'),
-  'alpaca-paper': resolve('data/securities-trading/commit.json'),
-  'alpaca-live': resolve('data/securities-trading/commit.json'),
-}
-const FRONTAL_LOBE_FILE = resolve('data/brain/frontal-lobe.md')
-const EMOTION_LOG_FILE = resolve('data/brain/emotion-log.md')
-const PERSONA_FILE = resolve('data/brain/persona.md')
-const PERSONA_DEFAULT = resolve('data/default/persona.default.md')
+import { initTradingAccounts, createAccountReconnector } from './bootstrap/trading-accounts.js'
+import { initServices } from './bootstrap/services.js'
+import { registerAllTools } from './bootstrap/tools.js'
+import { initAIProviders } from './bootstrap/ai.js'
+import { initPlugins, createConnectorReconnector } from './bootstrap/connectors.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-interface HistoricalBarRow {
-  date: string
-  open: number
-  high: number
-  low: number
-  close: number
-  volume: number | null
-}
-
-function toBacktestIsoTimestamp(input: string): string {
-  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(input) ? `${input}T00:00:00.000Z` : input
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid historical bar timestamp: ${input}`)
-  }
-  return date.toISOString()
-}
-
-function normalizeHistoricalBars(
-  symbol: string,
-  rows: HistoricalBarRow[],
-): BacktestBar[] {
-  return rows
-    .map((row) => ({
-      ts: toBacktestIsoTimestamp(row.date),
-      symbol,
-      open: Number(row.open),
-      high: Number(row.high),
-      low: Number(row.low),
-      close: Number(row.close),
-      volume: row.volume == null ? 0 : Number(row.volume),
-    }))
-    .filter((row) => (
-      Number.isFinite(row.open)
-      && Number.isFinite(row.high)
-      && Number.isFinite(row.low)
-      && Number.isFinite(row.close)
-      && Number.isFinite(row.volume)
-    ))
-    .sort((a, b) => a.ts.localeCompare(b.ts))
-}
-
-/** Read a file, copying from default if it doesn't exist yet. */
-async function readWithDefault(target: string, defaultFile: string): Promise<string> {
-  try { return await readFile(target, 'utf-8') } catch { /* not found — copy default */ }
-  try {
-    const content = await readFile(defaultFile, 'utf-8')
-    await mkdir(dirname(target), { recursive: true })
-    await writeFile(target, content)
-    return content
-  } catch { return '' }
-}
-
-/** Create a git commit persistence callback for a given file path. */
-function createGitPersister(filePath: string) {
-  return async (state: GitExportState) => {
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, JSON.stringify(state, null, 2))
-  }
-}
-
-/** Read saved git state from disk, trying primary path then legacy fallback. */
-async function loadGitState(accountId: string): Promise<GitExportState | undefined> {
-  const primary = gitFilePath(accountId)
-  try {
-    return JSON.parse(await readFile(primary, 'utf-8')) as GitExportState
-  } catch { /* try legacy */ }
-  const legacy = LEGACY_GIT_PATHS[accountId]
-  if (legacy) {
-    try {
-      return JSON.parse(await readFile(legacy, 'utf-8')) as GitExportState
-    } catch { /* no saved state */ }
-  }
-  return undefined
-}
 
 async function main() {
   const config = await loadConfig()
   await ensureDefaultSkillPacks()
 
-  // ==================== Trading Account Manager ====================
+  // ---- Trading Accounts ----
+  const { accountManager, accountSetups, ccxtInitPromise, initAccount } = await initTradingAccounts()
 
-  const accountManager = new AccountManager()
-  // Mutable map: accountId → setup. Needed for reconnect (re-wiring) and git lookups.
-  const accountSetups = new Map<string, AccountSetup>()
+  // ---- Services (Brain, EventLog, Cron, OpenBB, SymbolIndex) ----
+  const services = await initServices(config)
+  const { brain, instructions, eventLog, cronEngine, newsStore, marketData } = services
 
-  // ==================== Platform-driven Account Init ====================
+  // ---- Tool Center ----
+  const toolCenter = await registerAllTools({ config, accountManager, accountSetups, services, brain })
 
-  const tradingConfig = await loadTradingConfig()
-  const platformRegistry = new Map<string, IPlatform>()
-  for (const pc of tradingConfig.platforms) {
-    platformRegistry.set(pc.id, createPlatformFromConfig(pc))
-  }
-  validatePlatformRefs([...platformRegistry.values()], tradingConfig.accounts)
+  // ---- AI Providers & Engine ----
+  const { engine, backtest } = initAIProviders(config, toolCenter, instructions)
 
-  /** Initialize and register a single account. Returns true if successful. */
-  async function initAccount(
-    accountCfg: { id: string; platformId: string; guards: Array<{ type: string; options: Record<string, unknown> }> },
-    platform: IPlatform,
-  ): Promise<boolean> {
-    const account = createAccountFromConfig(platform, accountCfg)
-    try {
-      await account.init()
-    } catch (err) {
-      console.warn(`trading: ${accountCfg.id} init failed (non-fatal):`, err)
-      return false
-    }
-    const savedState = await loadGitState(accountCfg.id)
-    const filePath = gitFilePath(accountCfg.id)
-    const setup = wireAccountTrading(account, {
-      guards: accountCfg.guards,
-      savedState,
-      onCommit: createGitPersister(filePath),
-    })
-    accountManager.addAccount(account, accountCfg.platformId)
-    accountSetups.set(account.id, setup)
-    console.log(`trading: ${account.label} initialized`)
-    return true
-  }
-
-  // Alpaca accounts — sync init (fast, blocks startup)
-  // CCXT accounts — async background init (loadMarkets is slow)
-  const ccxtAccountConfigs: Array<{ cfg: typeof tradingConfig.accounts[number]; platform: IPlatform }> = []
-
-  for (const accCfg of tradingConfig.accounts) {
-    const platform = platformRegistry.get(accCfg.platformId)!
-    if (platform.providerType === 'alpaca') {
-      await initAccount(accCfg, platform)
-    } else {
-      ccxtAccountConfigs.push({ cfg: accCfg, platform })
-    }
-  }
-
-  // CCXT init in background — register tools when ready
-  const ccxtInitPromise = ccxtAccountConfigs.length > 0
-    ? (async () => {
-        for (const { cfg, platform } of ccxtAccountConfigs) {
-          await initAccount(cfg, platform)
-        }
-      })()
-    : Promise.resolve()
-
-  // ==================== Brain ====================
-
-  const [brainExport, persona] = await Promise.all([
-    readFile(BRAIN_FILE, 'utf-8').then((r) => JSON.parse(r) as BrainExportState).catch(() => undefined),
-    readWithDefault(PERSONA_FILE, PERSONA_DEFAULT),
-  ])
-
-  const brainDir = resolve('data/brain')
-  const brainOnCommit = async (state: BrainExportState) => {
-    await mkdir(brainDir, { recursive: true })
-    await writeFile(BRAIN_FILE, JSON.stringify(state, null, 2))
-    await writeFile(FRONTAL_LOBE_FILE, state.state.frontalLobe)
-    const latest = state.commits[state.commits.length - 1]
-    if (latest?.type === 'emotion') {
-      const prev = state.commits.length > 1
-        ? state.commits[state.commits.length - 2]?.stateAfter.emotion ?? 'unknown'
-        : 'unknown'
-      await appendFile(EMOTION_LOG_FILE,
-        `## ${latest.timestamp}\n**${prev} → ${latest.stateAfter.emotion}**\n${latest.message}\n\n`)
-    }
-  }
-
-  const brain = brainExport
-    ? Brain.restore(brainExport, { onCommit: brainOnCommit })
-    : new Brain({ onCommit: brainOnCommit })
-
-  const frontalLobe = brain.getFrontalLobe()
-  const emotion = brain.getEmotion().current
-  const instructions = [
-    persona,
-    '---',
-    '## Current Brain State',
-    '',
-    `**Frontal Lobe:** ${frontalLobe || '(empty)'}`,
-    '',
-    `**Emotion:** ${emotion}`,
-  ].join('\n')
-
-  // ==================== Event Log ====================
-
-  const eventLog = await createEventLog()
-
-  // ==================== Cron ====================
-
-  const cronEngine = createCronEngine({ eventLog })
-
-  // ==================== News Collector Store ====================
-
-  const newsStore = new NewsCollectorStore({
-    maxInMemory: config.newsCollector.maxInMemory,
-    retentionDays: config.newsCollector.retentionDays,
-  })
-  await newsStore.init()
-
-  // ==================== OpenBB Clients ====================
-
-  const providerKeys = config.openbb.providerKeys
-  const { providers } = config.openbb
-  const equityClient = new OpenBBEquityClient(config.openbb.apiUrl, providers.equity, providerKeys)
-  const cryptoClient = new OpenBBCryptoClient(config.openbb.apiUrl, providers.crypto, providerKeys)
-  const currencyClient = new OpenBBCurrencyClient(config.openbb.apiUrl, providers.currency, providerKeys)
-  const commodityClient = new OpenBBCommodityClient(config.openbb.apiUrl, undefined, providerKeys)
-  const economyClient = new OpenBBEconomyClient(config.openbb.apiUrl, undefined, providerKeys)
-  const newsClient = new OpenBBNewsClient(config.openbb.apiUrl, undefined, providerKeys)
-  const marketData = {
-    async getBacktestBars(query: { assetType: 'equity' | 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
-      if (!config.openbb.enabled) {
-        throw new Error('OpenBB is disabled')
-      }
-
-      const symbol = query.symbol.trim().toUpperCase()
-      if (query.assetType === 'equity') {
-        const rows = (await equityClient.getHistorical({
-          symbol,
-          start_date: query.startDate,
-          end_date: query.endDate,
-        })) as unknown as HistoricalBarRow[]
-        return normalizeHistoricalBars(symbol, rows)
-      }
-
-      const rows = (await cryptoClient.getHistorical({
-        symbol,
-        start_date: query.startDate,
-        end_date: query.endDate,
-        ...(query.interval ? { interval: query.interval } : {}),
-      })) as unknown as HistoricalBarRow[]
-      return normalizeHistoricalBars(symbol, rows)
-    },
-  }
-
-  // ==================== Equity Symbol Index ====================
-
-  const symbolIndex = new SymbolIndex()
-  await symbolIndex.load(equityClient)
-
-  // ==================== Tool Center ====================
-
-  const toolCenter = new ToolCenter()
-  toolCenter.register(createThinkingTools(), 'thinking')
-
-  // One unified set of trading tools — routes via `source` parameter at runtime
-  toolCenter.register(
-    createTradingTools({
-      accountManager,
-      getGit: (id) => accountSetups.get(id)?.git,
-      getGitState: (id) => accountSetups.get(id)?.getGitState(),
-    }),
-    'trading',
-  )
-
-  toolCenter.register(createBrainTools(brain), 'brain')
-  toolCenter.register(createCronTools(cronEngine), 'cron')
-  toolCenter.register(createMarketSearchTools(symbolIndex, cryptoClient, currencyClient), 'market-search')
-  toolCenter.register(createEquityTools(equityClient), 'equity')
-  let newsTools = createNewsTools(newsClient, {
-    companyProvider: providers.newsCompany,
-    worldProvider: providers.newsWorld,
-  })
-  if (config.newsCollector.piggybackOpenBB) {
-    newsTools = wrapNewsToolsForPiggyback(newsTools, newsStore)
-  }
-  toolCenter.register(newsTools, 'news')
-  if (config.newsCollector.enabled) {
-    toolCenter.register(createNewsArchiveTools(newsStore), 'news-archive')
-  }
-  toolCenter.register(createIndicatorTools(equityClient, cryptoClient, currencyClient), 'analysis')
-  toolCenter.register(createBrooksPaTools(equityClient, cryptoClient, currencyClient), 'analysis')
-  toolCenter.register(createIctSmcTools(equityClient, cryptoClient, currencyClient), 'analysis')
-
-  for (const skill of await listSkillPacks()) {
-    for (const warning of validateSkillToolReferences(skill, toolCenter.getInventory())) {
-      console.warn(warning)
-    }
-  }
-
-  console.log(`tool-center: ${toolCenter.list().length} tools registered`)
-
-  // ==================== AI Provider Chain ====================
-
-  const vercelProvider = new VercelAIProvider(
-    (policy) => toolCenter.getVercelTools(policy),
-    instructions,
-    config.agent.maxSteps,
-    config.compaction,
-  )
-  const claudeCodeProvider = new ClaudeCodeProvider(config.compaction, instructions)
-  const codexCliProvider = new CodexCliProvider(config.compaction, instructions)
-  const router = new ProviderRouter(vercelProvider, claudeCodeProvider, codexCliProvider)
-
-  const agentCenter = new AgentCenter(router)
-  const engine = new Engine({ agentCenter })
-
-  // ==================== Backtest ====================
-
-  const backtestStorage = createBacktestStorage()
-  const backtest = createBacktestRunManager({
-    storage: backtestStorage,
-    engine,
-  })
-
-  // ==================== Connector Center ====================
-
+  // ---- Connector Center ----
   const connectorCenter = new ConnectorCenter(eventLog)
 
-  // ==================== Cron Lifecycle ====================
-
+  // ---- Cron Lifecycle ----
   await cronEngine.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
   const cronListener = createCronListener({ connectorCenter, eventLog, engine, session: cronSession })
   cronListener.start()
   console.log('cron: engine + listener started')
-
-  // ==================== Heartbeat ====================
-
+  // ---- Heartbeat ----
   const heartbeat = createHeartbeat({
     config: config.heartbeat,
     connectorCenter, cronEngine, eventLog, engine,
@@ -398,8 +59,7 @@ async function main() {
     console.log(`heartbeat: enabled (every ${config.heartbeat.every})`)
   }
 
-  // ==================== News Collector ====================
-
+  // ---- News Collector ----
   let newsCollector: NewsCollector | null = null
   if (config.newsCollector.enabled && config.newsCollector.feeds.length > 0) {
     newsCollector = new NewsCollector({
@@ -411,164 +71,19 @@ async function main() {
     console.log(`news-collector: started (${config.newsCollector.feeds.length} feeds, every ${config.newsCollector.intervalMinutes}m)`)
   }
 
-  // ==================== Account Reconnect ====================
+  // ---- Plugins ----
+  const { corePlugins, optionalPlugins } = initPlugins(config, toolCenter)
 
-  const reconnectingAccounts = new Set<string>()
+  // ---- Reconnect handlers ----
+  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount, toolCenter })
+  let ctx: EngineContext
+  const reconnectConnectors = createConnectorReconnector(optionalPlugins, () => ctx)
 
-  const reconnectAccount = async (accountId: string): Promise<ReconnectResult> => {
-    if (reconnectingAccounts.has(accountId)) {
-      return { success: false, error: 'Reconnect already in progress' }
-    }
-    reconnectingAccounts.add(accountId)
-    try {
-      // Re-read trading config to pick up credential/guard changes
-      const freshTrading = await loadTradingConfig()
-
-      // Close old account
-      const currentAccount = accountManager.getAccount(accountId)
-      if (currentAccount) {
-        await currentAccount.close()
-        accountManager.removeAccount(accountId)
-        accountSetups.delete(accountId)
-      }
-
-      // Find this account in fresh config
-      const accCfg = freshTrading.accounts.find((a) => a.id === accountId)
-      if (!accCfg) {
-        return { success: true, message: `Account "${accountId}" not found in config (removed or disabled)` }
-      }
-
-      // Build platform registry from fresh config
-      const freshPlatforms = new Map<string, IPlatform>()
-      for (const pc of freshTrading.platforms) {
-        freshPlatforms.set(pc.id, createPlatformFromConfig(pc))
-      }
-
-      const platform = freshPlatforms.get(accCfg.platformId)
-      if (!platform) {
-        return { success: false, error: `Platform "${accCfg.platformId}" not found for account "${accountId}"` }
-      }
-
-      const ok = await initAccount(accCfg, platform)
-      if (!ok) {
-        return { success: false, error: `Account "${accountId}" init failed` }
-      }
-
-      // Re-register CCXT-specific tools if this is a CCXT account
-      if (platform.providerType !== 'alpaca') {
-        toolCenter.register(
-          createCcxtProviderTools({
-            accountManager,
-            getGit: (id) => accountSetups.get(id)?.git,
-            getGitState: (id) => accountSetups.get(id)?.getGitState(),
-          }),
-          'trading-ccxt',
-        )
-      }
-
-      const label = accountManager.getAccount(accountId)?.label ?? accountId
-      console.log(`reconnect: ${label} online`)
-      return { success: true, message: `${label} reconnected` }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`reconnect: ${accountId} failed:`, msg)
-      return { success: false, error: msg }
-    } finally {
-      reconnectingAccounts.delete(accountId)
-    }
-  }
-
-  // ==================== Plugins ====================
-
-  // Core plugins — always-on, not toggleable at runtime
-  const corePlugins: Plugin[] = []
-
-  // MCP Server is always active when a port is set — Claude Code provider depends on it for tools
-  if (config.connectors.mcp.port) {
-    corePlugins.push(new McpPlugin(() => toolCenter.getMcpTools(), config.connectors.mcp.port))
-  }
-
-  // Web UI is always active (no enabled flag)
-  if (config.connectors.web.port) {
-    corePlugins.push(new WebPlugin({ port: config.connectors.web.port, authToken: config.connectors.web.authToken }))
-  }
-
-  // Optional plugins — toggleable at runtime via reconnectConnectors()
-  const optionalPlugins = new Map<string, Plugin>()
-
-  if (config.connectors.mcpAsk.enabled && config.connectors.mcpAsk.port) {
-    optionalPlugins.set('mcp-ask', new McpAskPlugin({ port: config.connectors.mcpAsk.port, authToken: config.connectors.mcpAsk.authToken }))
-  }
-
-  if (config.connectors.telegram.enabled && config.connectors.telegram.botToken) {
-    optionalPlugins.set('telegram', new TelegramPlugin({
-      token: config.connectors.telegram.botToken,
-      allowedChatIds: config.connectors.telegram.chatIds,
-    }))
-  }
-
-  // ==================== Connector Reconnect ====================
-
-  let connectorsReconnecting = false
-  const reconnectConnectors = async (): Promise<ReconnectResult> => {
-    if (connectorsReconnecting) return { success: false, error: 'Reconnect already in progress' }
-    connectorsReconnecting = true
-    try {
-      const fresh = await loadConfig()
-      const changes: string[] = []
-
-      // --- MCP Ask ---
-      const mcpAskWanted = fresh.connectors.mcpAsk.enabled && !!fresh.connectors.mcpAsk.port
-      const mcpAskRunning = optionalPlugins.has('mcp-ask')
-      if (mcpAskRunning && !mcpAskWanted) {
-        await optionalPlugins.get('mcp-ask')!.stop()
-        optionalPlugins.delete('mcp-ask')
-        changes.push('mcp-ask stopped')
-      } else if (!mcpAskRunning && mcpAskWanted) {
-        const p = new McpAskPlugin({ port: fresh.connectors.mcpAsk.port!, authToken: fresh.connectors.mcpAsk.authToken })
-        await p.start(ctx)
-        optionalPlugins.set('mcp-ask', p)
-        changes.push('mcp-ask started')
-      }
-
-      // --- Telegram ---
-      const telegramWanted = fresh.connectors.telegram.enabled && !!fresh.connectors.telegram.botToken
-      const telegramRunning = optionalPlugins.has('telegram')
-      if (telegramRunning && !telegramWanted) {
-        await optionalPlugins.get('telegram')!.stop()
-        optionalPlugins.delete('telegram')
-        changes.push('telegram stopped')
-      } else if (!telegramRunning && telegramWanted) {
-        const p = new TelegramPlugin({
-          token: fresh.connectors.telegram.botToken!,
-          allowedChatIds: fresh.connectors.telegram.chatIds,
-        })
-        await p.start(ctx)
-        optionalPlugins.set('telegram', p)
-        changes.push('telegram started')
-      }
-
-      if (changes.length > 0) {
-        console.log(`reconnect: connectors — ${changes.join(', ')}`)
-      }
-      return { success: true, message: changes.length > 0 ? changes.join(', ') : 'no changes' }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('reconnect: connectors failed:', msg)
-      return { success: false, error: msg }
-    } finally {
-      connectorsReconnecting = false
-    }
-  }
-
-  // ==================== Engine Context ====================
-
-  const ctx: EngineContext = {
+  // ---- Engine Context ----
+  ctx = {
     config, connectorCenter, engine, eventLog, heartbeat, cronEngine, toolCenter,
-    accountManager,
-    backtest,
-    marketData,
-    getAccountGit: (id: string): ITradingGit | undefined => accountSetups.get(id)?.git,
+    accountManager, backtest, marketData,
+    getAccountGit: (id) => accountSetups.get(id)?.git,
     reconnectAccount,
     reconnectConnectors,
   }
@@ -580,16 +95,12 @@ async function main() {
 
   console.log('engine: started')
 
-  // ==================== CCXT Background Injection ====================
-  // CCXT accounts init in background (loadMarkets is slow). When done, register
-  // CCXT-specific tools so the next agent call picks them up automatically.
+  // ---- CCXT Background Injection ----
   ccxtInitPromise.then(() => {
-    // Check if any CCXT accounts were successfully registered
     const hasCcxt = Array.from(accountSetups.values()).some(
       (s) => s.account instanceof CcxtAccount,
     )
     if (!hasCcxt) return
-
     toolCenter.register(
       createCcxtProviderTools({
         accountManager,
@@ -601,8 +112,7 @@ async function main() {
     console.log('ccxt: provider tools registered')
   })
 
-  // ==================== Shutdown ====================
-
+  // ---- Shutdown ----
   let stopped = false
   const shutdown = async () => {
     stopped = true
@@ -621,8 +131,7 @@ async function main() {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
-  // ==================== Tick Loop ====================
-
+  // ---- Tick Loop ----
   while (!stopped) {
     await sleep(config.engine.interval)
   }

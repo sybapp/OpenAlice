@@ -14,11 +14,9 @@ import type {
   ITradingAccount,
   Order,
   OrderRequest,
-  OrderType,
   Position,
-  TimeInForce,
 } from './interfaces.js'
-import type { Operation } from './git/types.js'
+import type { Operation, PlaceOrderParams } from './git/types.js'
 
 interface ProtectionPlan {
   stopLossPrice?: number
@@ -164,18 +162,17 @@ function clearProtectionIntentByOrderId(account: ITradingAccount, orderId: strin
   }
 }
 
-function readProtectionPlan(params: Record<string, unknown>): ProtectionPlan | undefined {
+function readProtectionPlanFromTyped(params: PlaceOrderParams): ProtectionPlan | undefined {
   const raw = params.protection
-  if (!raw || typeof raw !== 'object') return undefined
+  if (!raw) return undefined
 
-  const candidate = raw as Record<string, unknown>
   const plan: ProtectionPlan = {}
 
-  if (isFinitePositive(candidate.stopLossPrice)) plan.stopLossPrice = candidate.stopLossPrice
-  if (isFinitePositive(candidate.stopLossPct)) plan.stopLossPct = candidate.stopLossPct
-  if (isFinitePositive(candidate.takeProfitPrice)) plan.takeProfitPrice = candidate.takeProfitPrice
-  if (isFinitePositive(candidate.takeProfitPct)) plan.takeProfitPct = candidate.takeProfitPct
-  if (isFiniteRatio(candidate.takeProfitSizeRatio)) plan.takeProfitSizeRatio = candidate.takeProfitSizeRatio
+  if (isFinitePositive(raw.stopLossPrice)) plan.stopLossPrice = raw.stopLossPrice
+  if (isFinitePositive(raw.stopLossPct)) plan.stopLossPct = raw.stopLossPct
+  if (isFinitePositive(raw.takeProfitPrice)) plan.takeProfitPrice = raw.takeProfitPrice
+  if (isFinitePositive(raw.takeProfitPct)) plan.takeProfitPct = raw.takeProfitPct
+  if (isFiniteRatio(raw.takeProfitSizeRatio)) plan.takeProfitSizeRatio = raw.takeProfitSizeRatio
 
   if (
     plan.stopLossPrice === undefined &&
@@ -461,29 +458,30 @@ export function createOperationDispatcher(account: ITradingAccount) {
   return async (op: Operation): Promise<unknown> => {
     switch (op.action) {
       case 'placeOrder': {
+        const p = op.params
         const contract: Partial<Contract> = {}
-        if (op.params.aliceId) contract.aliceId = op.params.aliceId as string
-        if (op.params.symbol) contract.symbol = op.params.symbol as string
-        if (op.params.secType) contract.secType = op.params.secType as Contract['secType']
-        if (op.params.currency) contract.currency = op.params.currency as string
-        if (op.params.exchange) contract.exchange = op.params.exchange as string
+        if (p.aliceId) contract.aliceId = p.aliceId
+        if (p.symbol) contract.symbol = p.symbol
+        if (p.secType) contract.secType = p.secType as Contract['secType']
+        if (p.currency) contract.currency = p.currency
+        if (p.exchange) contract.exchange = p.exchange
 
         const request: OrderRequest = {
           contract: contract as Contract,
-          side: op.params.side as 'buy' | 'sell',
-          type: op.params.type as OrderType,
-          qty: op.params.qty as number | undefined,
-          notional: op.params.notional as number | undefined,
-          price: op.params.price as number | undefined,
-          stopPrice: op.params.stopPrice as number | undefined,
-          trailingAmount: op.params.trailingAmount as number | undefined,
-          trailingPercent: op.params.trailingPercent as number | undefined,
-          reduceOnly: op.params.reduceOnly as boolean | undefined,
-          timeInForce: (op.params.timeInForce as TimeInForce) ?? 'day',
-          goodTillDate: op.params.goodTillDate as string | undefined,
-          extendedHours: op.params.extendedHours as boolean | undefined,
-          parentId: op.params.parentId as string | undefined,
-          ocaGroup: op.params.ocaGroup as string | undefined,
+          side: p.side,
+          type: p.type,
+          qty: p.qty,
+          notional: p.notional,
+          price: p.price,
+          stopPrice: p.stopPrice,
+          trailingAmount: p.trailingAmount,
+          trailingPercent: p.trailingPercent,
+          reduceOnly: p.reduceOnly,
+          timeInForce: p.timeInForce ?? 'day',
+          goodTillDate: p.goodTillDate,
+          extendedHours: p.extendedHours,
+          parentId: p.parentId,
+          ocaGroup: p.ocaGroup,
         }
 
         const protectionKind =
@@ -525,7 +523,7 @@ export function createOperationDispatcher(account: ITradingAccount) {
           })
         }
 
-        const protectionPlan = readProtectionPlan(op.params)
+        const protectionPlan = readProtectionPlanFromTyped(p)
         const shouldArmProtection =
           result.success &&
           protectionPlan &&
@@ -568,18 +566,18 @@ export function createOperationDispatcher(account: ITradingAccount) {
       }
 
       case 'modifyOrder': {
-        const orderId = op.params.orderId as string
+        const p = op.params
         const changes: Partial<OrderRequest> = {}
-        if (op.params.qty != null) changes.qty = op.params.qty as number
-        if (op.params.price != null) changes.price = op.params.price as number
-        if (op.params.stopPrice != null) changes.stopPrice = op.params.stopPrice as number
-        if (op.params.trailingAmount != null) changes.trailingAmount = op.params.trailingAmount as number
-        if (op.params.trailingPercent != null) changes.trailingPercent = op.params.trailingPercent as number
-        if (op.params.type) changes.type = op.params.type as OrderType
-        if (op.params.timeInForce) changes.timeInForce = op.params.timeInForce as TimeInForce
-        if (op.params.goodTillDate) changes.goodTillDate = op.params.goodTillDate as string
+        if (p.qty != null) changes.qty = p.qty
+        if (p.price != null) changes.price = p.price
+        if (p.stopPrice != null) changes.stopPrice = p.stopPrice
+        if (p.trailingAmount != null) changes.trailingAmount = p.trailingAmount
+        if (p.trailingPercent != null) changes.trailingPercent = p.trailingPercent
+        if (p.type) changes.type = p.type
+        if (p.timeInForce) changes.timeInForce = p.timeInForce
+        if (p.goodTillDate) changes.goodTillDate = p.goodTillDate
 
-        const result = await account.modifyOrder(orderId, changes)
+        const result = await account.modifyOrder(p.orderId, changes)
 
         return {
           success: result.success,
@@ -596,13 +594,13 @@ export function createOperationDispatcher(account: ITradingAccount) {
       }
 
       case 'closePosition': {
+        const p = op.params
         const contract: Partial<Contract> = {}
-        if (op.params.aliceId) contract.aliceId = op.params.aliceId as string
-        if (op.params.symbol) contract.symbol = op.params.symbol as string
-        if (op.params.secType) contract.secType = op.params.secType as Contract['secType']
+        if (p.aliceId) contract.aliceId = p.aliceId
+        if (p.symbol) contract.symbol = p.symbol
+        if (p.secType) contract.secType = p.secType as Contract['secType']
 
-        const qty = op.params.qty as number | undefined
-        const result = await account.closePosition(contract as Contract, qty)
+        const result = await account.closePosition(contract as Contract, p.qty)
         if (result.success) {
           clearProtectionIntent(account, contract)
         }
@@ -622,10 +620,9 @@ export function createOperationDispatcher(account: ITradingAccount) {
       }
 
       case 'cancelOrder': {
-        const orderId = op.params.orderId as string
-        const success = await account.cancelOrder(orderId)
+        const success = await account.cancelOrder(op.params.orderId)
         if (success) {
-          clearProtectionIntentByOrderId(account, orderId)
+          clearProtectionIntentByOrderId(account, op.params.orderId)
         }
         return { success, error: success ? undefined : 'Failed to cancel order' }
       }

@@ -36,6 +36,8 @@ export function wireAccountTrading(
     guards?: Array<{ type: string; options?: Record<string, unknown> }>
     savedState?: GitExportState
     onCommit?: (state: GitExportState) => void | Promise<void>
+    archivePath?: string
+    maxActiveCommits?: number
   },
 ): AccountSetup {
   const getGitState = createWalletStateBridge(account)
@@ -43,17 +45,17 @@ export function wireAccountTrading(
   const guards = resolveGuards(options.guards ?? [])
   const guardedDispatcher = createGuardPipeline(dispatcher, account, guards)
 
+  const gitConfig = {
+    executeOperation: guardedDispatcher,
+    getGitState,
+    onCommit: options.onCommit,
+    archivePath: options.archivePath,
+    maxActiveCommits: options.maxActiveCommits,
+  }
+
   const git = options.savedState
-    ? TradingGit.restore(options.savedState, {
-        executeOperation: guardedDispatcher,
-        getGitState,
-        onCommit: options.onCommit,
-      })
-    : new TradingGit({
-        executeOperation: guardedDispatcher,
-        getGitState,
-        onCommit: options.onCommit,
-      })
+    ? TradingGit.restore(options.savedState, gitConfig)
+    : new TradingGit(gitConfig)
 
   return { account, git, getGitState }
 }

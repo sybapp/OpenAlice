@@ -9,18 +9,22 @@
 import type { Operation } from '../git/types.js'
 import type { ITradingAccount } from '../interfaces.js'
 import type { OperationGuard, GuardContext } from './types.js'
+import { GuardContextCache, type GuardContextCacheOptions } from './context-cache.js'
 
 export function createGuardPipeline(
   dispatcher: (op: Operation) => Promise<unknown>,
   account: ITradingAccount,
   guards: OperationGuard[],
+  cacheOptions?: GuardContextCacheOptions,
 ): (op: Operation) => Promise<unknown> {
   if (guards.length === 0) return dispatcher
 
+  const cache = new GuardContextCache(account, cacheOptions)
+
   return async (op: Operation): Promise<unknown> => {
     const [positions, accountInfo] = await Promise.all([
-      account.getPositions(),
-      account.getAccount(),
+      cache.getPositions(),
+      cache.getAccount(),
     ])
 
     const ctx: GuardContext = { operation: op, positions, account: accountInfo }

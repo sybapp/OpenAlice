@@ -13,7 +13,8 @@ export class SymbolWhitelistGuard implements OperationGuard {
   }
 
   check(ctx: GuardContext): string | null {
-    const symbol = ctx.operation.params.symbol as string | undefined
+    const op = ctx.operation
+    const symbol = (op.action === 'placeOrder' || op.action === 'closePosition') ? op.params.symbol : undefined
     if (!symbol) return null
 
     if (!this.allowed.has(symbol)) {

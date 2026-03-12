@@ -14,7 +14,7 @@ export class CooldownGuard implements OperationGuard {
   check(ctx: GuardContext): string | null {
     if (ctx.operation.action !== 'placeOrder') return null
 
-    const symbol = ctx.operation.params.symbol as string
+    const symbol = ctx.operation.params.symbol ?? 'unknown'
     const now = Date.now()
     const lastTime = this.lastTradeTime.get(symbol)
 

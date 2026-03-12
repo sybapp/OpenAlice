@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'crypto'
+import { appendFile, readFile } from 'fs/promises'
 import type { ITradingGit, TradingGitConfig } from './interfaces.js'
 import type {
   CommitHash,
@@ -19,11 +20,14 @@ import type {
   GitState,
   CommitLogEntry,
   GitExportState,
+  GitArchiveMetadata,
   OperationSummary,
   PriceChangeInput,
   SimulatePriceChangeResult,
   OrderStatusUpdate,
   SyncResult,
+  PlaceOrderParams,
+  ClosePositionParams,
 } from './types.js'
 
 function generateCommitHash(content: object): CommitHash {
@@ -42,9 +46,12 @@ export class TradingGit implements ITradingGit {
   private pendingOrderIndex = new Map<string, string>()
   private currentRound: number | undefined = undefined
   private readonly config: TradingGitConfig
+  private readonly maxActiveCommits: number
+  private archiveMetadata: GitArchiveMetadata = { archivedCount: 0, oldestHash: null, newestHash: null }
 
   constructor(config: TradingGitConfig) {
     this.config = config
+    this.maxActiveCommits = config.maxActiveCommits ?? 200
   }
 
   // ==================== git add / commit / push ====================
@@ -127,6 +134,7 @@ export class TradingGit implements ITradingGit {
     this.applyPendingOrderResults(operations, results)
 
     await this.config.onCommit?.(this.exportState())
+    await this.archiveIfNeeded()
 
     // Clear staging
     this.stagingArea = []
@@ -149,11 +157,34 @@ export class TradingGit implements ITradingGit {
 
     if (symbol) {
       commits = commits.filter((c) =>
-        c.operations.some((op) => op.params.symbol === symbol),
+        c.operations.some((op) => {
+          if (op.action === 'placeOrder' || op.action === 'closePosition') return op.params.symbol === symbol
+          if (op.action === 'syncOrders') return false
+          return false
+        }),
       )
     }
 
     commits = commits.slice(0, limit)
+
+    // If we need more entries and archive exists, supplement from archive
+    if (commits.length < limit && this.archiveMetadata.archivedCount > 0 && this.config.archivePath) {
+      const needed = limit - commits.length
+      const archived = this.readArchivedCommitsSync(needed)
+      // Archived are oldest-first in file, reverse for newest-first
+      const archivedReversed = archived.reverse()
+      if (symbol) {
+        const filtered = archivedReversed.filter((c) =>
+          c.operations.some((op) => {
+            if (op.action === 'placeOrder' || op.action === 'closePosition') return op.params.symbol === symbol
+            return false
+          }),
+        )
+        commits = commits.concat(filtered.slice(0, needed))
+      } else {
+        commits = commits.concat(archivedReversed.slice(0, needed))
+      }
+    }
 
     return commits.map((c) => ({
       hash: c.hash,
@@ -174,7 +205,7 @@ export class TradingGit implements ITradingGit {
     for (let i = 0; i < commit.operations.length; i++) {
       const op = commit.operations[i]
       const result = commit.results[i]
-      const symbol = (op.params.symbol as string) || 'unknown'
+      const symbol = this.extractOperationSymbol(op)
 
       if (filterSymbol && symbol !== filterSymbol) continue
 
@@ -189,18 +220,21 @@ export class TradingGit implements ITradingGit {
     return summaries
   }
 
-  private formatOperationChange(op: Operation, result?: OperationResult): string {
-    const { action, params } = op
+  private extractOperationSymbol(op: Operation): string {
+    switch (op.action) {
+      case 'placeOrder': return op.params.symbol ?? 'unknown'
+      case 'closePosition': return op.params.symbol ?? 'unknown'
+      case 'modifyOrder': return 'unknown'
+      case 'cancelOrder': return 'unknown'
+      case 'syncOrders': return 'unknown'
+    }
+  }
 
-    switch (action) {
+  private formatOperationChange(op: Operation, result?: OperationResult): string {
+    switch (op.action) {
       case 'placeOrder': {
-        const side = params.side as string
-        const notional = params.notional as number | undefined
-        const qty = params.qty as number | undefined
-        const size = params.size as number | undefined
-        const usdSize = params.usd_size as number | undefined
-        // Unified: try notional/usd_size for dollar amount, fall back to qty/size for quantity
-        const sizeStr = notional ? `$${notional}` : usdSize ? `$${usdSize}` : qty ? `${qty}` : size ? `${size}` : '?'
+        const { side, notional, qty, size, usd_size } = op.params
+        const sizeStr = notional ? `$${notional}` : usd_size ? `$${usd_size}` : qty ? `${qty}` : size ? `${size}` : '?'
 
         if (result?.status === 'filled') {
           const price = result.filledPrice ? ` @${result.filledPrice}` : ''
@@ -210,37 +244,43 @@ export class TradingGit implements ITradingGit {
       }
 
       case 'closePosition': {
-        const qty = (params.qty ?? params.size) as number | undefined
+        const closeQty = op.params.qty ?? op.params.size
         if (result?.status === 'filled') {
           const price = result.filledPrice ? ` @${result.filledPrice}` : ''
-          const qtyStr = qty ? ` (partial: ${qty})` : ''
+          const qtyStr = closeQty ? ` (partial: ${closeQty})` : ''
           return `closed${qtyStr}${price}`
         }
         return `close (${result?.status || 'unknown'})`
       }
 
       case 'modifyOrder': {
-        const orderId = params.orderId as string
-        const changes = Object.keys(params).filter(k => k !== 'orderId')
-        return `modified ${orderId} (${changes.join(', ')})`
+        const { orderId, ...changes } = op.params
+        const changeKeys = Object.keys(changes).filter((k) => (changes as Record<string, unknown>)[k] != null)
+        return `modified ${orderId} (${changeKeys.join(', ')})`
       }
 
       case 'cancelOrder':
-        return `cancelled order ${params.orderId}`
+        return `cancelled order ${op.params.orderId}`
 
       case 'syncOrders': {
         const status = result?.status || 'unknown'
         const price = result?.filledPrice ? ` @${result.filledPrice}` : ''
         return `synced → ${status}${price}`
       }
-
-      default:
-        return `${action}`
     }
   }
 
   show(hash: CommitHash): GitCommit | null {
-    return this.commits.find((c) => c.hash === hash) ?? null
+    const found = this.commits.find((c) => c.hash === hash)
+    if (found) return found
+
+    // Fall back to archive
+    if (this.archiveMetadata.archivedCount > 0 && this.config.archivePath) {
+      const archived = this.readArchivedCommitsSync()
+      return archived.find((c) => c.hash === hash) ?? null
+    }
+
+    return null
   }
 
   status(): GitStatus {
@@ -255,13 +295,20 @@ export class TradingGit implements ITradingGit {
   // ==================== Serialization ====================
 
   exportState(): GitExportState {
-    return { commits: [...this.commits], head: this.head }
+    const state: GitExportState = { commits: [...this.commits], head: this.head }
+    if (this.archiveMetadata.archivedCount > 0) {
+      state.archive = { ...this.archiveMetadata }
+    }
+    return state
   }
 
   static restore(state: GitExportState, config: TradingGitConfig): TradingGit {
     const git = new TradingGit(config)
     git.commits = [...state.commits]
     git.head = state.head
+    if (state.archive) {
+      git.archiveMetadata = { ...state.archive }
+    }
     git.rebuildPendingOrderIndex()
     return git
   }
@@ -306,6 +353,7 @@ export class TradingGit implements ITradingGit {
     this.applySyncUpdatesToPendingIndex(updates)
 
     await this.config.onCommit?.(this.exportState())
+    await this.archiveIfNeeded()
 
     return { hash, updatedCount: updates.length, updates }
   }
@@ -482,8 +530,9 @@ export class TradingGit implements ITradingGit {
       if (!result.orderId) continue
 
       if (result.status === 'pending') {
+        const op = operations[i]
         const symbol =
-          (operations[i]?.params?.symbol as string | undefined) ??
+          (op && (op.action === 'placeOrder' || op.action === 'closePosition') ? op.params.symbol : undefined) ??
           this.pendingOrderIndex.get(result.orderId) ??
           'unknown'
         this.pendingOrderIndex.set(result.orderId, symbol)
@@ -500,6 +549,45 @@ export class TradingGit implements ITradingGit {
       } else {
         this.pendingOrderIndex.delete(update.orderId)
       }
+    }
+  }
+
+  // ==================== Archive ====================
+
+  private async archiveIfNeeded(): Promise<void> {
+    if (!this.config.archivePath) return
+    if (this.commits.length <= this.maxActiveCommits) return
+
+    const overflow = this.commits.length - this.maxActiveCommits
+    const toArchive = this.commits.splice(0, overflow)
+
+    const lines = toArchive.map((c) => JSON.stringify(c)).join('\n') + '\n'
+    await appendFile(this.config.archivePath, lines)
+
+    this.archiveMetadata = {
+      archivedCount: this.archiveMetadata.archivedCount + toArchive.length,
+      oldestHash: this.archiveMetadata.oldestHash ?? toArchive[0].hash,
+      newestHash: toArchive[toArchive.length - 1].hash,
+    }
+  }
+
+  private readArchivedCommitsSync(limit?: number): GitCommit[] {
+    if (!this.config.archivePath) return []
+    try {
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const content = readFileSync(this.config.archivePath, 'utf-8')
+      const lines = content.trim().split('\n').filter(Boolean)
+      const commits: GitCommit[] = []
+      // Read from end (newest archived) when limit is set
+      const start = limit ? Math.max(0, lines.length - limit) : 0
+      for (let i = start; i < lines.length; i++) {
+        try {
+          commits.push(JSON.parse(lines[i]) as GitCommit)
+        } catch { /* skip malformed lines */ }
+      }
+      return commits
+    } catch {
+      return []
     }
   }
 

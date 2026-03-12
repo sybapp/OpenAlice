@@ -23,11 +23,15 @@ export class BacktestAccount implements ITradingAccount {
   private holdings = new Map<string, BacktestHolding>()
   private orders: Order[] = []
   private nextOrderId = 1
+  private readonly feeRate: number
+  private readonly slippageBps: number
 
   constructor(private readonly options: BacktestAccountOptions) {
     this.id = options.id
     this.label = options.label
     this.cash = options.initialCash
+    this.feeRate = options.feeRate ?? 0
+    this.slippageBps = options.slippageBps ?? 0
   }
 
   async init(): Promise<void> {}
@@ -99,9 +103,11 @@ export class BacktestAccount implements ITradingAccount {
     const normalized = this.normalizeContract(contract)
     const holding = this.holdings.get(this.contractKey(normalized))
     if (!holding) return { success: false, error: 'Position not found' }
+    // Close long → sell, close short → buy
+    const side = holding.side === 'long' ? 'sell' : 'buy'
     return this.placeOrder({
       contract: normalized,
-      side: 'sell',
+      side,
       type: 'market',
       qty: qty ?? holding.qty,
     })
@@ -126,10 +132,12 @@ export class BacktestAccount implements ITradingAccount {
     for (const holding of this.holdings.values()) {
       const quote = await this.getQuote(holding.contract)
       const marketValue = quote.last * holding.qty
-      const unrealizedPnL = (quote.last - holding.avgEntryPrice) * holding.qty
+      const unrealizedPnL = holding.side === 'long'
+        ? (quote.last - holding.avgEntryPrice) * holding.qty
+        : (holding.avgEntryPrice - quote.last) * holding.qty
       positions.push({
         contract: holding.contract,
-        side: 'long',
+        side: holding.side,
         qty: holding.qty,
         avgEntryPrice: holding.avgEntryPrice,
         currentPrice: quote.last,
@@ -181,12 +189,16 @@ export class BacktestAccount implements ITradingAccount {
       const fill = this.resolveFillForCurrentBar(order)
       if (!fill) continue
 
-      const holding = order.side === 'sell'
-        ? this.holdings.get(this.contractKey(order.contract))
-        : undefined
-      const realizedPnLDelta = holding
-        ? (fill.price - holding.avgEntryPrice) * order.qty
-        : undefined
+      const holding = this.holdings.get(this.contractKey(order.contract))
+      let realizedPnLDelta: number | undefined
+      if (holding) {
+        // Closing a position: long close = sell, short close = buy
+        if (holding.side === 'long' && order.side === 'sell') {
+          realizedPnLDelta = (fill.price - holding.avgEntryPrice) * order.qty
+        } else if (holding.side === 'short' && order.side === 'buy') {
+          realizedPnLDelta = (holding.avgEntryPrice - fill.price) * order.qty
+        }
+      }
 
       this.applyFill(order, fill.price, currentTime)
       updates.push({
@@ -210,29 +222,35 @@ export class BacktestAccount implements ITradingAccount {
     const bar = this.options.replay.getCurrentBars().find((entry) => entry.symbol === symbol)
     if (!bar) return null
 
+    let basePrice: number | null = null
+
     if (order.type === 'market') {
-      return { price: bar.open }
-    }
-
-    if (order.type === 'limit') {
+      basePrice = bar.open
+    } else if (order.type === 'limit') {
       if (order.side === 'buy' && order.price != null && bar.low <= order.price) {
-        return { price: order.price }
+        basePrice = order.price
+      } else if (order.side === 'sell' && order.price != null && bar.high >= order.price) {
+        basePrice = order.price
       }
-      if (order.side === 'sell' && order.price != null && bar.high >= order.price) {
-        return { price: order.price }
-      }
-    }
-
-    if (order.type === 'stop') {
+    } else if (order.type === 'stop') {
       if (order.side === 'buy' && order.stopPrice != null && bar.high >= order.stopPrice) {
-        return { price: order.stopPrice }
-      }
-      if (order.side === 'sell' && order.stopPrice != null && bar.low <= order.stopPrice) {
-        return { price: order.stopPrice }
+        basePrice = Math.max(order.stopPrice, bar.open)
+      } else if (order.side === 'sell' && order.stopPrice != null && bar.low <= order.stopPrice) {
+        basePrice = Math.min(order.stopPrice, bar.open)
       }
     }
 
-    return null
+    if (basePrice == null) return null
+
+    // Apply slippage: buy pays more, sell receives less
+    if (this.slippageBps > 0) {
+      const slip = this.slippageBps / 10000
+      basePrice = order.side === 'buy'
+        ? basePrice * (1 + slip)
+        : basePrice * (1 - slip)
+    }
+
+    return { price: basePrice }
   }
 
   private applyFill(order: Order, price: number, ts: Date): void {
@@ -243,37 +261,72 @@ export class BacktestAccount implements ITradingAccount {
 
     const key = this.contractKey(order.contract)
     const holding = this.holdings.get(key)
+    const fee = this.feeRate > 0 ? price * order.qty * this.feeRate : 0
 
     if (order.side === 'buy') {
+      if (holding && holding.side === 'short') {
+        // Buy closing a short position
+        const closeQty = Math.min(order.qty, holding.qty)
+        this.cash -= price * closeQty + fee
+        this.realizedPnL += (holding.avgEntryPrice - price) * closeQty
+        const remainingQty = holding.qty - closeQty
+        if (remainingQty <= 0) {
+          this.holdings.delete(key)
+        } else {
+          this.holdings.set(key, { ...holding, qty: remainingQty })
+        }
+        // If buy qty exceeds short qty, open a long with the remainder
+        const excessQty = order.qty - closeQty
+        if (excessQty > 0) {
+          this.cash -= price * excessQty
+          this.holdings.set(key, { contract: order.contract, qty: excessQty, avgEntryPrice: price, side: 'long' })
+        }
+      } else {
+        // Buy opening/adding to a long position
+        const currentQty = holding?.qty ?? 0
+        const currentCost = (holding?.avgEntryPrice ?? 0) * currentQty
+        const fillCost = price * order.qty
+        const newQty = currentQty + order.qty
+        this.cash -= fillCost + fee
+        this.holdings.set(key, {
+          contract: order.contract,
+          qty: newQty,
+          avgEntryPrice: newQty > 0 ? (currentCost + fillCost) / newQty : price,
+          side: 'long',
+        })
+      }
+      return
+    }
+
+    // order.side === 'sell'
+    if (holding && holding.side === 'long') {
+      // Sell closing a long position
+      if (holding.qty < order.qty) {
+        throw new Error('Cannot sell more than current long position size in backtest account')
+      }
+      this.cash += price * order.qty - fee
+      this.realizedPnL += (price - holding.avgEntryPrice) * order.qty
+      const remainingQty = holding.qty - order.qty
+      if (remainingQty <= 0) {
+        this.holdings.delete(key)
+      } else {
+        this.holdings.set(key, { ...holding, qty: remainingQty })
+      }
+    } else if (!holding || holding.side === 'short') {
+      // Sell opening/adding to a short position
       const currentQty = holding?.qty ?? 0
       const currentCost = (holding?.avgEntryPrice ?? 0) * currentQty
       const fillCost = price * order.qty
       const newQty = currentQty + order.qty
-      this.cash -= fillCost
+      this.cash += fillCost - fee
       this.holdings.set(key, {
         contract: order.contract,
         qty: newQty,
         avgEntryPrice: newQty > 0 ? (currentCost + fillCost) / newQty : price,
+        side: 'short',
       })
-      return
-    }
-
-    const sellQty = order.qty
-    if (!holding || holding.qty < sellQty) {
-      throw new Error('Cannot sell more than current position size in backtest account')
-    }
-
-    this.cash += price * sellQty
-    this.realizedPnL += (price - holding.avgEntryPrice) * sellQty
-
-    const remainingQty = holding.qty - sellQty
-    if (remainingQty <= 0) {
-      this.holdings.delete(key)
     } else {
-      this.holdings.set(key, {
-        ...holding,
-        qty: remainingQty,
-      })
+      throw new Error('Unexpected holding state in backtest account')
     }
   }
 

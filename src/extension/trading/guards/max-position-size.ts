@@ -14,14 +14,15 @@ export class MaxPositionSizeGuard implements OperationGuard {
     if (ctx.operation.action !== 'placeOrder') return null
 
     const { positions, account, operation } = ctx
-    const symbol = operation.params.symbol as string
+    const p = operation.params
+    const symbol = p.symbol ?? 'unknown'
 
-    const existing = positions.find(p => p.contract.symbol === symbol)
+    const existing = positions.find(pos => pos.contract.symbol === symbol)
     const currentValue = existing?.marketValue ?? 0
 
     // Estimate added value — handle both crypto (usd_size/size) and securities (notional/qty) params
-    const dollarAmount = (operation.params.notional ?? operation.params.usd_size) as number | undefined
-    const quantity = (operation.params.qty ?? operation.params.size) as number | undefined
+    const dollarAmount = p.notional ?? p.usd_size
+    const quantity = p.qty ?? p.size
 
     let addedValue = 0
     if (dollarAmount) {

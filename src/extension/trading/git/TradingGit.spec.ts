@@ -548,4 +548,115 @@ describe('TradingGit', () => {
       expect(result.error).toContain('Invalid change format')
     })
   })
+
+  // ==================== archive ====================
+
+  describe('archive', () => {
+    let archivePath: string
+
+    beforeEach(async () => {
+      const { mkdtemp } = await import('fs/promises')
+      const { tmpdir } = await import('os')
+      const { join } = await import('path')
+      const dir = await mkdtemp(join(tmpdir(), 'trading-git-test-'))
+      archivePath = join(dir, 'archive.jsonl')
+    })
+
+    it('archives commits when exceeding maxActiveCommits', async () => {
+      const archiveConfig = makeConfig({
+        onCommit: vi.fn(),
+      })
+      const archiveGit = new TradingGit({
+        ...archiveConfig,
+        archivePath,
+        maxActiveCommits: 3,
+      })
+
+      // Push 5 commits
+      for (let i = 0; i < 5; i++) {
+        archiveGit.add(buyOp('AAPL'))
+        archiveGit.commit(`Commit ${i}`)
+        await archiveGit.push()
+      }
+
+      // Should have 3 active commits (2 archived)
+      expect(archiveGit.status().commitCount).toBe(3)
+
+      const exported = archiveGit.exportState()
+      expect(exported.commits).toHaveLength(3)
+      expect(exported.archive).toBeDefined()
+      expect(exported.archive!.archivedCount).toBe(2)
+    })
+
+    it('log reads from archive when limit exceeds active window', async () => {
+      const archiveConfig = makeConfig()
+      const archiveGit = new TradingGit({
+        ...archiveConfig,
+        archivePath,
+        maxActiveCommits: 3,
+      })
+
+      for (let i = 0; i < 5; i++) {
+        archiveGit.add(buyOp('AAPL'))
+        archiveGit.commit(`Commit ${i}`)
+        await archiveGit.push()
+      }
+
+      // Request all 5 — should get 3 active + 2 from archive
+      const entries = archiveGit.log({ limit: 10 })
+      expect(entries.length).toBe(5)
+      expect(entries[0].message).toBe('Commit 4')
+      expect(entries[4].message).toBe('Commit 0')
+    })
+
+    it('show finds commits in archive', async () => {
+      const archiveConfig = makeConfig()
+      const archiveGit = new TradingGit({
+        ...archiveConfig,
+        archivePath,
+        maxActiveCommits: 2,
+      })
+
+      archiveGit.add(buyOp('AAPL'))
+      const { hash: firstHash } = archiveGit.commit('First')
+      await archiveGit.push()
+
+      for (let i = 0; i < 3; i++) {
+        archiveGit.add(buyOp('AAPL'))
+        archiveGit.commit(`Later ${i}`)
+        await archiveGit.push()
+      }
+
+      // First commit should be archived
+      const found = archiveGit.show(firstHash)
+      expect(found).not.toBeNull()
+      expect(found!.message).toBe('First')
+    })
+
+    it('restore preserves archive metadata', async () => {
+      const archiveConfig = makeConfig()
+      const archiveGit = new TradingGit({
+        ...archiveConfig,
+        archivePath,
+        maxActiveCommits: 3,
+      })
+
+      for (let i = 0; i < 5; i++) {
+        archiveGit.add(buyOp('AAPL'))
+        archiveGit.commit(`Commit ${i}`)
+        await archiveGit.push()
+      }
+
+      const exported = archiveGit.exportState()
+      const restored = TradingGit.restore(exported, {
+        ...archiveConfig,
+        archivePath,
+        maxActiveCommits: 3,
+      })
+
+      const restoredExport = restored.exportState()
+      expect(restoredExport.archive).toEqual(exported.archive)
+      expect(restoredExport.commits).toHaveLength(3)
+    })
+  })
 })

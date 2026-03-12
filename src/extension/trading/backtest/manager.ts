@@ -15,6 +15,7 @@ import {
   type BacktestRunManifest,
   type BacktestRunRecord,
 } from './types.js'
+import type { Operation } from '../git/types.js'
 
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
@@ -206,10 +207,10 @@ function buildAIBacktestPrompt(basePrompt: string, context: { runId: string; ste
   ].join('\n')
 }
 
-function parseAIBacktestResponse(text: string): { text?: string; operations?: Array<{ action: 'placeOrder' | 'modifyOrder' | 'closePosition' | 'cancelOrder' | 'syncOrders'; params: Record<string, unknown> }> } {
+function parseAIBacktestResponse(text: string): { text?: string; operations?: Operation[] } {
   const trimmed = text.trim()
   try {
-    const parsed = JSON.parse(trimmed) as { text?: string; operations?: Array<{ action: 'placeOrder' | 'modifyOrder' | 'closePosition' | 'cancelOrder' | 'syncOrders'; params: Record<string, unknown> }> }
+    const parsed = JSON.parse(trimmed) as { text?: string; operations?: Operation[] }
     return {
       text: parsed.text,
       operations: Array.isArray(parsed.operations) ? parsed.operations : [],

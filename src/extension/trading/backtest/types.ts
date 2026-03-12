@@ -44,6 +44,10 @@ export interface BacktestAccountOptions {
     getBars(): BacktestBar[]
   }
   initialCash: number
+  /** Fee rate per trade (e.g. 0.001 = 0.1%). Default: 0 */
+  feeRate?: number
+  /** Slippage in basis points (e.g. 5 = 0.05%). Default: 0 */
+  slippageBps?: number
 }
 
 export interface BacktestStrategyContext {
@@ -135,6 +139,7 @@ export interface BacktestHolding {
   contract: Contract
   qty: number
   avgEntryPrice: number
+  side: 'long' | 'short'
 }
 
 export type BacktestRunMode = 'scripted' | 'ai'

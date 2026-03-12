@@ -5,7 +5,7 @@
  * Merges crypto-trading/wallet/types.ts and securities-trading/wallet/types.ts.
  */
 
-import type { Position, Order } from '../interfaces.js'
+import type { Position, Order, OrderType, TimeInForce } from '../interfaces.js'
 
 // ==================== Commit Hash ====================
 
@@ -21,10 +21,78 @@ export type OperationAction =
   | 'cancelOrder'
   | 'syncOrders'
 
-export interface Operation {
-  action: OperationAction
-  params: Record<string, unknown>
+// ---- Per-action param types ----
+
+export interface PlaceOrderParams {
+  aliceId?: string
+  symbol?: string
+  side: 'buy' | 'sell'
+  type: OrderType
+  qty?: number
+  notional?: number
+  price?: number
+  stopPrice?: number
+  trailingAmount?: number
+  trailingPercent?: number
+  reduceOnly?: boolean
+  timeInForce?: TimeInForce
+  goodTillDate?: string
+  extendedHours?: boolean
+  parentId?: string
+  ocaGroup?: string
+  secType?: string
+  currency?: string
+  exchange?: string
+  protection?: {
+    stopLossPct?: number
+    takeProfitPct?: number
+    stopLossPrice?: number
+    takeProfitPrice?: number
+    takeProfitSizeRatio?: number
+  }
+  /** Legacy alias for qty used by some providers */
+  size?: number
+  /** Legacy alias for notional used by some providers */
+  usd_size?: number
 }
+
+export interface ModifyOrderParams {
+  orderId: string
+  qty?: number
+  price?: number
+  stopPrice?: number
+  trailingAmount?: number
+  trailingPercent?: number
+  type?: OrderType
+  timeInForce?: TimeInForce
+  goodTillDate?: string
+}
+
+export interface ClosePositionParams {
+  aliceId?: string
+  symbol?: string
+  qty?: number
+  secType?: string
+  /** Legacy alias for qty */
+  size?: number
+}
+
+export interface CancelOrderParams {
+  orderId: string
+}
+
+export interface SyncOrdersParams {
+  orderIds: string[]
+}
+
+// ---- Discriminated union ----
+
+export type Operation =
+  | { action: 'placeOrder'; params: PlaceOrderParams }
+  | { action: 'modifyOrder'; params: ModifyOrderParams }
+  | { action: 'closePosition'; params: ClosePositionParams }
+  | { action: 'cancelOrder'; params: CancelOrderParams }
+  | { action: 'syncOrders'; params: SyncOrdersParams }
 
 // ==================== Operation Result ====================
 
@@ -115,9 +183,16 @@ export interface CommitLogEntry {
 
 // ==================== Export State ====================
 
+export interface GitArchiveMetadata {
+  archivedCount: number
+  oldestHash: CommitHash | null
+  newestHash: CommitHash | null
+}
+
 export interface GitExportState {
   commits: GitCommit[]
   head: CommitHash | null
+  archive?: GitArchiveMetadata
 }
 
 // ==================== Sync ====================

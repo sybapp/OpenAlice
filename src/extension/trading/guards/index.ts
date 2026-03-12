@@ -1,4 +1,6 @@
 export { createGuardPipeline } from './guard-pipeline.js'
+export { GuardContextCache } from './context-cache.js'
+export type { GuardContextCacheOptions } from './context-cache.js'
 export { registerGuard, resolveGuards } from './registry.js'
 export { MaxPositionSizeGuard } from './max-position-size.js'
 export { CooldownGuard } from './cooldown.js'

@@ -10,6 +10,8 @@ import type { Operation } from '../git/types.js'
 import type { AccountInfo, Position } from '../interfaces.js'
 import { MockTradingAccount, makePosition } from '../__test__/mock-account.js'
 
+import { GuardContextCache } from './context-cache.js'
+
 // ==================== Helpers ====================
 
 function makeContext(overrides: {
@@ -367,5 +369,62 @@ describe('BuyingPowerGuard', () => {
     const guards = resolveGuards([{ type: 'buying-power' }])
     expect(guards).toHaveLength(1)
     expect(guards[0].name).toBe('buying-power')
+  })
+})
+
+// ==================== GuardContextCache ====================
+
+describe('GuardContextCache', () => {
+  it('caches positions and account within TTL', async () => {
+    const account = new MockTradingAccount()
+    const cache = new GuardContextCache(account, { ttlMs: 5000 })
+
+    await cache.getPositions()
+    await cache.getPositions()
+    await cache.getAccount()
+    await cache.getAccount()
+
+    expect(account.getPositions).toHaveBeenCalledTimes(1)
+    expect(account.getAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches after invalidate()', async () => {
+    const account = new MockTradingAccount()
+    const cache = new GuardContextCache(account, { ttlMs: 5000 })
+
+    await cache.getPositions()
+    cache.invalidate()
+    await cache.getPositions()
+
+    expect(account.getPositions).toHaveBeenCalledTimes(2)
+  })
+
+  it('refetches after TTL expires', async () => {
+    const account = new MockTradingAccount()
+    const cache = new GuardContextCache(account, { ttlMs: 1 })
+
+    await cache.getPositions()
+    await new Promise((r) => setTimeout(r, 10))
+    await cache.getPositions()
+
+    expect(account.getPositions).toHaveBeenCalledTimes(2)
+  })
+
+  it('same push cycle shares one API call through guard pipeline', async () => {
+    const account = new MockTradingAccount()
+    const dispatcher = vi.fn().mockResolvedValue({ success: true })
+    const passGuard: OperationGuard = { name: 'pass', check: () => null }
+
+    const pipeline = createGuardPipeline(dispatcher, account, [passGuard])
+
+    const op1: Operation = { action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 1 } }
+    const op2: Operation = { action: 'placeOrder', params: { symbol: 'GOOG', side: 'buy', type: 'market', qty: 2 } }
+
+    await pipeline(op1)
+    await pipeline(op2)
+
+    // Both calls within 2s TTL — only 1 API call each
+    expect(account.getPositions).toHaveBeenCalledTimes(1)
+    expect(account.getAccount).toHaveBeenCalledTimes(1)
   })
 })
