@@ -168,4 +168,31 @@ describe('tradingPush source required', () => {
     expect(parsed.success).toBe(true)
     expect(parsed.data.mode).toBe('best-effort')
   })
+
+  it('rejects ambiguous provider name matching multiple accounts', async () => {
+    // Create two accounts with the same provider
+    const account1 = new MockTradingAccount({ id: 'ccxt-1', provider: 'ccxt', label: 'CCXT 1' })
+    const account2 = new MockTradingAccount({ id: 'ccxt-2', provider: 'ccxt', label: 'CCXT 2' })
+
+    const accountManager = {
+      listAccounts: () => [
+        { id: account1.id, provider: account1.provider, label: account1.label, capabilities: account1.getCapabilities() },
+        { id: account2.id, provider: account2.provider, label: account2.label, capabilities: account2.getCapabilities() },
+      ],
+      getAccount: (id: string) => {
+        if (id === account1.id) return account1
+        if (id === account2.id) return account2
+        return undefined
+      },
+    }
+
+    const tools = createTradingTools({
+      accountManager: accountManager as any,
+      getGit: () => undefined,
+      getGitState: () => undefined,
+    })
+
+    const execute = (tools.tradingPush as any).execute as (args: { source: string; mode: string }) => Promise<unknown>
+    await expect(execute({ source: 'ccxt', mode: 'best-effort' })).rejects.toThrow('Multiple accounts match')
+  })
 })

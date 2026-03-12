@@ -86,6 +86,7 @@ async function main() {
     getAccountGit: (id) => accountSetups.get(id)?.git,
     reconnectAccount,
     reconnectConnectors,
+    removeAccountSetup: (id) => { accountSetups.delete(id) },
   }
 
   for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {

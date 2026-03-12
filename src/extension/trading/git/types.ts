@@ -192,10 +192,22 @@ export interface GitArchiveMetadata {
   newestHash: CommitHash | null
 }
 
+export interface PersistedProtectionWatcher {
+  orderId: string
+  contractRef: { aliceId?: string; symbol?: string; secType?: string }
+  plan: {
+    stopLossPrice?: number; stopLossPct?: number
+    takeProfitPrice?: number; takeProfitPct?: number
+    takeProfitSizeRatio?: number
+  }
+  startedAt: number
+}
+
 export interface GitExportState {
   commits: GitCommit[]
   head: CommitHash | null
   archive?: GitArchiveMetadata
+  protectionWatchers?: PersistedProtectionWatcher[]
 }
 
 // ==================== Sync ====================

@@ -6,16 +6,18 @@ export class BuyingPowerGuard implements OperationGuard {
   check(ctx: GuardContext): string | null {
     if (ctx.operation.action !== 'placeOrder') return null
 
-    const notional = (ctx.operation.params.notional ?? ctx.operation.params.usd_size) as number | undefined
-    if (!notional || notional <= 0) return null
+    const p = ctx.operation.params
+    const notional = p.notional ?? p.usd_size
+    const estimatedNotional = notional ?? (p.qty && p.price ? p.qty * p.price : undefined)
+    if (!estimatedNotional || estimatedNotional <= 0) return null
 
-    const buyingPower = ctx.account.cash
+    const buyingPower = ctx.account.buyingPower ?? ctx.account.cash
     if (buyingPower <= 0) {
-      return `Insufficient buying power: $0 available, order requires $${notional.toFixed(2)}`
+      return `Insufficient buying power: $0 available, order requires $${estimatedNotional.toFixed(2)}`
     }
 
-    if (notional > buyingPower) {
-      return `Order notional $${notional.toFixed(2)} exceeds buying power $${buyingPower.toFixed(2)}`
+    if (estimatedNotional > buyingPower) {
+      return `Order notional $${estimatedNotional.toFixed(2)} exceeds buying power $${buyingPower.toFixed(2)}`
     }
 
     return null

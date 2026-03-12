@@ -61,6 +61,8 @@ export interface EngineContext {
   reconnectAccount: (accountId: string) => Promise<ReconnectResult>
   /** Reconnect connector plugins (Telegram, MCP-Ask, etc.). */
   reconnectConnectors: () => Promise<ReconnectResult>
+  /** Remove account setup state (git, wallet) when an account is deleted. */
+  removeAccountSetup?: (accountId: string) => void
 }
 
 /** A media attachment collected from tool results (e.g. browser screenshots). */

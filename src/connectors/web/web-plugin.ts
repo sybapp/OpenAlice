@@ -58,6 +58,16 @@ export class WebPlugin implements Plugin {
     }))
     app.use('/api/*', createAuthMiddleware(authToken))
 
+    // ==================== Auth endpoints (exempt from auth middleware) ====================
+    app.get('/api/auth/check', (c) => {
+      return c.json({ authRequired: !!authToken })
+    })
+    app.post('/api/auth/verify', async (c) => {
+      if (!authToken) return c.json({ valid: true })
+      const body = await c.req.json<{ token?: string }>()
+      return c.json({ valid: body.token === authToken })
+    })
+
     // ==================== Mount route modules ====================
     app.route('/api/chat', createChatRoutes({ ctx, session, sseClients: this.sseClients }))
     app.route('/api/media', createMediaRoutes())

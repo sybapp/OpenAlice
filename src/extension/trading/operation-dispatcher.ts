@@ -16,7 +16,7 @@ import type {
   OrderRequest,
   Position,
 } from './interfaces.js'
-import type { Operation, PlaceOrderParams } from './git/types.js'
+import type { Operation, PlaceOrderParams, PersistedProtectionWatcher } from './git/types.js'
 
 interface ProtectionPlan {
   stopLossPrice?: number
@@ -364,7 +364,14 @@ async function armProtectionForPosition(args: {
   }
 }
 
-export function createOperationDispatcher(account: ITradingAccount) {
+export interface DispatcherHandle {
+  dispatch: (op: Operation) => Promise<unknown>
+  getWatchers(): PersistedProtectionWatcher[]
+  restoreWatchers(watchers: PersistedProtectionWatcher[]): void
+  dispose(): void
+}
+
+export function createOperationDispatcher(account: ITradingAccount): DispatcherHandle {
   const protectionWatchers = new Map<string, {
     contractRef: Partial<Contract>
     plan: ProtectionPlan
@@ -455,7 +462,49 @@ export function createOperationDispatcher(account: ITradingAccount) {
     void pollProtectionWatchers()
   }
 
-  return async (op: Operation): Promise<unknown> => {
+  const getWatchers = (): PersistedProtectionWatcher[] => {
+    const result: PersistedProtectionWatcher[] = []
+    for (const [orderId, w] of protectionWatchers) {
+      result.push({
+        orderId,
+        contractRef: {
+          aliceId: w.contractRef.aliceId,
+          symbol: w.contractRef.symbol,
+          secType: w.contractRef.secType,
+        },
+        plan: w.plan,
+        startedAt: w.startedAt,
+      })
+    }
+    return result
+  }
+
+  const restoreWatchers = (watchers: PersistedProtectionWatcher[]): void => {
+    for (const w of watchers) {
+      if (protectionWatchers.has(w.orderId)) continue
+      // Skip expired watchers
+      if (Date.now() - w.startedAt > PROTECTION_WATCH_TIMEOUT_MS) continue
+      protectionWatchers.set(w.orderId, {
+        contractRef: w.contractRef,
+        plan: w.plan,
+        startedAt: w.startedAt,
+      })
+    }
+    if (protectionWatchers.size > 0) {
+      ensureProtectionPoller()
+      void pollProtectionWatchers()
+    }
+  }
+
+  const dispose = (): void => {
+    if (protectionPollTimer) {
+      clearInterval(protectionPollTimer)
+      protectionPollTimer = null
+    }
+    protectionWatchers.clear()
+  }
+
+  const dispatch = async (op: Operation): Promise<unknown> => {
     switch (op.action) {
       case 'placeOrder': {
         const p = op.params
@@ -631,4 +680,6 @@ export function createOperationDispatcher(account: ITradingAccount) {
         throw new Error(`Unknown operation action: ${op.action}`)
     }
   }
+
+  return { dispatch, getWatchers, restoreWatchers, dispose }
 }

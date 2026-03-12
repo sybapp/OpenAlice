@@ -104,7 +104,7 @@ describe('MaxPositionSizeGuard', () => {
     expect(guard.check(ctx)).toBeNull()
   })
 
-  it('allows when addedValue cannot be estimated (qty-based, no existing position)', () => {
+  it('allows when addedValue cannot be estimated (market order qty-based, no existing position, no price)', () => {
     const guard = new MaxPositionSizeGuard({ maxPercentOfEquity: 1 })
     const ctx = makeContext({
       operation: {
@@ -113,6 +113,21 @@ describe('MaxPositionSizeGuard', () => {
       },
     })
     expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('estimates value from qty + limit price for new symbol', () => {
+    const guard = new MaxPositionSizeGuard({ maxPercentOfEquity: 25 })
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'NEW_STOCK', side: 'buy', type: 'limit', qty: 100, price: 300 },
+      },
+      account: { equity: 100_000 },
+    })
+    // 100 * 300 = 30_000 = 30% > 25%
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('30.0%')
   })
 
   it('allows placeOrder without symbol (cannot estimate, let broker validate)', () => {
@@ -416,7 +431,7 @@ describe('BuyingPowerGuard', () => {
     expect(result).toContain('exceeds buying power')
   })
 
-  it('allows when no notional specified (qty-based)', () => {
+  it('allows when no notional and no price specified (market order qty-based)', () => {
     const guard = new BuyingPowerGuard()
     const ctx = makeContext({
       operation: {
@@ -425,6 +440,34 @@ describe('BuyingPowerGuard', () => {
       },
       account: { cash: 100_000 },
     })
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('rejects qty + limit price order exceeding buying power', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'limit', qty: 100, price: 200 },
+      },
+      account: { cash: 10_000 },
+    })
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('exceeds buying power')
+    expect(result).toContain('20000')
+  })
+
+  it('prefers buyingPower field over cash', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', notional: 80_000 },
+      },
+      account: { cash: 50_000, buyingPower: 100_000 },
+    })
+    // cash=50k would reject, but buyingPower=100k allows
     expect(guard.check(ctx)).toBeNull()
   })
 

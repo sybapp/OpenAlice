@@ -50,6 +50,19 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
         platforms.push(validated)
       }
       await writePlatformsConfig(platforms)
+
+      // Reconnect all running accounts that reference this platform
+      const accounts = await readAccountsConfig()
+      const affectedIds = accounts
+        .filter((a) => a.platformId === id)
+        .map((a) => a.id)
+        .filter((aid) => ctx.accountManager.has(aid))
+      if (affectedIds.length > 0) {
+        const reconnectResults = await Promise.all(
+          affectedIds.map(async (aid) => ({ id: aid, ...(await ctx.reconnectAccount(aid)) })),
+        )
+        return c.json({ ...validated, reconnected: reconnectResults })
+      }
       return c.json(validated)
     } catch (err) {
       if (err instanceof Error && err.name === 'ZodError') {
@@ -117,6 +130,12 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
         accounts.push(validated)
       }
       await writeAccountsConfig(accounts)
+
+      // Reconnect running account if config changed
+      if (ctx.accountManager.has(id)) {
+        const reconnectResult = await ctx.reconnectAccount(id)
+        return c.json({ ...validated, reconnect: reconnectResult })
+      }
       return c.json(validated)
     } catch (err) {
       if (err instanceof Error && err.name === 'ZodError') {
@@ -139,6 +158,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       if (ctx.accountManager.has(id)) {
         const account = ctx.accountManager.getAccount(id)
         ctx.accountManager.removeAccount(id)
+        ctx.removeAccountSetup?.(id)
         try { await account?.close() } catch { /* best effort */ }
       }
       return c.json({ success: true })

@@ -22,6 +22,7 @@ export interface AccountSetup {
   account: ITradingAccount
   git: ITradingGit
   getGitState: () => Promise<GitState>
+  disposeDispatcher?: () => void
 }
 
 // ==================== Wiring ====================
@@ -41,14 +42,21 @@ export function wireAccountTrading(
   },
 ): AccountSetup {
   const getGitState = createWalletStateBridge(account)
-  const dispatcher = createOperationDispatcher(account)
+  const handle = createOperationDispatcher(account)
   const guards = resolveGuards(options.guards ?? [])
-  const guardedDispatcher = createGuardPipeline(dispatcher, account, guards)
+  const guardedDispatcher = createGuardPipeline(handle.dispatch, account, guards)
+
+  const wrappedOnCommit = options.onCommit
+    ? async (state: GitExportState) => {
+        state.protectionWatchers = handle.getWatchers()
+        await options.onCommit!(state)
+      }
+    : undefined
 
   const gitConfig = {
     executeOperation: guardedDispatcher,
     getGitState,
-    onCommit: options.onCommit,
+    onCommit: wrappedOnCommit,
     archivePath: options.archivePath,
     maxActiveCommits: options.maxActiveCommits,
   }
@@ -57,7 +65,12 @@ export function wireAccountTrading(
     ? TradingGit.restore(options.savedState, gitConfig)
     : new TradingGit(gitConfig)
 
-  return { account, git, getGitState }
+  // Restore protection watchers from saved state
+  if (options.savedState?.protectionWatchers?.length) {
+    handle.restoreWatchers(options.savedState.protectionWatchers)
+  }
+
+  return { account, git, getGitState, disposeDispatcher: handle.dispose }
 }
 
 // ==================== Config → Account helpers ====================

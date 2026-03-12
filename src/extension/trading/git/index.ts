@@ -20,6 +20,7 @@ export type {
   CommitLogEntry,
   GitExportState,
   GitArchiveMetadata,
+  PersistedProtectionWatcher,
   OperationSummary,
   OrderStatusUpdate,
   SyncResult,

@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createOperationDispatcher } from './operation-dispatcher.js'
+import { createOperationDispatcher, type DispatcherHandle } from './operation-dispatcher.js'
 import { MockTradingAccount, makeOrder, makeOrderResult, makePosition } from './__test__/mock-account.js'
 import type { Operation } from './git/types.js'
 
 describe('createOperationDispatcher', () => {
   let account: MockTradingAccount
+  let handle: DispatcherHandle
   let dispatch: (op: Operation) => Promise<unknown>
 
   beforeEach(() => {
     account = new MockTradingAccount()
-    dispatch = createOperationDispatcher(account)
+    handle = createOperationDispatcher(account)
+    dispatch = handle.dispatch
   })
 
   // ==================== placeOrder ====================
@@ -511,6 +513,124 @@ describe('createOperationDispatcher', () => {
         (call) => call[0].type === 'stop' && call[0].reduceOnly === true,
       )
       expect(stopCalls.length).toBe(1)
+    })
+  })
+
+  // ==================== DispatcherHandle persistence ====================
+
+  describe('DispatcherHandle persistence', () => {
+    it('getWatchers() returns active watchers', async () => {
+      account.placeOrder.mockResolvedValue(makeOrderResult({
+        orderId: 'entry-w1',
+        filledPrice: undefined,
+        filledQty: undefined,
+      }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'limit',
+          qty: 0.5,
+          price: 90000,
+          protection: { stopLossPct: 0.8 },
+        },
+      }
+
+      await dispatch(op)
+
+      const watchers = handle.getWatchers()
+      expect(watchers).toHaveLength(1)
+      expect(watchers[0].orderId).toBe('entry-w1')
+      expect(watchers[0].contractRef.symbol).toBe('BTCUSDT')
+      expect(watchers[0].plan.stopLossPct).toBe(0.8)
+    })
+
+    it('restoreWatchers() restarts poller and can arm protection', async () => {
+      vi.useFakeTimers()
+      try {
+        account.setPositions([
+          makePosition({
+            contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+            qty: 0.5,
+            avgEntryPrice: 90000,
+            currentPrice: 90000,
+            marketValue: 45000,
+            costBasis: 45000,
+          }),
+        ])
+
+        account.placeOrder.mockResolvedValue(makeOrderResult({
+          orderId: 'prot-restored',
+          filledPrice: undefined,
+          filledQty: undefined,
+        }))
+
+        account.getOrders.mockResolvedValue([
+          makeOrder({
+            id: 'entry-restored',
+            contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+            side: 'buy',
+            type: 'limit',
+            qty: 0.5,
+            price: 90000,
+            status: 'filled',
+            filledPrice: 90000,
+            filledQty: 0.5,
+          }),
+        ])
+
+        // Create a fresh handle and restore watchers into it
+        const handle2 = createOperationDispatcher(account)
+        handle2.restoreWatchers([{
+          orderId: 'entry-restored',
+          contractRef: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+          plan: { stopLossPct: 0.8 },
+          startedAt: Date.now(),
+        }])
+
+        await vi.advanceTimersByTimeAsync(3500)
+
+        // Protection order should have been placed after poller detected fill
+        expect(account.placeOrder).toHaveBeenCalled()
+        const stopCalls = account.placeOrder.mock.calls.filter(
+          (call) => call[0].type === 'stop' && call[0].reduceOnly === true,
+        )
+        expect(stopCalls.length).toBe(1)
+
+        handle2.dispose()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('dispose() clears timer and watchers', async () => {
+      account.placeOrder.mockResolvedValue(makeOrderResult({
+        orderId: 'entry-d1',
+        filledPrice: undefined,
+        filledQty: undefined,
+      }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'limit',
+          qty: 0.5,
+          price: 90000,
+          protection: { stopLossPct: 1 },
+        },
+      }
+
+      await dispatch(op)
+      expect(handle.getWatchers()).toHaveLength(1)
+
+      handle.dispose()
+      expect(handle.getWatchers()).toHaveLength(0)
     })
   })
 })

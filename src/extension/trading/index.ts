@@ -56,6 +56,7 @@ export type {
   GitState,
   CommitLogEntry,
   GitExportState,
+  PersistedProtectionWatcher,
   OperationSummary,
   OrderStatusUpdate,
   SyncResult,
@@ -80,6 +81,7 @@ export type {
 
 // Operation Dispatcher
 export { createOperationDispatcher } from './operation-dispatcher.js'
+export type { DispatcherHandle } from './operation-dispatcher.js'
 
 // Wallet State Bridge
 export { createWalletStateBridge } from './wallet-state-bridge.js'

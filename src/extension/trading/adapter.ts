@@ -853,20 +853,13 @@ IMPORTANT: source is required — specify which account to push.`,
         ),
       }),
       execute: async ({ source, mode }) => {
-        const targets = resolveAccounts(accountManager, source)
-        const results: Array<Record<string, unknown>> = []
-
-        for (const { id } of targets) {
-          const git = resolver.getGit(id)
-          if (!git) continue
-          const status = git.status()
-          if (!status.pendingMessage) continue
-          const result = await git.push({ mode })
-          results.push({ source: id, ...result })
-        }
-
-        if (results.length === 0) return { message: 'No committed operations to push.' }
-        return results.length === 1 ? results[0] : results
+        const { id } = resolveOne(accountManager, source)
+        const git = resolver.getGit(id)
+        if (!git) return { message: 'No git instance for this account.' }
+        const status = git.status()
+        if (!status.pendingMessage) return { message: 'No committed operations to push.' }
+        const result = await git.push({ mode })
+        return { source: id, ...result }
       },
     }),
 
