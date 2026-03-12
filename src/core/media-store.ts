@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, copyFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { extname, join, resolve, relative, sep } from 'node:path'
 
 /** 256 short, common English words — one per byte value. */
 const WORDS = [
@@ -79,7 +79,19 @@ export async function persistMedia(filePath: string): Promise<string> {
   return join(dateDir, name)
 }
 
+function assertWithinMediaRoot(filePath: string): void {
+  const root = resolve(MEDIA_DIR)
+  const target = resolve(filePath)
+  const rel = relative(root, target)
+  if (rel === '' || rel === '.') return
+  if (rel.startsWith('..') || rel.includes(`${sep}..`)) {
+    throw new Error('Invalid media path: path traversal detected')
+  }
+}
+
 /** Resolve a media relative path to its absolute path on disk. */
 export function resolveMediaPath(name: string): string {
-  return join(MEDIA_DIR, name)
+  const resolved = join(MEDIA_DIR, name)
+  assertWithinMediaRoot(resolved)
+  return resolved
 }

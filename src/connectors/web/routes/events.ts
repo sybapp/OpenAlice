@@ -9,7 +9,7 @@ export function createEventsRoutes(ctx: EngineContext) {
   // Paginated query from disk (full history)
   app.get('/', async (c) => {
     const page = Number(c.req.query('page')) || 1
-    const pageSize = Number(c.req.query('pageSize')) || 100
+    const pageSize = Math.min(Number(c.req.query('pageSize')) || 100, 1000)
     const type = c.req.query('type') || undefined
     const result = await ctx.eventLog.query({ page, pageSize, type })
     return c.json(result)
@@ -31,11 +31,22 @@ export function createEventsRoutes(ctx: EngineContext) {
       })
 
       const pingInterval = setInterval(() => {
-        stream.writeSSE({ event: 'ping', data: '' }).catch(() => {})
+        stream.writeSSE({ event: 'ping', data: '' }).catch(() => {
+          clearInterval(pingInterval)
+          unsub()
+        })
       }, 30_000)
+
+      // Safety net: cap connection lifetime at 24h
+      const maxLifetime = setTimeout(() => {
+        clearInterval(pingInterval)
+        unsub()
+        stream.close().catch(() => {})
+      }, 24 * 60 * 60 * 1000)
 
       stream.onAbort(() => {
         clearInterval(pingInterval)
+        clearTimeout(maxLifetime)
         unsub()
       })
 

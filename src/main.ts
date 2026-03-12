@@ -490,14 +490,14 @@ async function main() {
 
   // Web UI is always active (no enabled flag)
   if (config.connectors.web.port) {
-    corePlugins.push(new WebPlugin({ port: config.connectors.web.port }))
+    corePlugins.push(new WebPlugin({ port: config.connectors.web.port, authToken: config.connectors.web.authToken }))
   }
 
   // Optional plugins — toggleable at runtime via reconnectConnectors()
   const optionalPlugins = new Map<string, Plugin>()
 
   if (config.connectors.mcpAsk.enabled && config.connectors.mcpAsk.port) {
-    optionalPlugins.set('mcp-ask', new McpAskPlugin({ port: config.connectors.mcpAsk.port }))
+    optionalPlugins.set('mcp-ask', new McpAskPlugin({ port: config.connectors.mcpAsk.port, authToken: config.connectors.mcpAsk.authToken }))
   }
 
   if (config.connectors.telegram.enabled && config.connectors.telegram.botToken) {
@@ -525,7 +525,7 @@ async function main() {
         optionalPlugins.delete('mcp-ask')
         changes.push('mcp-ask stopped')
       } else if (!mcpAskRunning && mcpAskWanted) {
-        const p = new McpAskPlugin({ port: fresh.connectors.mcpAsk.port! })
+        const p = new McpAskPlugin({ port: fresh.connectors.mcpAsk.port!, authToken: fresh.connectors.mcpAsk.authToken })
         await p.start(ctx)
         optionalPlugins.set('mcp-ask', p)
         changes.push('mcp-ask started')

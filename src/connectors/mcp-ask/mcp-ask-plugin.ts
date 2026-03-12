@@ -23,6 +23,7 @@ import { SessionStore, toTextHistory } from '../../core/session.js'
 
 export interface McpAskConfig {
   port: number
+  authToken?: string
 }
 
 const SESSION_PREFIX = 'mcp-ask'
@@ -114,9 +115,21 @@ export class McpAskPlugin implements Plugin {
     app.use('*', cors({
       origin: '*',
       allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'mcp-session-id', 'Last-Event-ID', 'mcp-protocol-version'],
+      allowHeaders: ['Content-Type', 'Authorization', 'mcp-session-id', 'Last-Event-ID', 'mcp-protocol-version'],
       exposeHeaders: ['mcp-session-id', 'mcp-protocol-version'],
     }))
+
+    // Optional auth token check
+    const authToken = this.config.authToken
+    if (authToken) {
+      app.use('*', async (c, next) => {
+        const header = c.req.header('Authorization')
+        if (header !== `Bearer ${authToken}`) {
+          return c.json({ error: 'Unauthorized' }, 401)
+        }
+        return next()
+      })
+    }
 
     app.all('/mcp', async (c) => {
       const transport = new WebStandardStreamableHTTPServerTransport()

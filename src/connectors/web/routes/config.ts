@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { loadConfig, writeConfigSection, readAIProviderConfig, readOpenbbConfig, validSections, type ConfigSection } from '../../../core/config.js'
 import { readAIConfig, writeAIConfig, type AIBackend } from '../../../core/ai-config.js'
+import { mask } from './mask.js'
 
 interface ConfigRouteOpts {
   onConnectorsChange?: () => Promise<void>
@@ -13,7 +14,28 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   app.get('/', async (c) => {
     try {
       const config = await loadConfig()
-      return c.json(config)
+      // Mask sensitive fields before returning
+      const masked = {
+        ...config,
+        aiProvider: {
+          ...config.aiProvider,
+          apiKeys: Object.fromEntries(
+            Object.entries(config.aiProvider.apiKeys).map(([k, v]) => [k, mask(v)]),
+          ),
+        },
+        openbb: {
+          ...config.openbb,
+          providerKeys: Object.fromEntries(
+            Object.entries(config.openbb.providerKeys).map(([k, v]) => [k, mask(v)]),
+          ),
+        },
+        connectors: {
+          ...config.connectors,
+          web: { ...config.connectors.web, authToken: mask(config.connectors.web.authToken) },
+          telegram: { ...config.connectors.telegram, botToken: mask(config.connectors.telegram.botToken) },
+        },
+      }
+      return c.json(masked)
     } catch (err) {
       return c.json({ error: String(err) }, 500)
     }

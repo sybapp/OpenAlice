@@ -62,6 +62,7 @@ export async function askClaudeCode(
     cwd = process.cwd(),
     systemPrompt,
     appendSystemPrompt,
+    timeoutMs = 600_000,
     onToolResult,
   } = config
 
@@ -105,6 +106,15 @@ export async function askClaudeCode(
     let stderr = ''
     let resultText = ''
     const messages: ClaudeCodeMessage[] = []
+
+    // Timeout: SIGTERM first, SIGKILL after 5s grace period
+    const killTimeout = setTimeout(() => {
+      logger.warn({ timeoutMs }, 'child_timeout')
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        if (!child.killed) child.kill('SIGKILL')
+      }, 5000)
+    }, timeoutMs)
 
     child.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString()
@@ -169,11 +179,14 @@ export async function askClaudeCode(
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
 
     child.on('error', (err) => {
+      clearTimeout(killTimeout)
+      child.kill()
       logger.error({ error: err.message }, 'spawn_error')
       reject(new Error(`Failed to spawn claude CLI: ${err.message}`))
     })
 
     child.on('close', (code) => {
+      clearTimeout(killTimeout)
       if (code !== 0) {
         logger.error({ code, stderr: stderr.slice(0, 500) }, 'exit_error')
         return resolve({

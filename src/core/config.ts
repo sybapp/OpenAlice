@@ -151,13 +151,17 @@ const activeHoursSchema = z.object({
 
 
 const connectorsSchema = z.object({
-  web: z.object({ port: z.number().int().positive().default(3002) }).default({ port: 3002 }),
+  web: z.object({
+    port: z.number().int().positive().default(3002),
+    authToken: z.string().min(1).optional(),
+  }).default({ port: 3002 }),
   mcp: z.object({
     port: z.number().int().positive().default(3001),
   }).default({ port: 3001 }),
   mcpAsk: z.object({
     enabled: z.boolean().default(false),
     port: z.number().int().positive().optional(),
+    authToken: z.string().min(1).optional(),
   }).default({ enabled: false }),
   telegram: z.object({
     enabled: z.boolean().default(false),

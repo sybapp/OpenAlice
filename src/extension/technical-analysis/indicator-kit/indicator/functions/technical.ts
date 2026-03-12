@@ -29,7 +29,7 @@ export function RSI(data: number[], period: number = 14): number {
   }
 
   if (avgLoss === 0) {
-    return 100
+    return avgGain === 0 ? 50 : 100
   }
 
   const rs = avgGain / avgLoss

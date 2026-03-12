@@ -7,6 +7,7 @@ import type { Plugin, EngineContext } from '../../core/types.js'
 import { SessionStore, type ContentBlock } from '../../core/session.js'
 import type { ConnectorCenter, Connector } from '../../core/connector-center.js'
 import { persistMedia } from '../../core/media-store.js'
+import { createAuthMiddleware } from './auth-middleware.js'
 import { createChatRoutes, createMediaRoutes, type SSEClient } from './routes/chat.js'
 import { createConfigRoutes, createOpenbbRoutes } from './routes/config.js'
 import { createEventsRoutes } from './routes/events.js'
@@ -20,6 +21,7 @@ import { createBacktestRoutes } from './routes/backtest.js'
 
 export interface WebConfig {
   port: number
+  authToken?: string
 }
 
 export class WebPlugin implements Plugin {
@@ -45,7 +47,16 @@ export class WebPlugin implements Plugin {
       return c.json({ error: err.message }, 500)
     })
 
-    app.use('/api/*', cors())
+    const authToken = this.config.authToken
+    if (!authToken) {
+      console.warn('web: ⚠ no authToken configured — API is open to all network traffic')
+    }
+
+    app.use('/api/*', cors({
+      origin: authToken ? (origin) => origin : '*',
+      credentials: !!authToken,
+    }))
+    app.use('/api/*', createAuthMiddleware(authToken))
 
     // ==================== Mount route modules ====================
     app.route('/api/chat', createChatRoutes({ ctx, session, sseClients: this.sseClients }))

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MaxPositionSizeGuard } from './max-position-size.js'
 import { CooldownGuard } from './cooldown.js'
 import { SymbolWhitelistGuard } from './symbol-whitelist.js'
+import { BuyingPowerGuard } from './buying-power.js'
 import { createGuardPipeline } from './guard-pipeline.js'
 import { resolveGuards, registerGuard } from './registry.js'
 import type { GuardContext, OperationGuard } from './types.js'
@@ -296,5 +297,75 @@ describe('registerGuard', () => {
     const guards = resolveGuards([{ type: 'test-custom' }])
     expect(guards).toHaveLength(1)
     expect(guards[0].name).toBe('test-custom')
+  })
+})
+
+// ==================== BuyingPowerGuard ====================
+
+describe('BuyingPowerGuard', () => {
+  it('allows order within buying power', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', notional: 50_000 },
+      },
+      account: { cash: 100_000 },
+    })
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('rejects order exceeding buying power', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', notional: 150_000 },
+      },
+      account: { cash: 100_000 },
+    })
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('exceeds buying power')
+  })
+
+  it('allows when no notional specified (qty-based)', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 100 },
+      },
+      account: { cash: 100_000 },
+    })
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('skips non-placeOrder operations', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: { action: 'closePosition', params: { symbol: 'AAPL' } },
+    })
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('rejects when cash is zero', () => {
+    const guard = new BuyingPowerGuard()
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', notional: 1000 },
+      },
+      account: { cash: 0 },
+    })
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('Insufficient buying power')
+  })
+
+  it('is resolvable from registry', () => {
+    const guards = resolveGuards([{ type: 'buying-power' }])
+    expect(guards).toHaveLength(1)
+    expect(guards[0].name).toBe('buying-power')
   })
 })

@@ -47,6 +47,35 @@ interface ProtectionIntent {
 }
 
 const protectionIntentByAccount = new WeakMap<ITradingAccount, Map<string, ProtectionIntent>>()
+const protectionLockByAccount = new WeakMap<ITradingAccount, Map<string, Promise<void>>>()
+
+function protectionLockMap(account: ITradingAccount): Map<string, Promise<void>> {
+  let map = protectionLockByAccount.get(account)
+  if (!map) { map = new Map(); protectionLockByAccount.set(account, map) }
+  return map
+}
+
+async function withProtectionLock<T>(
+  account: ITradingAccount,
+  contractRef: Partial<Contract>,
+  kind: ProtectionKind,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = protectionIntentKey(contractRef, kind)
+  if (!key) return fn()
+  const locks = protectionLockMap(account)
+  const prev = locks.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const next = new Promise<void>((r) => { release = r })
+  locks.set(key, next)
+  try {
+    await prev
+    return await fn()
+  } finally {
+    release()
+    if (locks.get(key) === next) locks.delete(key)
+  }
+}
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -217,73 +246,75 @@ async function upsertProtectionOrder(args: {
 }): Promise<void> {
   const { account, contract, side, triggerPrice, qty, kind } = args
 
-  const recentIntent = readProtectionIntent(account, contract, kind)
-  if (
-    recentIntent &&
-    recentIntent.side === side &&
-    approxEqual(recentIntent.triggerPrice, triggerPrice, PRICE_EPSILON) &&
-    approxEqual(recentIntent.qty, qty, QTY_EPSILON)
-  ) {
-    return
-  }
-
-  let pendingSameKind: Order[] = []
-  try {
-    const orders = await account.getOrders()
-    pendingSameKind = orders.filter((order) => (
-      order.status === 'pending' &&
-      order.reduceOnly === true &&
-      contractMatches(contract, order.contract) &&
-      classifyProtectionOrderType(order) === kind
-    ))
-  } catch {
-    pendingSameKind = []
-  }
-
-  const existing = pendingSameKind.find((order) => (
-    order.side === side &&
-    approxEqual(getOrderTriggerPrice(order), triggerPrice, PRICE_EPSILON) &&
-    approxEqual(order.qty, qty, QTY_EPSILON)
-  ))
-
-  if (existing) {
-    writeProtectionIntent(account, contract, kind, {
-      side,
-      triggerPrice,
-      qty,
-      orderId: existing.id,
-    })
-    return
-  }
-
-  clearProtectionIntent(account, contract, kind)
-
-  for (const order of pendingSameKind) {
-    try {
-      await account.cancelOrder(order.id)
-    } catch {
-      // Best-effort cleanup before placing the replacement protection order.
+  return withProtectionLock(account, contract, kind, async () => {
+    const recentIntent = readProtectionIntent(account, contract, kind)
+    if (
+      recentIntent &&
+      recentIntent.side === side &&
+      approxEqual(recentIntent.triggerPrice, triggerPrice, PRICE_EPSILON) &&
+      approxEqual(recentIntent.qty, qty, QTY_EPSILON)
+    ) {
+      return
     }
-  }
 
-  const result = await account.placeOrder({
-    contract,
-    side,
-    type: kind,
-    qty,
-    stopPrice: triggerPrice,
-    reduceOnly: true,
-    timeInForce: 'gtc',
-  })
+    let pendingSameKind: Order[] = []
+    try {
+      const orders = await account.getOrders()
+      pendingSameKind = orders.filter((order) => (
+        order.status === 'pending' &&
+        order.reduceOnly === true &&
+        contractMatches(contract, order.contract) &&
+        classifyProtectionOrderType(order) === kind
+      ))
+    } catch {
+      pendingSameKind = []
+    }
 
-  if (result.success) {
-    writeProtectionIntent(account, contract, kind, {
+    const existing = pendingSameKind.find((order) => (
+      order.side === side &&
+      approxEqual(getOrderTriggerPrice(order), triggerPrice, PRICE_EPSILON) &&
+      approxEqual(order.qty, qty, QTY_EPSILON)
+    ))
+
+    if (existing) {
+      writeProtectionIntent(account, contract, kind, {
+        side,
+        triggerPrice,
+        qty,
+        orderId: existing.id,
+      })
+      return
+    }
+
+    clearProtectionIntent(account, contract, kind)
+
+    for (const order of pendingSameKind) {
+      try {
+        await account.cancelOrder(order.id)
+      } catch {
+        console.warn(`protection: failed to cancel stale ${kind} order ${order.id}`)
+      }
+    }
+
+    const result = await account.placeOrder({
+      contract,
       side,
-      triggerPrice,
+      type: kind,
       qty,
-      orderId: result.orderId,
+      stopPrice: triggerPrice,
+      reduceOnly: true,
+      timeInForce: 'gtc',
     })
-  }
+
+    if (result.success) {
+      writeProtectionIntent(account, contract, kind, {
+        side,
+        triggerPrice,
+        qty,
+        orderId: result.orderId,
+      })
+    }
+  })
 }
 
 async function armProtectionForPosition(args: {
@@ -291,8 +322,9 @@ async function armProtectionForPosition(args: {
   contractRef: Partial<Contract>
   plan: ProtectionPlan
   fillPriceHint?: number
+  filledQty?: number
 }): Promise<void> {
-  const { account, contractRef, plan, fillPriceHint } = args
+  const { account, contractRef, plan, fillPriceHint, filledQty } = args
 
   const positions = await account.getPositions()
   const position = findPosition(contractRef, positions)
@@ -308,19 +340,21 @@ async function armProtectionForPosition(args: {
   const takeProfitPrice = computeTakeProfitPrice(plan, position, entryPrice)
   const protectionSide = sideForProtection(position)
 
+  const protectionQty = isFinitePositive(filledQty) ? filledQty : position.qty
+
   if (isFinitePositive(stopPrice)) {
     await upsertProtectionOrder({
       account,
       contract: position.contract,
       side: protectionSide,
       triggerPrice: stopPrice,
-      qty: position.qty,
+      qty: protectionQty,
       kind: 'stop',
     })
   }
 
   const tpRatio = plan.takeProfitSizeRatio ?? 1
-  const tpQty = position.qty * tpRatio
+  const tpQty = protectionQty * tpRatio
   if (isFinitePositive(takeProfitPrice) && isFinitePositive(tpQty)) {
     await upsertProtectionOrder({
       account,
@@ -381,6 +415,7 @@ export function createOperationDispatcher(account: ITradingAccount) {
             contractRef: watcher.contractRef,
             plan: watcher.plan,
             fillPriceHint: order.filledPrice ?? order.price,
+            filledQty: order.filledQty,
           })
           settledOrderIds.push(orderId)
         }
@@ -504,6 +539,7 @@ export function createOperationDispatcher(account: ITradingAccount) {
               contractRef: contract,
               plan: protectionPlan,
               fillPriceHint: result.filledPrice,
+              filledQty: result.filledQty,
             })
           } else if (result.orderId) {
             startProtectionWatch({
@@ -520,7 +556,10 @@ export function createOperationDispatcher(account: ITradingAccount) {
           order: result.success
             ? {
                 id: result.orderId,
-                status: result.filledPrice ? 'filled' : 'pending',
+                status: result.filledPrice
+                  ? (result.filledQty && request.qty && result.filledQty < request.qty
+                      ? 'partially_filled' : 'filled')
+                  : 'pending',
                 filledPrice: result.filledPrice,
                 filledQty: result.filledQty,
               }

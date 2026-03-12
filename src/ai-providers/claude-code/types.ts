@@ -15,6 +15,8 @@ export interface ClaudeCodeConfig {
   systemPrompt?: string
   /** Append to Claude Code's default system prompt. */
   appendSystemPrompt?: string
+  /** Timeout in ms for the child process. Default: 600_000 (10 min). */
+  timeoutMs?: number
   /**
    * Called for each tool_result block in the JSONL stream.
    * Use this to extract side-channel data (e.g. images) from tool results.

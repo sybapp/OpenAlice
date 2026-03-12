@@ -65,11 +65,22 @@ export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
       })
 
       const pingInterval = setInterval(() => {
-        stream.writeSSE({ event: 'ping', data: '' }).catch(() => {})
+        stream.writeSSE({ event: 'ping', data: '' }).catch(() => {
+          clearInterval(pingInterval)
+          sseClients.delete(clientId)
+        })
       }, 30_000)
+
+      // Safety net: cap connection lifetime at 24h
+      const maxLifetime = setTimeout(() => {
+        clearInterval(pingInterval)
+        sseClients.delete(clientId)
+        stream.close().catch(() => {})
+      }, 24 * 60 * 60 * 1000)
 
       stream.onAbort(() => {
         clearInterval(pingInterval)
+        clearTimeout(maxLifetime)
         sseClients.delete(clientId)
       })
 
@@ -93,8 +104,12 @@ export function createMediaRoutes() {
     '.svg': 'image/svg+xml',
   }
 
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+  const NAME_RE = /^[a-z]+-[a-z]+-[a-z]+\.[a-z]+$/
+
   app.get('/:date/:name', async (c) => {
     const { date, name } = c.req.param()
+    if (!DATE_RE.test(date) || !NAME_RE.test(name)) return c.notFound()
     const filePath = resolveMediaPath(join(date, name))
 
     try {

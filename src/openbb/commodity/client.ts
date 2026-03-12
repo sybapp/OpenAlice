@@ -87,6 +87,7 @@ export class OpenBBCommodityClient {
     if (res.status === 204) return []
 
     const envelope = (await res.json()) as OBBjectResponse<T>
-    return envelope.results ?? []
+    const results = envelope.results ?? []
+    return Array.isArray(results) ? results : []
   }
 }

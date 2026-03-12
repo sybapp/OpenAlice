@@ -5,13 +5,7 @@ import {
   readAccountsConfig, writeAccountsConfig,
   platformConfigSchema, accountConfigSchema,
 } from '../../../core/config.js'
-
-/** Mask a secret string: show last 4 chars, prefix with "****" */
-function mask(value: string | undefined): string | undefined {
-  if (!value) return value
-  if (value.length <= 4) return '****'
-  return '****' + value.slice(-4)
-}
+import { mask } from './mask.js'
 
 /** Trading config CRUD routes: platforms + accounts */
 export function createTradingConfigRoutes(ctx: EngineContext) {

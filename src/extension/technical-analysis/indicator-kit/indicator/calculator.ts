@@ -288,16 +288,25 @@ export class IndicatorCalculator {
       throw new Error(`Binary operations require numbers, got ${typeof left} and ${typeof right}`)
     }
 
+    let result: number
     switch (node.operator) {
-      case '+': return left + right
-      case '-': return left - right
-      case '*': return left * right
+      case '+': result = left + right; break
+      case '-': result = left - right; break
+      case '*': result = left * right; break
       case '/':
         if (right === 0) throw new Error('Division by zero')
-        return left / right
+        result = left / right; break
       default:
         throw new Error(`Unknown operator: ${String(node.operator)}`)
     }
+    return this.validateNumericResult(result, `${left} ${String(node.operator)} ${right}`)
+  }
+
+  private validateNumericResult(value: number, context: string): number {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Non-finite result in ${context}: ${value}`)
+    }
+    return value
   }
 
   private async executeArrayAccess(node: ArrayAccessNode): Promise<number> {

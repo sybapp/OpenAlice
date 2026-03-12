@@ -917,6 +917,13 @@ Use this after placing limit/stop orders to check if they've been filled.`,
             if (!isProtectionOrder(String(order.type ?? ''))) continue
             if (symbolsWithPosition.has(orderSymbol)) continue
 
+            // Grace period: skip recently created orders (< 30s) to avoid cancelling
+            // protection orders that were just placed for a new position
+            if ((order as { createdAt?: string }).createdAt) {
+              const age = Date.now() - new Date((order as { createdAt?: string }).createdAt!).getTime()
+              if (age < 30_000) continue
+            }
+
             const cancelled = await account.cancelOrder(order.id)
             if (!cancelled) continue
 

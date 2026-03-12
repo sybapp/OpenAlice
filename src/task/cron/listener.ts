@@ -100,6 +100,11 @@ export function createCronListener(opts: CronListenerOpts): CronListener {
     // Guard: skip if already processing (serial execution)
     if (processing) {
       console.warn(`cron-listener: skipping job ${payload.jobId} (already processing)`)
+      await eventLog.append('cron.skipped', {
+        jobId: payload.jobId,
+        jobName: payload.jobName,
+        reason: 'overlap — previous job still processing',
+      })
       return
     }
 

@@ -33,6 +33,24 @@ const DEFAULT_MAX_HISTORY = 50
 const DEFAULT_PREAMBLE =
   'The following is the recent conversation history. Use it as context if it references earlier events or decisions.'
 
+// ==================== Async Mutex ====================
+
+const sessionLocks = new WeakMap<SessionStore, Promise<void>>()
+
+async function withSessionLock<T>(session: SessionStore, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(session) ?? Promise.resolve()
+  let release!: () => void
+  const next = new Promise<void>((r) => { release = r })
+  sessionLocks.set(session, next)
+  try {
+    await prev
+    return await fn()
+  } finally {
+    release()
+    if (sessionLocks.get(session) === next) sessionLocks.delete(session)
+  }
+}
+
 // ==================== Public ====================
 
 /**
@@ -46,6 +64,7 @@ export async function askClaudeCodeWithSession(
   session: SessionStore,
   config: ClaudeCodeSessionConfig,
 ): Promise<ClaudeCodeSessionResult> {
+  return withSessionLock(session, async () => {
   const maxHistory = config.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
   const preamble = config.historyPreamble ?? DEFAULT_PREAMBLE
 
@@ -111,4 +130,5 @@ export async function askClaudeCodeWithSession(
   // 7. Return unified result
   const prefix = result.ok ? '' : '[error] '
   return { text: prefix + result.text, media }
+  }) // end withSessionLock
 }

@@ -2,11 +2,13 @@ import type { OperationGuard, GuardRegistryEntry } from './types.js'
 import { MaxPositionSizeGuard } from './max-position-size.js'
 import { CooldownGuard } from './cooldown.js'
 import { SymbolWhitelistGuard } from './symbol-whitelist.js'
+import { BuyingPowerGuard } from './buying-power.js'
 
 const builtinGuards: GuardRegistryEntry[] = [
   { type: 'max-position-size', create: (opts) => new MaxPositionSizeGuard(opts) },
   { type: 'cooldown',          create: (opts) => new CooldownGuard(opts) },
   { type: 'symbol-whitelist',  create: (opts) => new SymbolWhitelistGuard(opts) },
+  { type: 'buying-power',      create: () => new BuyingPowerGuard() },
 ]
 
 const registry = new Map<string, GuardRegistryEntry['create']>(

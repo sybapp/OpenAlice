@@ -400,4 +400,117 @@ describe('createOperationDispatcher', () => {
       await expect(dispatch(op)).rejects.toThrow('Unknown operation action')
     })
   })
+
+  // ==================== partial fill ====================
+
+  describe('partial fill', () => {
+    it('returns partially_filled status when filledQty < requested qty', async () => {
+      account.placeOrder.mockResolvedValue(makeOrderResult({
+        orderId: 'ord-partial',
+        filledPrice: 150,
+        filledQty: 3,
+      }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 10 },
+      }
+
+      const result = await dispatch(op) as Record<string, unknown>
+      expect(result.success).toBe(true)
+      const order = result.order as Record<string, unknown>
+      expect(order.status).toBe('partially_filled')
+      expect(order.filledQty).toBe(3)
+    })
+
+    it('uses filledQty for protection order qty on partial fill', async () => {
+      account.setPositions([
+        makePosition({
+          contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
+          qty: 0.3,
+          avgEntryPrice: 90000,
+          currentPrice: 90000,
+          marketValue: 27000,
+          costBasis: 27000,
+        }),
+      ])
+
+      account.placeOrder
+        .mockResolvedValueOnce(makeOrderResult({ orderId: 'entry-partial', filledPrice: 90000, filledQty: 0.3 }))
+        .mockResolvedValue(makeOrderResult({ orderId: 'prot-partial', filledPrice: undefined, filledQty: undefined }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'market',
+          qty: 0.5,
+          protection: { stopLossPct: 1 },
+        },
+      }
+
+      await dispatch(op)
+
+      await vi.waitFor(() => {
+        expect(account.placeOrder).toHaveBeenCalledTimes(2)
+      })
+
+      // Protection order should use filledQty (0.3), not position.qty or request.qty
+      expect(account.placeOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        type: 'stop',
+        qty: 0.3,
+        reduceOnly: true,
+      }))
+    })
+  })
+
+  // ==================== concurrent protection ====================
+
+  describe('concurrent protection upsert', () => {
+    it('serializes concurrent upsert calls — only one placeOrder per key', async () => {
+      account.setPositions([
+        makePosition({
+          contract: { aliceId: 'binance-ETHUSDT', symbol: 'ETHUSDT', secType: 'CRYPTO' },
+          qty: 1,
+          avgEntryPrice: 3000,
+          currentPrice: 3000,
+          marketValue: 3000,
+          costBasis: 3000,
+        }),
+      ])
+
+      // First call places the order, second should see the intent and skip
+      account.placeOrder
+        .mockResolvedValueOnce(makeOrderResult({ orderId: 'entry-1', filledPrice: 3000, filledQty: 1 }))
+        .mockResolvedValue(makeOrderResult({ orderId: 'prot-1', filledPrice: undefined, filledQty: undefined }))
+
+      const op: Operation = {
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-ETHUSDT',
+          symbol: 'ETHUSDT',
+          side: 'buy',
+          type: 'market',
+          qty: 1,
+          protection: { stopLossPct: 2 },
+        },
+      }
+
+      // Fire two dispatches concurrently
+      await Promise.all([dispatch(op), dispatch(op)])
+
+      await vi.waitFor(() => {
+        // entry order + one stop loss = 2 calls (not 3 — second stop should be deduped)
+        expect(account.placeOrder.mock.calls.length).toBeGreaterThanOrEqual(2)
+      })
+
+      // Count stop-loss placeOrder calls
+      const stopCalls = account.placeOrder.mock.calls.filter(
+        (call) => call[0].type === 'stop' && call[0].reduceOnly === true,
+      )
+      expect(stopCalls.length).toBe(1)
+    })
+  })
 })
