@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ClaudeCodeProvider } from './claude-code-provider.js'
 import { readAgentConfig } from '../../core/config.js'
+import { streamFromResult } from '../../core/ai-provider.js'
 import { askClaudeCodeWithSession } from './session.js'
 
 vi.mock('../../core/config.js', () => ({
@@ -8,7 +9,7 @@ vi.mock('../../core/config.js', () => ({
 }))
 
 vi.mock('./session.js', () => ({
-  askClaudeCodeWithSession: vi.fn(async () => ({ text: 'ok', media: [] })),
+  askClaudeCodeWithSession: vi.fn(() => streamFromResult({ text: 'ok', media: [] })),
 }))
 
 vi.mock('../../core/skills/session-skill.js', () => ({

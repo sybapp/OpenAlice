@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto'
 import type { ModelMessage, Tool } from 'ai'
-import type { AIProvider, AskOptions, ProviderResult } from '../../core/ai-provider.js'
+import { StreamableResult, type AIProvider, type AskOptions, type ProviderEvent, type ProviderResult } from '../../core/ai-provider.js'
 import type { Agent } from './agent.js'
 import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
@@ -21,6 +21,7 @@ import { createAgent } from './agent.js'
 import { getSkillPack } from '../../core/skills/registry.js'
 import { buildSkillPromptText, getSkillToolPolicy } from '../../core/skills/policy.js'
 import { getSessionSkillId } from '../../core/skills/session-skill.js'
+import { createChannel } from '../../core/async-channel.js'
 
 export class VercelAIProvider implements AIProvider {
   private cachedAgents = new Map<string, Agent>()
@@ -80,35 +81,60 @@ export class VercelAIProvider implements AIProvider {
     return { text: result.text ?? '', media }
   }
 
-  async askWithSession(prompt: string, session: SessionStore, _opts?: AskOptions): Promise<ProviderResult> {
-    const { agent } = await this.resolveAgentForSession(session)
+  askWithSession(prompt: string, session: SessionStore, _opts?: AskOptions): StreamableResult {
+    const self = this
 
-    await session.appendUser(prompt, 'human')
+    async function* generate(): AsyncGenerator<ProviderEvent> {
+      const { agent } = await self.resolveAgentForSession(session)
 
-    const compactionResult = await compactIfNeeded(
-      session,
-      this.compaction,
-      async (summarizePrompt) => {
-        const r = await agent.generate({ prompt: summarizePrompt })
-        return r.text ?? ''
-      },
-    )
+      await session.appendUser(prompt, 'human')
 
-    const entries = compactionResult.activeEntries ?? await session.readActive()
-    const messages = toModelMessages(entries)
+      const compactionResult = await compactIfNeeded(
+        session,
+        self.compaction,
+        async (summarizePrompt) => {
+          const r = await agent.generate({ prompt: summarizePrompt })
+          return r.text ?? ''
+        },
+      )
 
-    const media: MediaAttachment[] = []
-    const result = await agent.generate({
-      messages: messages as ModelMessage[],
-      onStepFinish: (step) => {
-        for (const tr of step.toolResults) {
-          media.push(...extractMediaFromToolOutput(tr.output))
-        }
-      },
-    })
+      const entries = compactionResult.activeEntries ?? await session.readActive()
+      const messages = toModelMessages(entries)
+      const channel = createChannel<ProviderEvent>()
+      const media: MediaAttachment[] = []
 
-    const text = result.text ?? ''
-    await session.appendAssistant(text, 'engine')
-    return { text, media }
+      const resultPromise = agent.generate({
+        messages: messages as ModelMessage[],
+        onStepFinish: (step) => {
+          for (const tc of step.toolCalls) {
+            channel.push({ type: 'tool_use', id: tc.toolCallId, name: tc.toolName, input: tc.input })
+          }
+          for (const tr of step.toolResults) {
+            media.push(...extractMediaFromToolOutput(tr.output))
+            channel.push({
+              type: 'tool_result',
+              tool_use_id: tr.toolCallId,
+              content: typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output ?? ''),
+            })
+          }
+          if (step.text?.trim()) {
+            channel.push({ type: 'text', text: step.text })
+          }
+        },
+      })
+
+      resultPromise
+        .then(() => channel.close())
+        .catch((err) => channel.error(err instanceof Error ? err : new Error(String(err))))
+
+      yield* channel
+
+      const result = await resultPromise
+      const text = result.text ?? ''
+      await session.appendAssistant(text, 'engine')
+      yield { type: 'done', result: { text, media } }
+    }
+
+    return new StreamableResult(generate())
   }
 }

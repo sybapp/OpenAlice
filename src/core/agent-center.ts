@@ -8,7 +8,7 @@
  * Future: subagent orchestration will be managed here.
  */
 
-import type { AIProvider, AskOptions, ProviderResult } from './ai-provider.js'
+import type { AIProvider, AskOptions, ProviderResult, StreamableResult } from './ai-provider.js'
 import type { SessionStore } from './session.js'
 
 export class AgentCenter {
@@ -20,7 +20,7 @@ export class AgentCenter {
   }
 
   /** Prompt with session history — routed through the configured AI provider. */
-  async askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): Promise<ProviderResult> {
+  askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): StreamableResult {
     return this.provider.askWithSession(prompt, session, opts)
   }
 }

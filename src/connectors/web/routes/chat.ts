@@ -23,17 +23,32 @@ export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
   const app = new Hono()
 
   app.post('/', async (c) => {
-    const body = await c.req.json<{ message?: string }>()
+    const body = await c.req.json<{ message?: string; requestId?: string }>()
     const message = body.message?.trim()
     if (!message) return c.json({ error: 'message is required' }, 400)
+    const requestId = body.requestId?.trim() || randomUUID()
 
     const receivedEntry = await ctx.eventLog.append('message.received', {
       channel: 'web', to: 'default', prompt: message,
     })
 
-    const result = await ctx.engine.askWithSession(message, session, {
+    const resultStream = ctx.engine.askWithSession(message, session, {
       historyPreamble: 'The following is the recent conversation from the Web UI. Use it as context if the user references earlier messages.',
     })
+
+    for await (const event of resultStream) {
+      if (event.type === 'done') continue
+      const data = JSON.stringify({
+        type: 'stream',
+        requestId,
+        event,
+      })
+      for (const client of sseClients.values()) {
+        try { client.send(data) } catch { /* client disconnected */ }
+      }
+    }
+
+    const result = await resultStream
 
     await ctx.eventLog.append('message.sent', {
       channel: 'web', to: 'default', prompt: message,
@@ -47,7 +62,7 @@ export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
       media.push({ type: 'image', url: `/api/media/${name}` })
     }
 
-    return c.json({ text: result.text, media })
+    return c.json({ text: result.text, media, requestId })
   })
 
   app.get('/history', async (c) => {

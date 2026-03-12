@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { api, type ChatHistoryItem, type ToolCall } from '../api'
+import { api, type ChatHistoryItem, type StreamingToolCall, type ToolCall } from '../api'
 import { useSSE } from '../hooks/useSSE'
-import { ChatMessage, ToolCallGroup, ThinkingIndicator } from '../components/ChatMessage'
+import { ChatMessage, StreamingToolGroup, ThinkingIndicator, ToolCallGroup } from '../components/ChatMessage'
 import { ChatInput } from '../components/ChatInput'
 
 /** Unified display item for the message list. */
@@ -17,10 +17,15 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
   const [messages, setMessages] = useState<DisplayItem[]>([])
   const [isWaiting, setIsWaiting] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [streamTools, setStreamTools] = useState<StreamingToolCall[]>([])
   const nextId = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const currentRequestIdRef = useRef<string | null>(null)
+  const streamTextRef = useRef('')
+  const streamToolsRef = useRef<StreamingToolCall[]>([])
 
   // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -29,7 +34,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
     }
   }, [])
 
-  useEffect(scrollToBottom, [messages, isWaiting, scrollToBottom])
+  useEffect(scrollToBottom, [messages, isWaiting, streamText, streamTools, scrollToBottom])
 
   // Detect user scroll
   useEffect(() => {
@@ -63,6 +68,46 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
   useSSE({
     url: '/api/chat/events',
     onMessage: (data) => {
+      if (data.type === 'stream') {
+        if (!currentRequestIdRef.current || data.requestId !== currentRequestIdRef.current) {
+          return
+        }
+        const event = data.event
+        if (event.type === 'tool_use') {
+          setStreamTools((prev) => {
+            const next = [
+              ...prev,
+              {
+                id: event.id,
+                name: event.name,
+                input: JSON.stringify(event.input),
+                status: 'running' as const,
+              },
+            ]
+            streamToolsRef.current = next
+            return next
+          })
+          return
+        }
+        if (event.type === 'tool_result') {
+          setStreamTools((prev) => {
+            const next = prev.map((call) =>
+              call.id === event.tool_use_id
+                ? { ...call, status: 'done' as const, result: event.content }
+                : call,
+            )
+            streamToolsRef.current = next
+            return next
+          })
+          return
+        }
+        if (event.type === 'text') {
+          streamTextRef.current += event.text
+          setStreamText(streamTextRef.current)
+        }
+        return
+      }
+
       if (data.type === 'message' && data.text) {
         const role = data.kind === 'message' ? 'assistant' : 'notification'
         setMessages((prev) => [
@@ -76,23 +121,55 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
 
   // Send message
   const handleSend = useCallback(async (text: string) => {
+    const requestId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+    currentRequestIdRef.current = requestId
+    streamTextRef.current = ''
+    streamToolsRef.current = []
+    setStreamText('')
+    setStreamTools([])
     setMessages((prev) => [...prev, { kind: 'text', role: 'user', text, _id: nextId.current++ }])
     setIsWaiting(true)
 
     try {
-      const data = await api.chat.send(text)
+      const data = await api.chat.send(text, requestId)
+      const streamedCalls = streamToolsRef.current.map<ToolCall>((call) => ({
+        name: call.name,
+        input: call.input,
+        result: call.result,
+      }))
 
-      if (data.text) {
+      setMessages((prev) => {
         const media = data.media?.length ? data.media : undefined
-        setMessages((prev) => [...prev, { kind: 'text', role: 'assistant', text: data.text, media, _id: nextId.current++ }])
-      }
+        const next = [...prev]
+        if (streamedCalls.length > 0) {
+          next.push({ kind: 'tool_calls', calls: streamedCalls, _id: nextId.current++ })
+        }
+        if (data.text) {
+          next.push({ kind: 'text', role: 'assistant', text: data.text, media, _id: nextId.current++ })
+        }
+        return next
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'
-      setMessages((prev) => [
-        ...prev,
-        { kind: 'text', role: 'notification', text: `Error: ${msg}`, _id: nextId.current++ },
-      ])
+      setMessages((prev) => {
+        const streamedCalls = streamToolsRef.current.map<ToolCall>((call) => ({
+          name: call.name,
+          input: call.input,
+          result: call.result,
+        }))
+        const next = [...prev]
+        if (streamedCalls.length > 0) {
+          next.push({ kind: 'tool_calls', calls: streamedCalls, _id: nextId.current++ })
+        }
+        next.push({ kind: 'text', role: 'notification', text: `Error: ${msg}`, _id: nextId.current++ })
+        return next
+      })
     } finally {
+      currentRequestIdRef.current = null
+      streamTextRef.current = ''
+      streamToolsRef.current = []
+      setStreamText('')
+      setStreamTools([])
       setIsWaiting(false)
     }
   }, [])
@@ -154,9 +231,23 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
               </div>
             )
           })}
+          {streamTools.length > 0 && (
+            <div className={`${messages.length > 0 ? 'mt-1' : ''}`}>
+              <StreamingToolGroup calls={streamTools} />
+            </div>
+          )}
+          {streamText && (
+            <div className={`${messages.length > 0 || streamTools.length > 0 ? 'mt-1' : ''}`}>
+              <ChatMessage
+                role="assistant"
+                text={streamText}
+                isGrouped={streamTools.length > 0}
+              />
+            </div>
+          )}
           {isWaiting && (
-            <div className={`${messages.length > 0 ? 'mt-5' : ''}`}>
-              <ThinkingIndicator />
+            <div className={`${messages.length > 0 || streamTools.length > 0 || streamText ? 'mt-1' : ''}`}>
+              <ThinkingIndicator isGrouped={streamTools.length > 0 || !!streamText} />
             </div>
           )}
         </div>

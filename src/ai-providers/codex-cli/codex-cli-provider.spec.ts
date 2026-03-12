@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CodexCliProvider } from './codex-cli-provider.js'
 import { readAgentConfig, readAIProviderConfig } from '../../core/config.js'
+import { streamFromResult } from '../../core/ai-provider.js'
 import { askCodexCliWithSession } from './session.js'
 
 vi.mock('../../core/config.js', () => ({
@@ -9,7 +10,7 @@ vi.mock('../../core/config.js', () => ({
 }))
 
 vi.mock('./session.js', () => ({
-  askCodexCliWithSession: vi.fn(async () => ({ text: 'ok', media: [] })),
+  askCodexCliWithSession: vi.fn(() => streamFromResult({ text: 'ok', media: [] })),
 }))
 
 vi.mock('../../core/skills/session-skill.js', () => ({

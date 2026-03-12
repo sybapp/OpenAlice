@@ -64,6 +64,8 @@ export async function askClaudeCode(
     appendSystemPrompt,
     timeoutMs = 600_000,
     onToolResult,
+    onToolUse,
+    onText,
   } = config
 
   // Merge: explicit config overrides mode defaults
@@ -136,8 +138,10 @@ export async function askClaudeCode(
               if (block.type === 'tool_use') {
                 logToolCall(block.name, block.input)
                 logger.info({ tool: block.name, input: block.input }, 'tool_use')
+                onToolUse?.({ id: block.id, name: block.name, input: block.input })
                 blocks.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input })
               } else if (block.type === 'text') {
+                onText?.(block.text)
                 blocks.push({ type: 'text', text: block.text })
               }
             }

@@ -5,7 +5,7 @@
  */
 
 import { resolve } from 'node:path'
-import type { AIProvider, AskOptions, ProviderResult } from '../../core/ai-provider.js'
+import { StreamableResult, type AIProvider, type AskOptions, type ProviderEvent, type ProviderResult } from '../../core/ai-provider.js'
 import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
 import type { CodexCliConfig } from './types.js'
@@ -57,16 +57,23 @@ export class CodexCliProvider implements AIProvider {
     return { text: result.text, media: [] }
   }
 
-  async askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): Promise<ProviderResult> {
-    const config = await this.resolveConfig()
-    const skillId = await getSessionSkillId(session)
-    const skill = skillId ? await getSkillPack(skillId) : null
-    const skillAwareConfig = this.mergeSkillConfig(config, skill, opts?.appendSystemPrompt)
-    return askCodexCliWithSession(prompt, session, {
-      codexCli: skillAwareConfig,
-      compaction: this.compaction,
-      ...opts,
-      systemPrompt: opts?.systemPrompt ?? this.systemPrompt,
-    })
+  askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): StreamableResult {
+    const self = this
+
+    async function* generate(): AsyncGenerator<ProviderEvent> {
+      const config = await self.resolveConfig()
+      const skillId = await getSessionSkillId(session)
+      const skill = skillId ? await getSkillPack(skillId) : null
+      const skillAwareConfig = self.mergeSkillConfig(config, skill, opts?.appendSystemPrompt)
+
+      yield* askCodexCliWithSession(prompt, session, {
+        codexCli: skillAwareConfig,
+        compaction: self.compaction,
+        ...opts,
+        systemPrompt: opts?.systemPrompt ?? self.systemPrompt,
+      })
+    }
+
+    return new StreamableResult(generate())
   }
 }

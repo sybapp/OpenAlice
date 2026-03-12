@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from 'react'
-import type { ToolCall } from '../api'
+import type { StreamingToolCall, ToolCall } from '../api'
 
 interface ChatMessageProps {
   role: 'user' | 'assistant' | 'notification'
@@ -129,20 +129,57 @@ export function ToolCallGroup({ calls, timestamp }: ToolCallGroupProps) {
   )
 }
 
-export function ThinkingIndicator() {
+interface ThinkingIndicatorProps {
+  isGrouped?: boolean
+}
+
+export function ThinkingIndicator({ isGrouped = false }: ThinkingIndicatorProps) {
   return (
     <div className="flex flex-col items-start message-enter">
-      <div className="flex items-center gap-2 mb-1.5">
-        <AliceAvatar />
-        <span className="text-[12px] text-text-muted font-medium">Alice</span>
-      </div>
-      <div className="text-text-muted ml-8">
+      {!isGrouped && (
+        <div className="flex items-center gap-2 mb-1.5">
+          <AliceAvatar />
+          <span className="text-[12px] text-text-muted font-medium">Alice</span>
+        </div>
+      )}
+      <div className={`text-text-muted ${isGrouped ? 'ml-8' : 'ml-8'}`}>
         <div className="flex">
           <span className="thinking-dot">.</span>
           <span className="thinking-dot">.</span>
           <span className="thinking-dot">.</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+interface StreamingToolGroupProps {
+  calls: StreamingToolCall[]
+}
+
+export function StreamingToolGroup({ calls }: StreamingToolGroupProps) {
+  return (
+    <div className="flex flex-col items-start ml-8 gap-2">
+      {calls.map((call) => (
+        <div key={call.id} className="w-full max-w-[90%] rounded-lg border border-border bg-bg-secondary/60 px-3 py-2">
+          <div className="flex items-center gap-2 text-[12px] text-text-muted">
+            <span className="inline-flex h-4 w-4 items-center justify-center">
+              {call.status === 'running' ? (
+                <span className="h-2.5 w-2.5 rounded-full border border-accent/70 border-t-transparent animate-spin" />
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </span>
+            <span className="font-medium text-text">{call.name}</span>
+          </div>
+          <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-text-muted/80">{call.input}</pre>
+          {call.result && (
+            <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-green/80">{call.result}</pre>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

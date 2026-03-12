@@ -1,12 +1,12 @@
 import { fetchJson, fetchJsonOrThrow, headers, withAuthQuery } from './client'
-import type { ChatResponse, ChatHistoryItem } from './types'
+import type { ChatResponse, ChatHistoryItem, ChatStreamEnvelope } from './types'
 
 export const chatApi = {
-  async send(message: string): Promise<ChatResponse> {
+  async send(message: string, requestId: string): Promise<ChatResponse> {
     return fetchJsonOrThrow('/api/chat', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, requestId }),
     }, 'Send failed')
   },
 
@@ -14,7 +14,7 @@ export const chatApi = {
     return fetchJson(`/api/chat/history?limit=${limit}`)
   },
 
-  connectSSE(onMessage: (data: { type: string; kind?: string; text: string; media?: Array<{ type: string; url: string }> }) => void): EventSource {
+  connectSSE(onMessage: (data: ChatStreamEnvelope | { type: string; kind?: string; text: string; media?: Array<{ type: string; url: string }> }) => void): EventSource {
     const es = new EventSource(withAuthQuery('/api/chat/events'))
     es.onmessage = (event) => {
       try {

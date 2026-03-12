@@ -2,9 +2,12 @@ import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
 import type { MediaAttachment } from '../../core/types.js'
 import type { CodexCliConfig } from './types.js'
+import type { ProviderEvent } from '../../core/ai-provider.js'
+import { StreamableResult } from '../../core/ai-provider.js'
 import { toTextHistory } from '../../core/session.js'
 import { compactIfNeeded } from '../../core/compaction.js'
 import { askCodexCli } from './provider.js'
+import { createChannel } from '../../core/async-channel.js'
 
 export interface CodexCliSessionConfig {
   codexCli: CodexCliConfig
@@ -23,57 +26,82 @@ const DEFAULT_MAX_HISTORY = 50
 const DEFAULT_PREAMBLE =
   'The following is the recent conversation history. Use it as context if it references earlier events or decisions.'
 
-export async function askCodexCliWithSession(
+export function askCodexCliWithSession(
   prompt: string,
   session: SessionStore,
   config: CodexCliSessionConfig,
-): Promise<CodexCliSessionResult> {
-  const maxHistory = config.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
-  const preamble = config.historyPreamble ?? DEFAULT_PREAMBLE
+): StreamableResult {
+  const channel = createChannel<ProviderEvent>()
 
-  await session.appendUser(prompt, 'human')
+  const resultPromise = (async (): Promise<CodexCliSessionResult> => {
+    const maxHistory = config.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
+    const preamble = config.historyPreamble ?? DEFAULT_PREAMBLE
 
-  const compactionResult = await compactIfNeeded(
-    session,
-    config.compaction,
-    async (summarizePrompt) => {
-      const r = await askCodexCli(summarizePrompt, {
-        ...config.codexCli,
-      })
-      return r.text
-    },
-  )
+    await session.appendUser(prompt, 'human')
 
-  const entries = compactionResult.activeEntries ?? await session.readActive()
-  const textHistory = toTextHistory(entries).slice(-maxHistory)
+    const compactionResult = await compactIfNeeded(
+      session,
+      config.compaction,
+      async (summarizePrompt) => {
+        const r = await askCodexCli(summarizePrompt, {
+          ...config.codexCli,
+        })
+        return r.text
+      },
+    )
 
-  let fullPrompt: string
-  if (textHistory.length > 0) {
-    const lines = textHistory.map((entry) => {
-      const tag = entry.role === 'user' ? 'User' : 'Bot'
-      return `[${tag}] ${entry.text}`
+    const entries = compactionResult.activeEntries ?? await session.readActive()
+    const textHistory = toTextHistory(entries).slice(-maxHistory)
+    const fullPrompt = textHistory.length > 0
+      ? [
+          '<chat_history>',
+          preamble,
+          '',
+          ...textHistory.map((entry) => `[${entry.role === 'user' ? 'User' : 'Bot'}] ${entry.text}`),
+          '</chat_history>',
+          '',
+          prompt,
+        ].join('\n')
+      : prompt
+
+    const result = await askCodexCli(fullPrompt, {
+      ...config.codexCli,
+      systemPrompt: config.systemPrompt,
+      appendSystemPrompt: config.codexCli.appendSystemPrompt,
+      onText: (text) => {
+        if (text.trim()) {
+          channel.push({ type: 'text', text })
+        }
+      },
+      onCommandStart: ({ id, command }) => {
+        channel.push({
+          type: 'tool_use',
+          id,
+          name: 'Bash',
+          input: { command },
+        })
+      },
+      onCommandFinish: ({ id, output, exitCode }) => {
+        const suffix = exitCode == null ? '' : `\n(exit code ${exitCode})`
+        channel.push({
+          type: 'tool_result',
+          tool_use_id: id,
+          content: `${output}${suffix}`.trim(),
+        })
+      },
     })
-    fullPrompt = [
-      '<chat_history>',
-      preamble,
-      '',
-      ...lines,
-      '</chat_history>',
-      '',
-      prompt,
-    ].join('\n')
-  } else {
-    fullPrompt = prompt
-  }
 
-  const result = await askCodexCli(fullPrompt, {
-    ...config.codexCli,
-    systemPrompt: config.systemPrompt,
-    appendSystemPrompt: config.codexCli.appendSystemPrompt,
-  })
+    const text = result.ok ? result.text : `[error] ${result.text}`
+    await session.appendAssistant(text, 'codex-cli')
 
-  const text = result.ok ? result.text : `[error] ${result.text}`
-  await session.appendAssistant(text, 'codex-cli')
+    const finalResult = { text, media: [] }
+    channel.push({ type: 'done', result: finalResult })
+    return finalResult
+  })()
 
-  return { text, media: [] }
+  resultPromise
+    .then(() => channel.close())
+    .catch((err) => channel.error(err instanceof Error ? err : new Error(String(err))))
+
+  return new StreamableResult(channel)
 }

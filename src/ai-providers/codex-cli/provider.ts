@@ -23,6 +23,9 @@ export async function askCodexCli(
     configOverrides = [],
     systemPrompt,
     appendSystemPrompt,
+    onText,
+    onCommandStart,
+    onCommandFinish,
   } = config
 
   const fullPrompt = buildPrompt(prompt, systemPrompt, appendSystemPrompt)
@@ -67,20 +70,31 @@ export async function askCodexCli(
 
         try {
           const event = JSON.parse(line) as Record<string, unknown>
-          if (event.type !== 'item.completed') continue
-
           const item = event.item as Record<string, unknown> | undefined
           if (!item || typeof item.type !== 'string') continue
 
-          if (item.type === 'agent_message' && typeof item.text === 'string') {
+          if (event.type === 'item.completed' && item.type === 'agent_message' && typeof item.text === 'string') {
             const text = item.text
+            onText?.(text)
             messages.push({ role: 'assistant', text })
             resultText = text
           } else if (item.type === 'command_execution') {
+            const id = typeof item.id === 'string' ? item.id : `command-${messages.length}`
+            const command = typeof item.command === 'string' ? item.command : '(unknown)'
+            const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : ''
+            const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null
+
+            if (event.type === 'item.started') {
+              onCommandStart?.({ id, command })
+              continue
+            }
+            if (event.type !== 'item.completed') continue
+
+            onCommandFinish?.({ id, command, output, exitCode })
             logger.info(
               {
-                command: typeof item.command === 'string' ? item.command : '(unknown)',
-                exitCode: typeof item.exit_code === 'number' ? item.exit_code : null,
+                command,
+                exitCode,
               },
               'command_execution',
             )

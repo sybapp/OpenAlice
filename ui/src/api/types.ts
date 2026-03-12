@@ -9,12 +9,44 @@ export interface ChatMessage {
 export interface ChatResponse {
   text: string
   media: Array<{ type: 'image'; url: string }>
+  requestId: string
 }
 
 export interface ToolCall {
   name: string
   input: string
   result?: string
+}
+
+export interface StreamingToolCall {
+  id: string
+  name: string
+  input: string
+  result?: string
+  status: 'running' | 'done'
+}
+
+export type ChatStreamEvent =
+  | {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+}
+  | {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+}
+  | {
+  type: 'text'
+  text: string
+}
+
+export interface ChatStreamEnvelope {
+  type: 'stream'
+  requestId: string
+  event: ChatStreamEvent
 }
 
 export type ChatHistoryItem =

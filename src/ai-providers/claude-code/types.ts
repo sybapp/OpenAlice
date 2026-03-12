@@ -22,6 +22,10 @@ export interface ClaudeCodeConfig {
    * Use this to extract side-channel data (e.g. images) from tool results.
    */
   onToolResult?: (toolResult: { toolUseId: string; content: string }) => void
+  /** Called for each tool_use block observed in the stream. */
+  onToolUse?: (toolUse: { id: string; name: string; input: unknown }) => void
+  /** Called for assistant text blocks observed in the stream. */
+  onText?: (text: string) => void
 }
 
 export interface ClaudeCodeMessage {

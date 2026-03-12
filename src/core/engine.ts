@@ -13,7 +13,7 @@
 
 import type { MediaAttachment } from './types.js'
 import type { SessionStore } from './session.js'
-import type { AskOptions } from './ai-provider.js'
+import { StreamableResult, type AskOptions, type ProviderEvent } from './ai-provider.js'
 import type { AgentCenter } from './agent-center.js'
 import { handleSkillCommand } from './skills/command.js'
 
@@ -47,14 +47,25 @@ export class Engine {
   }
 
   /** Prompt with session — routed through the configured AI provider. */
-  async askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): Promise<EngineResult> {
-    const localCommand = await handleSkillCommand(prompt, session)
-    if (localCommand.handled) {
-      return {
-        text: localCommand.text ?? '',
-        media: [],
+  askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): StreamableResult {
+    const self = this
+
+    async function* generate(): AsyncGenerator<ProviderEvent> {
+      const localCommand = await handleSkillCommand(prompt, session)
+      if (localCommand.handled) {
+        yield {
+          type: 'done',
+          result: {
+            text: localCommand.text ?? '',
+            media: [],
+          },
+        }
+        return
       }
+
+      yield* self.agentCenter.askWithSession(prompt, session, opts)
     }
-    return this.agentCenter.askWithSession(prompt, session, opts)
+
+    return new StreamableResult(generate())
   }
 }

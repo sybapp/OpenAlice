@@ -2,10 +2,13 @@ import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
 import type { MediaAttachment } from '../../core/types.js'
 import type { ClaudeCodeConfig } from './types.js'
+import type { ProviderEvent } from '../../core/ai-provider.js'
+import { StreamableResult } from '../../core/ai-provider.js'
 import { toTextHistory } from '../../core/session.js'
 import { compactIfNeeded } from '../../core/compaction.js'
 import { extractMediaFromToolResultContent } from '../../core/media.js'
 import { askClaudeCode } from './provider.js'
+import { createChannel } from '../../core/async-channel.js'
 
 // ==================== Types ====================
 
@@ -63,72 +66,79 @@ export async function askClaudeCodeWithSession(
   prompt: string,
   session: SessionStore,
   config: ClaudeCodeSessionConfig,
-): Promise<ClaudeCodeSessionResult> {
-  return withSessionLock(session, async () => {
-  const maxHistory = config.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
-  const preamble = config.historyPreamble ?? DEFAULT_PREAMBLE
+): StreamableResult {
+  const channel = createChannel<ProviderEvent>()
 
-  // 1. Append user message to session
-  await session.appendUser(prompt, 'human')
+  const resultPromise = withSessionLock(session, async (): Promise<ClaudeCodeSessionResult> => {
+    const maxHistory = config.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
+    const preamble = config.historyPreamble ?? DEFAULT_PREAMBLE
 
-  // 2. Compact if needed (using askClaudeCode as summarizer)
-  const compactionResult = await compactIfNeeded(
-    session,
-    config.compaction,
-    async (summarizePrompt) => {
-      const r = await askClaudeCode(summarizePrompt, {
-        ...config.claudeCode,
-        maxTurns: 1,
-      })
-      return r.text
-    },
-  )
+    await session.appendUser(prompt, 'human')
 
-  // 3. Read active window and build text history
-  const entries = compactionResult.activeEntries ?? await session.readActive()
-  const textHistory = toTextHistory(entries).slice(-maxHistory)
+    const compactionResult = await compactIfNeeded(
+      session,
+      config.compaction,
+      async (summarizePrompt) => {
+        const r = await askClaudeCode(summarizePrompt, {
+          ...config.claudeCode,
+          maxTurns: 1,
+        })
+        return r.text
+      },
+    )
 
-  // 4. Build full prompt with <chat_history> if history exists
-  let fullPrompt: string
-  if (textHistory.length > 0) {
-    const lines = textHistory.map((entry) => {
-      const tag = entry.role === 'user' ? 'User' : 'Bot'
-      return `[${tag}] ${entry.text}`
+    const entries = compactionResult.activeEntries ?? await session.readActive()
+    const textHistory = toTextHistory(entries).slice(-maxHistory)
+
+    const fullPrompt = textHistory.length > 0
+      ? [
+          '<chat_history>',
+          preamble,
+          '',
+          ...textHistory.map((entry) => `[${entry.role === 'user' ? 'User' : 'Bot'}] ${entry.text}`),
+          '</chat_history>',
+          '',
+          prompt,
+        ].join('\n')
+      : prompt
+
+    const media: MediaAttachment[] = []
+    const result = await askClaudeCode(fullPrompt, {
+      ...config.claudeCode,
+      systemPrompt: config.systemPrompt,
+      onToolUse: ({ id, name, input }) => {
+        channel.push({ type: 'tool_use', id, name, input })
+      },
+      onToolResult: ({ toolUseId, content }) => {
+        media.push(...extractMediaFromToolResultContent(content))
+        channel.push({ type: 'tool_result', tool_use_id: toolUseId, content })
+      },
+      onText: (text) => {
+        if (text.trim()) {
+          channel.push({ type: 'text', text })
+        }
+      },
     })
-    fullPrompt = [
-      '<chat_history>',
-      preamble,
-      '',
-      ...lines,
-      '</chat_history>',
-      '',
-      prompt,
-    ].join('\n')
-  } else {
-    fullPrompt = prompt
-  }
 
-  // 5. Call askClaudeCode — collect media from tool results
-  const media: MediaAttachment[] = []
-  const result = await askClaudeCode(fullPrompt, {
-    ...config.claudeCode,
-    systemPrompt: config.systemPrompt,
-    onToolResult: ({ content }) => {
-      media.push(...extractMediaFromToolResultContent(content))
-    },
+    for (const msg of result.messages) {
+      if (msg.role === 'assistant') {
+        await session.appendAssistant(msg.content, 'claude-code')
+      } else {
+        await session.appendUser(msg.content, 'claude-code')
+      }
+    }
+
+    const finalResult = {
+      text: result.ok ? result.text : `[error] ${result.text}`,
+      media,
+    }
+    channel.push({ type: 'done', result: finalResult })
+    return finalResult
   })
 
-  // 6. Persist intermediate messages (tool calls + results) to session
-  for (const msg of result.messages) {
-    if (msg.role === 'assistant') {
-      await session.appendAssistant(msg.content, 'claude-code')
-    } else {
-      await session.appendUser(msg.content, 'claude-code')
-    }
-  }
+  resultPromise
+    .then(() => channel.close())
+    .catch((err) => channel.error(err instanceof Error ? err : new Error(String(err))))
 
-  // 7. Return unified result
-  const prefix = result.ok ? '' : '[error] '
-  return { text: prefix + result.text, media }
-  }) // end withSessionLock
+  return new StreamableResult(channel)
 }

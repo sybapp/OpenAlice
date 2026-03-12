@@ -20,6 +20,12 @@ export interface CodexCliConfig {
   systemPrompt?: string
   /** Extra system prompt content (prepended after systemPrompt). */
   appendSystemPrompt?: string
+  /** Called when Codex emits an assistant message item. */
+  onText?: (text: string) => void
+  /** Called when Codex starts a command execution item. */
+  onCommandStart?: (command: { id: string; command: string }) => void
+  /** Called when Codex completes a command execution item. */
+  onCommandFinish?: (command: { id: string; command: string; output: string; exitCode: number | null }) => void
 }
 
 export interface CodexCliMessage {
