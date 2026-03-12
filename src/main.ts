@@ -10,6 +10,7 @@ import { McpAskPlugin } from './connectors/mcp-ask/index.js'
 import { createThinkingTools } from './extension/cognition/thinking-kit/index.js'
 import {
   AccountManager,
+  type BacktestBar,
   CcxtAccount,
   createCcxtProviderTools,
   wireAccountTrading,
@@ -70,6 +71,48 @@ const PERSONA_FILE = resolve('data/brain/persona.md')
 const PERSONA_DEFAULT = resolve('data/default/persona.default.md')
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+interface HistoricalBarRow {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number | null
+}
+
+function toBacktestIsoTimestamp(input: string): string {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(input) ? `${input}T00:00:00.000Z` : input
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Invalid historical bar timestamp: ${input}`)
+  }
+  return date.toISOString()
+}
+
+function normalizeHistoricalBars(
+  symbol: string,
+  rows: HistoricalBarRow[],
+): BacktestBar[] {
+  return rows
+    .map((row) => ({
+      ts: toBacktestIsoTimestamp(row.date),
+      symbol,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: row.volume == null ? 0 : Number(row.volume),
+    }))
+    .filter((row) => (
+      Number.isFinite(row.open)
+      && Number.isFinite(row.high)
+      && Number.isFinite(row.low)
+      && Number.isFinite(row.close)
+      && Number.isFinite(row.volume)
+    ))
+    .sort((a, b) => a.ts.localeCompare(b.ts))
+}
 
 /** Read a file, copying from default if it doesn't exist yet. */
 async function readWithDefault(target: string, defaultFile: string): Promise<string> {
@@ -235,6 +278,31 @@ async function main() {
   const commodityClient = new OpenBBCommodityClient(config.openbb.apiUrl, undefined, providerKeys)
   const economyClient = new OpenBBEconomyClient(config.openbb.apiUrl, undefined, providerKeys)
   const newsClient = new OpenBBNewsClient(config.openbb.apiUrl, undefined, providerKeys)
+  const marketData = {
+    async getBacktestBars(query: { assetType: 'equity' | 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
+      if (!config.openbb.enabled) {
+        throw new Error('OpenBB is disabled')
+      }
+
+      const symbol = query.symbol.trim().toUpperCase()
+      if (query.assetType === 'equity') {
+        const rows = (await equityClient.getHistorical({
+          symbol,
+          start_date: query.startDate,
+          end_date: query.endDate,
+        })) as unknown as HistoricalBarRow[]
+        return normalizeHistoricalBars(symbol, rows)
+      }
+
+      const rows = (await cryptoClient.getHistorical({
+        symbol,
+        start_date: query.startDate,
+        end_date: query.endDate,
+        ...(query.interval ? { interval: query.interval } : {}),
+      })) as unknown as HistoricalBarRow[]
+      return normalizeHistoricalBars(symbol, rows)
+    },
+  }
 
   // ==================== Equity Symbol Index ====================
 
@@ -499,6 +567,7 @@ async function main() {
     config, connectorCenter, engine, eventLog, heartbeat, cronEngine, toolCenter,
     accountManager,
     backtest,
+    marketData,
     getAccountGit: (id: string): ITradingGit | undefined => accountSetups.get(id)?.git,
     reconnectAccount,
     reconnectConnectors,

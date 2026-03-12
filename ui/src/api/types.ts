@@ -192,3 +192,172 @@ export interface GuardEntry {
   type: string
   options: Record<string, unknown>
 }
+
+// ==================== Backtest ====================
+
+export interface BacktestBar {
+  ts: string
+  symbol: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  bid?: number
+  ask?: number
+}
+
+export type BacktestRunMode = 'scripted' | 'ai'
+export type BacktestRunStatus = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface BacktestDecisionPlanEntry {
+  step: number
+  operations: Array<{
+    action: 'placeOrder' | 'modifyOrder' | 'closePosition' | 'cancelOrder' | 'syncOrders'
+    params: Record<string, unknown>
+  }>
+}
+
+export interface ScriptedBacktestRunStrategyConfig {
+  mode: 'scripted'
+  decisions: BacktestDecisionPlanEntry[]
+}
+
+export interface AIBacktestRunStrategyConfig {
+  mode: 'ai'
+  prompt: string
+  systemPrompt?: string
+  maxHistoryEntries?: number
+}
+
+export type BacktestRunStrategyConfig =
+  | ScriptedBacktestRunStrategyConfig
+  | AIBacktestRunStrategyConfig
+
+export interface BacktestStartRunRequest {
+  runId?: string
+  accountId?: string
+  accountLabel?: string
+  initialCash: number
+  startTime?: string
+  guards?: GuardEntry[]
+  bars: BacktestBar[]
+  strategy: BacktestRunStrategyConfig
+}
+
+export interface BacktestRunManifest {
+  runId: string
+  status: BacktestRunStatus
+  mode: BacktestRunMode
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  sessionId?: string
+  artifactDir: string
+  barCount: number
+  currentStep: number
+  accountId: string
+  accountLabel: string
+  initialCash: number
+  startTime?: string
+  guards: GuardEntry[]
+}
+
+export interface BacktestRunSummary {
+  runId: string
+  startEquity: number
+  endEquity: number
+  totalReturn: number
+  realizedPnL: number
+  unrealizedPnL: number
+  maxDrawdown: number
+  tradeCount: number
+  winRate: number
+  guardRejectionCount: number
+}
+
+export interface BacktestRunRecord {
+  manifest: BacktestRunManifest
+  summary?: BacktestRunSummary
+}
+
+export interface BacktestEquityPoint {
+  step: number
+  ts: string
+  equity: number
+  realizedPnL: number
+  unrealizedPnL: number
+}
+
+export interface BacktestEventEntry {
+  seq: number
+  ts: number
+  type: string
+  payload: unknown
+}
+
+export interface BacktestBarsQuery {
+  assetType: 'equity' | 'crypto'
+  symbol: string
+  startDate: string
+  endDate: string
+  interval?: string
+}
+
+export interface BacktestFetchBarsResponse {
+  bars: BacktestBar[]
+}
+
+export interface BacktestGitState {
+  head: string | null
+  commits: Array<{
+    hash: string
+    parentHash: string | null
+    message: string
+    operations: Array<{ action: string; params: Record<string, unknown> }>
+    results: Array<{
+      action: string
+      success: boolean
+      orderId?: string
+      status: string
+      filledPrice?: number
+      filledQty?: number
+      error?: string
+      raw?: unknown
+    }>
+    stateAfter: {
+      cash: number
+      equity: number
+      unrealizedPnL: number
+      realizedPnL: number
+      positions: unknown[]
+      pendingOrders: unknown[]
+    }
+    timestamp: string
+    round?: number
+  }>
+}
+
+export interface SessionEntry {
+  type: 'user' | 'assistant' | 'meta' | 'system'
+  message: {
+    role: 'user' | 'assistant' | 'system'
+    content: string | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image'; url: string }
+      | { type: 'tool_use'; id: string; name: string; input: unknown }
+      | { type: 'tool_result'; tool_use_id: string; content: string }
+    >
+  }
+  uuid: string
+  parentUuid: string | null
+  sessionId: string
+  timestamp: string
+  provider?: 'engine' | 'claude-code' | 'codex-cli' | 'human' | 'compaction'
+  cwd?: string
+  metadata?: Record<string, unknown>
+  subtype?: 'compact_boundary'
+  compactMetadata?: { trigger: 'auto' | 'manual'; preTokens: number }
+  isCompactSummary?: boolean
+}

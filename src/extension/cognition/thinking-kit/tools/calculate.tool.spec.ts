@@ -61,6 +61,12 @@ describe('calculate tool', () => {
       expect(calculate('  1  +  2  ')).toBe(3);
     });
 
+    it('should handle unary operators', () => {
+      expect(calculate('-5 + 2')).toBe(-3);
+      expect(calculate('4 * -2')).toBe(-8);
+      expect(calculate('-(1 + 2)')).toBe(-3);
+    });
+
     it('should handle negative results', () => {
       expect(calculate('1 - 5')).toBe(-4);
     });
@@ -68,6 +74,12 @@ describe('calculate tool', () => {
     it('should handle zero', () => {
       expect(calculate('0 + 0')).toBe(0);
       expect(calculate('5 * 0')).toBe(0);
+    });
+
+    it('should throw for malformed expressions', () => {
+      expect(() => calculate('(1 + 2')).toThrow(/Calculation error/);
+      expect(() => calculate('1 +')).toThrow(/Calculation error/);
+      expect(() => calculate('1..2 + 3')).toThrow(/Calculation error/);
     });
   });
 });

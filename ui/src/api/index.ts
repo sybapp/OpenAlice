@@ -8,6 +8,7 @@ import { eventsApi } from './events'
 import { cronApi } from './cron'
 import { heartbeatApi } from './heartbeat'
 import { tradingApi } from './trading'
+import { backtestApi } from './backtest'
 import { openbbApi } from './openbb'
 import { devApi } from './dev'
 import { toolsApi } from './tools'
@@ -18,6 +19,7 @@ export const api = {
   cron: cronApi,
   heartbeat: heartbeatApi,
   trading: tradingApi,
+  backtest: backtestApi,
   openbb: openbbApi,
   dev: devApi,
   tools: toolsApi,
@@ -40,6 +42,20 @@ export type {
   Position,
   WalletCommitLog,
   ReconnectResult,
+  BacktestBar,
+  BacktestRunMode,
+  BacktestRunStatus,
+  BacktestDecisionPlanEntry,
+  BacktestRunManifest,
+  BacktestRunSummary,
+  BacktestRunRecord,
+  BacktestEquityPoint,
+  BacktestEventEntry,
+  BacktestBarsQuery,
+  BacktestFetchBarsResponse,
+  BacktestStartRunRequest,
+  BacktestGitState,
+  SessionEntry,
   ConnectorsConfig,
   NewsCollectorConfig,
   NewsCollectorFeed,

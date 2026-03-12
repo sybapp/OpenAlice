@@ -22,6 +22,26 @@ export interface ReconnectResult {
   message?: string
 }
 
+export interface BacktestBarsQuery {
+  assetType: 'equity' | 'crypto'
+  symbol: string
+  startDate: string
+  endDate: string
+  interval?: string
+}
+
+export interface MarketDataBridge {
+  getBacktestBars(query: BacktestBarsQuery): Promise<Array<{
+    ts: string
+    symbol: string
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+  }>>
+}
+
 export interface EngineContext {
   config: Config
   connectorCenter: ConnectorCenter
@@ -34,6 +54,7 @@ export interface EngineContext {
   // Trading (unified account model)
   accountManager: AccountManager
   backtest: BacktestRunManager
+  marketData: MarketDataBridge
   /** Get the TradingGit instance for an account by ID. */
   getAccountGit: (accountId: string) => ITradingGit | undefined
   /** Reconnect a specific trading account by ID. */

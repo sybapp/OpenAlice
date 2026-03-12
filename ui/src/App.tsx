@@ -30,6 +30,10 @@ const TradingPage = lazy(async () => {
   const mod = await import('./pages/TradingPage')
   return { default: mod.TradingPage }
 })
+const BacktestPage = lazy(async () => {
+  const mod = await import('./pages/BacktestPage')
+  return { default: mod.BacktestPage }
+})
 const ConnectorsPage = lazy(async () => {
   const mod = await import('./pages/ConnectorsPage')
   return { default: mod.ConnectorsPage }
@@ -49,7 +53,7 @@ const ToolsPage = lazy(async () => {
 
 export type Page =
   | 'chat' | 'portfolio' | 'events' | 'heartbeat' | 'data-sources' | 'connectors'
-  | 'trading'
+  | 'trading' | 'backtest'
   | 'ai-provider' | 'settings' | 'tools' | 'dev'
 
 /** Page type → URL path mapping. Chat is the root, everything else maps to /slug. */
@@ -62,6 +66,7 @@ export const ROUTES: Record<Page, string> = {
   'connectors': '/connectors',
   'tools': '/tools',
   'trading': '/trading',
+  'backtest': '/backtest',
   'ai-provider': '/ai-provider',
   'settings': '/settings',
   'dev': '/dev',
@@ -110,6 +115,7 @@ export function App() {
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/trading" element={<TradingPage />} />
+            <Route path="/backtest" element={<BacktestPage />} />
             <Route path="/ai-provider" element={<AIProviderPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/dev" element={<DevPage />} />
