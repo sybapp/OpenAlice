@@ -149,10 +149,13 @@ export interface CommitPrepareResult {
   operationCount: number
 }
 
+export type PushMode = 'best-effort' | 'fail-fast'
+
 export interface PushResult {
   hash: CommitHash
   message: string
   operationCount: number
+  mode: PushMode
   filled: OperationResult[]
   pending: OperationResult[]
   rejected: OperationResult[]

@@ -11,6 +11,7 @@ import type {
   AddResult,
   CommitPrepareResult,
   PushResult,
+  PushMode,
   GitStatus,
   GitCommit,
   CommitLogEntry,
@@ -22,12 +23,16 @@ import type {
   SyncResult,
 } from './types.js'
 
+export interface PushOptions {
+  mode?: PushMode
+}
+
 export interface ITradingGit {
   // ---- git add / commit / push ----
 
   add(operation: Operation): AddResult
   commit(message: string): CommitPrepareResult
-  push(): Promise<PushResult>
+  push(options?: PushOptions): Promise<PushResult>
 
   // ---- git log / show / status ----
 

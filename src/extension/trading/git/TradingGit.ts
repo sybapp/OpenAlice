@@ -7,7 +7,7 @@
 
 import { createHash } from 'crypto'
 import { appendFile, readFile } from 'fs/promises'
-import type { ITradingGit, TradingGitConfig } from './interfaces.js'
+import type { ITradingGit, TradingGitConfig, PushOptions } from './interfaces.js'
 import type {
   CommitHash,
   Operation,
@@ -15,6 +15,7 @@ import type {
   AddResult,
   CommitPrepareResult,
   PushResult,
+  PushMode,
   GitStatus,
   GitCommit,
   GitState,
@@ -87,7 +88,7 @@ export class TradingGit implements ITradingGit {
     }
   }
 
-  async push(): Promise<PushResult> {
+  async push(options?: PushOptions): Promise<PushResult> {
     if (this.stagingArea.length === 0) {
       throw new Error('Nothing to push: staging area is empty')
     }
@@ -95,16 +96,29 @@ export class TradingGit implements ITradingGit {
       throw new Error('Nothing to push: please commit first')
     }
 
+    const mode: PushMode = options?.mode ?? 'best-effort'
     const operations = [...this.stagingArea]
     const message = this.pendingMessage
     const hash = this.pendingHash
 
     // Execute all operations
     const results: OperationResult[] = []
+    let aborted = false
     for (const op of operations) {
+      if (aborted) {
+        results.push({
+          action: op.action,
+          success: false,
+          status: 'rejected',
+          error: 'Aborted: fail-fast mode',
+        })
+        continue
+      }
       try {
         const raw = await this.config.executeOperation(op)
-        results.push(this.parseOperationResult(op, raw))
+        const parsed = this.parseOperationResult(op, raw)
+        results.push(parsed)
+        if (mode === 'fail-fast' && !parsed.success) aborted = true
       } catch (error) {
         results.push({
           action: op.action,
@@ -112,6 +126,7 @@ export class TradingGit implements ITradingGit {
           status: 'rejected',
           error: error instanceof Error ? error.message : String(error),
         })
+        if (mode === 'fail-fast') aborted = true
       }
     }
 
@@ -145,7 +160,7 @@ export class TradingGit implements ITradingGit {
     const pending = results.filter((r) => r.status === 'pending')
     const rejected = results.filter((r) => r.status === 'rejected' || !r.success)
 
-    return { hash, message, operationCount: operations.length, filled, pending, rejected }
+    return { hash, message, operationCount: operations.length, mode, filled, pending, rejected }
   }
 
   // ==================== git log / show / status ====================

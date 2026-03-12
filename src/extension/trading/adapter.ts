@@ -825,7 +825,11 @@ Example workflow:
         }
 
         if (results.length === 0) return { message: 'No staged operations to commit.' }
-        return results.length === 1 ? results[0] : results
+        const response = results.length === 1 ? results[0] : results
+        if (!source && results.length > 1) {
+          return { warning: 'Operating on multiple accounts', results: response }
+        }
+        return response
       },
     }),
 
@@ -840,13 +844,15 @@ After staging operations and committing them, use this to:
 
 Returns execution results for each operation (filled/pending/rejected).
 
-If source is omitted, pushes ALL accounts that have committed operations.
-
-IMPORTANT: You must call tradingCommit first before pushing.`,
+IMPORTANT: You must call tradingCommit first before pushing.
+IMPORTANT: source is required — specify which account to push.`,
       inputSchema: z.object({
-        source: z.string().optional().describe(sourceDesc(false, 'If omitted, pushes all accounts with committed operations.')),
+        source: z.string().describe(sourceDesc(true, 'Required — specify which account to push.')),
+        mode: z.enum(['best-effort', 'fail-fast']).default('best-effort').describe(
+          'Execution mode. "best-effort" (default) continues after failures. "fail-fast" stops at first failure.',
+        ),
       }),
-      execute: async ({ source }) => {
+      execute: async ({ source, mode }) => {
         const targets = resolveAccounts(accountManager, source)
         const results: Array<Record<string, unknown>> = []
 
@@ -855,7 +861,7 @@ IMPORTANT: You must call tradingCommit first before pushing.`,
           if (!git) continue
           const status = git.status()
           if (!status.pendingMessage) continue
-          const result = await git.push()
+          const result = await git.push({ mode })
           results.push({ source: id, ...result })
         }
 
@@ -993,7 +999,11 @@ Use this after placing limit/stop orders to check if they've been filled.`,
         }
 
         if (results.length === 0) return { message: 'No pending orders to sync.', updatedCount: 0 }
-        return results.length === 1 ? results[0] : results
+        const response = results.length === 1 ? results[0] : results
+        if (!source && results.length > 1) {
+          return { warning: 'Operating on multiple accounts', results: response }
+        }
+        return response
       },
     }),
 

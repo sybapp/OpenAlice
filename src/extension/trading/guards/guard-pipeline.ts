@@ -36,6 +36,11 @@ export function createGuardPipeline(
       }
     }
 
-    return dispatcher(op)
+    const result = await dispatcher(op)
+    cache.invalidate()
+    for (const guard of guards) {
+      guard.onExecuted?.(ctx)
+    }
+    return result
   }
 }

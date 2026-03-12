@@ -12,6 +12,8 @@ export interface GuardContext {
 export interface OperationGuard {
   readonly name: string
   check(ctx: GuardContext): Promise<string | null> | string | null
+  /** Called after operation executes successfully. Use for post-execution bookkeeping. */
+  onExecuted?(ctx: GuardContext): void
 }
 
 /** Registry entry: type identifier + factory function. */

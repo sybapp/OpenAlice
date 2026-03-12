@@ -114,9 +114,18 @@ describe('MaxPositionSizeGuard', () => {
     })
     expect(guard.check(ctx)).toBeNull()
   })
-})
 
-// ==================== CooldownGuard ====================
+  it('allows placeOrder without symbol (cannot estimate, let broker validate)', () => {
+    const guard = new MaxPositionSizeGuard({ maxPercentOfEquity: 1 })
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { aliceId: 'alpaca-AAPL', side: 'buy', type: 'market', notional: 50_000 },
+      },
+    })
+    expect(guard.check(ctx)).toBeNull()
+  })
+})
 
 describe('CooldownGuard', () => {
   it('allows first trade', () => {
@@ -125,23 +134,35 @@ describe('CooldownGuard', () => {
     expect(guard.check(ctx)).toBeNull()
   })
 
-  it('rejects rapid repeat trade for same symbol', () => {
+  it('rejects rapid repeat trade for same symbol after onExecuted', () => {
     const guard = new CooldownGuard({ minIntervalMs: 60_000 })
     const ctx = makeContext()
 
     guard.check(ctx) // first — allowed
+    guard.onExecuted(ctx) // mark as executed
     const result = guard.check(ctx) // second — rejected
     expect(result).not.toBeNull()
     expect(result).toContain('Cooldown active')
     expect(result).toContain('AAPL')
   })
 
+  it('does not consume cooldown when check passes but onExecuted is not called (rejected order)', () => {
+    const guard = new CooldownGuard({ minIntervalMs: 60_000 })
+    const ctx = makeContext()
+
+    guard.check(ctx) // first — allowed, but no onExecuted (simulating rejected order)
+    const result = guard.check(ctx) // second — should still be allowed
+    expect(result).toBeNull()
+  })
+
   it('allows trade for different symbol', () => {
     const guard = new CooldownGuard({ minIntervalMs: 60_000 })
 
-    guard.check(makeContext({
+    const ctx1 = makeContext({
       operation: { action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 1 } },
-    }))
+    })
+    guard.check(ctx1)
+    guard.onExecuted(ctx1)
 
     const result = guard.check(makeContext({
       operation: { action: 'placeOrder', params: { symbol: 'GOOG', side: 'buy', type: 'market', qty: 1 } },
@@ -154,6 +175,23 @@ describe('CooldownGuard', () => {
     const ctx = makeContext({
       operation: { action: 'closePosition', params: { symbol: 'AAPL' } },
     })
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('uses injected now() for time source', () => {
+    let time = 1000
+    const guard = new CooldownGuard({ minIntervalMs: 5_000, now: () => time })
+    const ctx = makeContext()
+
+    guard.check(ctx)
+    guard.onExecuted(ctx)
+
+    // Advance 3s — still in cooldown
+    time = 4000
+    expect(guard.check(ctx)).not.toBeNull()
+
+    // Advance past cooldown
+    time = 7000
     expect(guard.check(ctx)).toBeNull()
   })
 })
@@ -178,12 +216,32 @@ describe('SymbolWhitelistGuard', () => {
     expect(() => new SymbolWhitelistGuard({ symbols: [] })).toThrow('non-empty "symbols"')
   })
 
-  it('allows operations without a symbol param', () => {
+  it('allows operations without a symbol param (cancelOrder)', () => {
     const guard = new SymbolWhitelistGuard({ symbols: ['AAPL'] })
     const ctx = makeContext({
       operation: { action: 'cancelOrder', params: { orderId: '123' } },
     })
     expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('rejects placeOrder without symbol', () => {
+    const guard = new SymbolWhitelistGuard({ symbols: ['AAPL'] })
+    const ctx = makeContext({
+      operation: { action: 'placeOrder', params: { aliceId: 'alpaca-AAPL', side: 'buy', type: 'market', qty: 1 } },
+    })
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('Symbol required')
+  })
+
+  it('rejects closePosition without symbol', () => {
+    const guard = new SymbolWhitelistGuard({ symbols: ['AAPL'] })
+    const ctx = makeContext({
+      operation: { action: 'closePosition', params: { aliceId: 'alpaca-AAPL' } },
+    })
+    const result = guard.check(ctx)
+    expect(result).not.toBeNull()
+    expect(result).toContain('Symbol required')
   })
 })
 
@@ -260,6 +318,33 @@ describe('createGuardPipeline', () => {
     expect(capturedCtx).toBeDefined()
     expect(capturedCtx!.positions).toHaveLength(1)
     expect(capturedCtx!.account.equity).toBe(105_000)
+  })
+
+  it('calls onExecuted on all guards after successful dispatch', async () => {
+    const dispatcher = vi.fn().mockResolvedValue({ success: true })
+    const account = new MockTradingAccount()
+    const onExecutedA = vi.fn()
+    const onExecutedB = vi.fn()
+    const guardA: OperationGuard = { name: 'A', check: () => null, onExecuted: onExecutedA }
+    const guardB: OperationGuard = { name: 'B', check: () => null, onExecuted: onExecutedB }
+
+    const pipeline = createGuardPipeline(dispatcher, account, [guardA, guardB])
+    await pipeline({ action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 1 } })
+
+    expect(onExecutedA).toHaveBeenCalledTimes(1)
+    expect(onExecutedB).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onExecuted when guard rejects', async () => {
+    const dispatcher = vi.fn().mockResolvedValue({ success: true })
+    const account = new MockTradingAccount()
+    const onExecuted = vi.fn()
+    const denyGuard: OperationGuard = { name: 'deny', check: () => 'Blocked', onExecuted }
+
+    const pipeline = createGuardPipeline(dispatcher, account, [denyGuard])
+    await pipeline({ action: 'placeOrder', params: { symbol: 'AAPL', side: 'buy', type: 'market', qty: 1 } })
+
+    expect(onExecuted).not.toHaveBeenCalled()
   })
 })
 
@@ -410,7 +495,7 @@ describe('GuardContextCache', () => {
     expect(account.getPositions).toHaveBeenCalledTimes(2)
   })
 
-  it('same push cycle shares one API call through guard pipeline', async () => {
+  it('invalidates cache after each dispatch so next operation gets fresh data', async () => {
     const account = new MockTradingAccount()
     const dispatcher = vi.fn().mockResolvedValue({ success: true })
     const passGuard: OperationGuard = { name: 'pass', check: () => null }
@@ -423,8 +508,8 @@ describe('GuardContextCache', () => {
     await pipeline(op1)
     await pipeline(op2)
 
-    // Both calls within 2s TTL — only 1 API call each
-    expect(account.getPositions).toHaveBeenCalledTimes(1)
-    expect(account.getAccount).toHaveBeenCalledTimes(1)
+    // Cache is invalidated after each dispatch, so each operation fetches fresh data
+    expect(account.getPositions).toHaveBeenCalledTimes(2)
+    expect(account.getAccount).toHaveBeenCalledTimes(2)
   })
 })

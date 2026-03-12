@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import { mkdir, open, readFile, writeFile, appendFile } from 'node:fs/promises'
+import { mkdir, open, readFile, writeFile, appendFile, unlink } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import type { GitExportState } from '../git/types.js'
 import type {
@@ -78,6 +78,13 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   async function queueManifestCreate(manifest: BacktestRunManifest): Promise<void> {
     const paths = getRunPaths(manifest.runId)
     await mkdir(paths.runDir, { recursive: true })
+    // Clean stale artifacts from previous run with same ID
+    await Promise.all([
+      unlink(paths.equityCurvePath).catch(ignoreENOENT),
+      unlink(paths.eventLogPath).catch(ignoreENOENT),
+      unlink(paths.summaryPath).catch(ignoreENOENT),
+      unlink(paths.gitStatePath).catch(ignoreENOENT),
+    ])
     await writeJson(paths.manifestPath, manifest)
     await updateRunIndex(manifest)
   }
@@ -269,4 +276,8 @@ function sortRunManifests(entries: BacktestRunManifest[]): BacktestRunManifest[]
 
 function isENOENT(err: unknown): boolean {
   return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function ignoreENOENT(err: unknown): void {
+  if (!isENOENT(err)) throw err
 }

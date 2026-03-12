@@ -207,4 +207,66 @@ describe('createBacktestStorage', () => {
     const runs = await storage.listRuns()
     expect(runs[0]).toMatchObject({ runId: 'indexed', status: 'completed', currentStep: 1 })
   })
+
+  it('cleans stale JSONL artifacts when reusing a runId', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('collision') })
+    const runId = 'reused-run'
+
+    // First run: create and write equity data
+    await storage.createRun({
+      runId,
+      status: 'completed',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: storage.getRunPaths(runId).runDir,
+      barCount: 3,
+      currentStep: 3,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+
+    await storage.appendEquityPoint(runId, {
+      step: 1,
+      ts: '2025-01-01T09:30:00.000Z',
+      equity: 10_000,
+      realizedPnL: 0,
+      unrealizedPnL: 0,
+    })
+    await storage.appendEquityPoint(runId, {
+      step: 2,
+      ts: '2025-01-01T09:31:00.000Z',
+      equity: 10_050,
+      realizedPnL: 50,
+      unrealizedPnL: 0,
+    })
+
+    const curveBeforeReuse = await storage.readEquityCurve(runId)
+    expect(curveBeforeReuse).toHaveLength(2)
+
+    // Second run with same ID: should clean old artifacts
+    await storage.createRun({
+      runId,
+      status: 'queued',
+      mode: 'scripted',
+      createdAt: '2025-01-02T00:00:00.000Z',
+      artifactDir: storage.getRunPaths(runId).runDir,
+      barCount: 5,
+      currentStep: 0,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 20_000,
+      guards: [],
+    })
+
+    // Old equity curve should be gone
+    const curveAfterReuse = await storage.readEquityCurve(runId)
+    expect(curveAfterReuse).toHaveLength(0)
+
+    // New manifest should reflect the second run
+    const manifest = await storage.getManifest(runId)
+    expect(manifest?.initialCash).toBe(20_000)
+    expect(manifest?.status).toBe('queued')
+  })
 })

@@ -1,4 +1,5 @@
 import type { OperationGuard, GuardContext } from './types.js'
+import { extractGuardSymbol } from './resolve-symbol.js'
 
 const DEFAULT_MAX_PERCENT = 25
 
@@ -15,7 +16,10 @@ export class MaxPositionSizeGuard implements OperationGuard {
 
     const { positions, account, operation } = ctx
     const p = operation.params
-    const symbol = p.symbol ?? 'unknown'
+    const symbol = extractGuardSymbol(ctx.operation)
+
+    // Can't estimate without symbol — let broker validate
+    if (symbol == null) return null
 
     const existing = positions.find(pos => pos.contract.symbol === symbol)
     const currentValue = existing?.marketValue ?? 0

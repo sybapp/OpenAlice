@@ -143,3 +143,29 @@ describe('createTradingTools tradingSync orphan cleanup', () => {
     expect(result).toMatchObject({ message: 'No pending orders to sync.', updatedCount: 0 })
   })
 })
+
+describe('tradingPush source required', () => {
+  it('has source as a required field in the inputSchema', () => {
+    const { tools } = createHarness({ pendingOrders: [] })
+    const schema = (tools.tradingPush as any).inputSchema
+    // Zod required fields won't have .isOptional()
+    const parsed = schema.safeParse({ mode: 'best-effort' })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('accepts source with mode parameter', () => {
+    const { tools } = createHarness({ pendingOrders: [] })
+    const schema = (tools.tradingPush as any).inputSchema
+    const parsed = schema.safeParse({ source: 'mock-paper', mode: 'fail-fast' })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data.mode).toBe('fail-fast')
+  })
+
+  it('defaults mode to best-effort', () => {
+    const { tools } = createHarness({ pendingOrders: [] })
+    const schema = (tools.tradingPush as any).inputSchema
+    const parsed = schema.safeParse({ source: 'mock-paper' })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data.mode).toBe('best-effort')
+  })
+})

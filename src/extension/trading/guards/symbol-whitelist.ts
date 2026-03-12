@@ -1,4 +1,5 @@
 import type { OperationGuard, GuardContext } from './types.js'
+import { extractGuardSymbol } from './resolve-symbol.js'
 
 export class SymbolWhitelistGuard implements OperationGuard {
   readonly name = 'symbol-whitelist'
@@ -13,9 +14,14 @@ export class SymbolWhitelistGuard implements OperationGuard {
   }
 
   check(ctx: GuardContext): string | null {
-    const op = ctx.operation
-    const symbol = (op.action === 'placeOrder' || op.action === 'closePosition') ? op.params.symbol : undefined
-    if (!symbol) return null
+    const symbol = extractGuardSymbol(ctx.operation)
+    if (symbol == null) {
+      // Symbol-bearing actions (placeOrder, closePosition) without a symbol must be rejected
+      if (ctx.operation.action === 'placeOrder' || ctx.operation.action === 'closePosition') {
+        return 'Symbol required for whitelist check'
+      }
+      return null
+    }
 
     if (!this.allowed.has(symbol)) {
       return `Symbol ${symbol} is not in the allowed list`

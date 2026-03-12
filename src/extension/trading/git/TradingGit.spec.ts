@@ -211,6 +211,78 @@ describe('TradingGit', () => {
       expect(result.pending).toHaveLength(1)
       expect(result.filled).toHaveLength(0)
     })
+
+    it('includes mode in PushResult (defaults to best-effort)', async () => {
+      git.add(buyOp())
+      git.commit('msg')
+      const result = await git.push()
+      expect(result.mode).toBe('best-effort')
+    })
+
+    it('fail-fast mode stops after first failure', async () => {
+      let callCount = 0
+      const failSecondConfig = makeConfig({
+        executeOperation: vi.fn().mockImplementation(async () => {
+          callCount++
+          if (callCount === 1) return { success: true, order: { id: 'o1', status: 'filled', filledPrice: 100, filledQty: 10 } }
+          return { success: false, error: 'Insufficient funds' }
+        }),
+      })
+      const failGit = new TradingGit(failSecondConfig)
+
+      failGit.add(buyOp('AAPL'))
+      failGit.add(buyOp('GOOG'))
+      failGit.add(buyOp('TSLA'))
+      failGit.commit('Three buys')
+      const result = await failGit.push({ mode: 'fail-fast' })
+
+      expect(result.mode).toBe('fail-fast')
+      expect(result.filled).toHaveLength(1)
+      // Second op failed, third should be aborted
+      expect(result.rejected).toHaveLength(2)
+      expect(result.rejected[0].error).toBe('Insufficient funds')
+      expect(result.rejected[1].error).toBe('Aborted: fail-fast mode')
+      // executeOperation should only be called twice (not for the third)
+      expect(failSecondConfig.executeOperation).toHaveBeenCalledTimes(2)
+    })
+
+    it('fail-fast mode with exception stops remaining ops', async () => {
+      const failConfig = makeConfig({
+        executeOperation: vi.fn().mockRejectedValue(new Error('Network error')),
+      })
+      const failGit = new TradingGit(failConfig)
+
+      failGit.add(buyOp('AAPL'))
+      failGit.add(buyOp('GOOG'))
+      failGit.commit('Two buys')
+      const result = await failGit.push({ mode: 'fail-fast' })
+
+      expect(result.rejected).toHaveLength(2)
+      expect(result.rejected[0].error).toBe('Network error')
+      expect(result.rejected[1].error).toBe('Aborted: fail-fast mode')
+      expect(failConfig.executeOperation).toHaveBeenCalledTimes(1)
+    })
+
+    it('best-effort mode continues after failure', async () => {
+      let callCount = 0
+      const mixedConfig = makeConfig({
+        executeOperation: vi.fn().mockImplementation(async () => {
+          callCount++
+          if (callCount === 1) return { success: false, error: 'Failed' }
+          return { success: true, order: { id: 'o2', status: 'filled', filledPrice: 100, filledQty: 10 } }
+        }),
+      })
+      const mixedGit = new TradingGit(mixedConfig)
+
+      mixedGit.add(buyOp('AAPL'))
+      mixedGit.add(buyOp('GOOG'))
+      mixedGit.commit('Two buys')
+      const result = await mixedGit.push({ mode: 'best-effort' })
+
+      expect(result.rejected).toHaveLength(1)
+      expect(result.filled).toHaveLength(1)
+      expect(mixedConfig.executeOperation).toHaveBeenCalledTimes(2)
+    })
   })
 
   // ==================== log ====================
