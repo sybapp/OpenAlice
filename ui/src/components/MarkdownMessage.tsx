@@ -16,6 +16,7 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 import DOMPurify from 'dompurify'
 import 'highlight.js/styles/github-dark.min.css'
+import { withAuthQuery } from '../api/client'
 
 function registerLanguage(name: string, language: Parameters<typeof hljs.registerLanguage>[1], aliases: string[] = []) {
   hljs.registerLanguage(name, language)
@@ -120,7 +121,7 @@ export function MarkdownMessage({ text, media, prefixText }: MarkdownMessageProp
     <div ref={contentRef}>
       <div className="markdown-content" dangerouslySetInnerHTML={{ __html: html }} />
       {media?.map((m, i) => (
-        <img key={i} src={m.url} alt="" className="max-w-full rounded-lg mt-2" />
+        <img key={i} src={withAuthQuery(m.url)} alt="" className="max-w-full rounded-lg mt-2" />
       ))}
     </div>
   )

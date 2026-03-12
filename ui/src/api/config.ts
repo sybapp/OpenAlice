@@ -1,32 +1,34 @@
-import { headers } from './client'
-import type { AppConfig } from './types'
+import { fetchJson, fetchJsonOrThrow, fetchOkOrThrow, headers } from './client'
+import type { AppConfig, ConfigUpdateResponse } from './types'
+
+function isWrappedConfigUpdateResponse<T>(payload: unknown): payload is ConfigUpdateResponse<T> {
+  return typeof payload === 'object' && payload !== null && 'data' in payload
+}
+
+function normalizeConfigUpdateResponse<T>(payload: unknown): ConfigUpdateResponse<T> {
+  if (isWrappedConfigUpdateResponse<T>(payload)) return payload
+  return { data: payload as T }
+}
 
 export const configApi = {
   async load(): Promise<AppConfig> {
-    const res = await fetch('/api/config')
-    if (!res.ok) throw new Error('Failed to load config')
-    return res.json()
+    return fetchJson('/api/config')
   },
 
   async setBackend(backend: string): Promise<void> {
-    const res = await fetch('/api/config/ai-provider', {
+    await fetchOkOrThrow('/api/config/ai-provider', {
       method: 'PUT',
       headers,
       body: JSON.stringify({ backend }),
-    })
-    if (!res.ok) throw new Error('Failed to switch backend')
+    }, 'Failed to switch backend')
   },
 
-  async updateSection(section: string, data: unknown): Promise<unknown> {
-    const res = await fetch(`/api/config/${section}`, {
+  async updateSection<T>(section: string, data: unknown): Promise<ConfigUpdateResponse<T>> {
+    const payload = await fetchJsonOrThrow<unknown>(`/api/config/${section}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(data),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Save failed' }))
-      throw new Error(err.error || 'Save failed')
-    }
-    return res.json()
+    }, 'Save failed')
+    return normalizeConfigUpdateResponse<T>(payload)
   },
 }

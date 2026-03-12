@@ -1,18 +1,28 @@
 import { useState } from 'react'
 import { api, type AppConfig, type NewsCollectorConfig, type NewsCollectorFeed } from '../api'
 import { SaveIndicator } from '../components/SaveIndicator'
+import { SecretFieldEditor } from '../components/SecretFieldEditor'
 import { SDKSelector, DATASOURCE_OPTIONS } from '../components/SDKSelector'
 import { Section, Field, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'
 import { useConfigPage } from '../hooks/useConfigPage'
+import { useSecretFieldAction } from '../hooks/useSecretFieldAction'
 import type { SaveStatus } from '../hooks/useAutoSave'
 
-type OpenbbConfig = Record<string, unknown>
+type OpenbbKeyStatus = Record<string, boolean>
+
+interface OpenbbConfig {
+  enabled?: boolean
+  apiUrl?: string
+  providers?: Record<string, string>
+  providerKeys?: OpenbbKeyStatus
+}
 
 /** Combine two save statuses for the header indicator */
 function combineStatus(a: SaveStatus, b: SaveStatus): SaveStatus {
   if (a === 'error' || b === 'error') return 'error'
   if (a === 'saving' || b === 'saving') return 'saving'
+  if (a === 'applying' || b === 'applying') return 'applying'
   if (a === 'saved' || b === 'saved') return 'saved'
   return 'idle'
 }
@@ -97,7 +107,7 @@ export function DataSourcesPage() {
               />
               <ProviderKeysSection
                 openbb={openbb.config}
-                onChange={openbb.updateConfig}
+                onReplace={openbb.replaceConfig}
               />
             </>
           )}
@@ -247,28 +257,59 @@ const ALL_PROVIDER_KEYS = [...FREE_PROVIDERS, ...PAID_PROVIDERS].map((p) => p.ke
 
 function ProviderKeysSection({
   openbb,
-  onChange,
+  onReplace,
 }: {
   openbb: OpenbbConfig
-  onChange: (patch: Partial<OpenbbConfig>) => void
+  onReplace: (next: OpenbbConfig) => void
 }) {
-  const existing = (openbb.providerKeys ?? {}) as Record<string, string | undefined>
+  const existing = (openbb.providerKeys ?? {}) as OpenbbKeyStatus
   const [keys, setKeys] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
-    for (const k of ALL_PROVIDER_KEYS) init[k] = existing[k] || ''
+    for (const k of ALL_PROVIDER_KEYS) init[k] = ''
     return init
   })
   const [testStatus, setTestStatus] = useState<Record<string, 'idle' | 'testing' | 'ok' | 'error'>>({})
+  const actionState = useSecretFieldAction<string>()
 
   const setKey = (k: string, v: string) => {
     setKeys((prev) => ({ ...prev, [k]: v }))
     setTestStatus((prev) => ({ ...prev, [k]: 'idle' }))
-    const updated = { ...keys, [k]: v }
-    const providerKeys: Record<string, string> = {}
-    for (const [key, val] of Object.entries(updated)) {
-      if (val) providerKeys[key] = val
+  }
+
+  const saveProviderKey = async (provider: string) => {
+    const key = keys[provider]?.trim()
+    if (!key) {
+      actionState.setError(provider, 'Key is required')
+      return
     }
-    onChange({ providerKeys })
+
+    actionState.setSaving(provider)
+    try {
+      const result = await api.config.updateSection<OpenbbConfig>('openbb', {
+        providerKeys: { [provider]: key },
+      })
+      onReplace(result.data)
+      setKeys((prev) => ({ ...prev, [provider]: '' }))
+      actionState.setTransientStatus(provider, 'saved')
+    } catch (err) {
+      actionState.setError(provider, err instanceof Error ? err.message : 'Failed to save key')
+    }
+  }
+
+  const clearProviderKey = async (provider: string) => {
+    if (!existing[provider]) return
+
+    actionState.setSaving(provider)
+    try {
+      const result = await api.config.updateSection<OpenbbConfig>('openbb', {
+        providerKeys: { [provider]: null },
+      })
+      onReplace(result.data)
+      setKeys((prev) => ({ ...prev, [provider]: '' }))
+      actionState.setTransientStatus(provider, 'saved')
+    } catch (err) {
+      actionState.setError(provider, err instanceof Error ? err.message : 'Failed to clear key')
+    }
   }
 
   const testProvider = async (provider: string) => {
@@ -285,6 +326,7 @@ function ProviderKeysSection({
 
   const [expanded, setExpanded] = useState(false)
   const configuredCount = Object.values(keys).filter(Boolean).length
+  const retryProvider = actionState.state.key
 
   const renderGroup = (label: string, providers: ReadonlyArray<{ key: string; name: string; desc: string; hint: string }>) => (
     <div className="mb-4">
@@ -295,28 +337,42 @@ function ProviderKeysSection({
           <Field key={key} label={name}>
             <p className="text-[11px] text-text-muted mb-1">{desc}</p>
             <p className="text-[10px] text-text-muted/60 mb-1.5">{hint}</p>
-            <div className="flex items-center gap-2">
-              <input
-                className={inputClass}
-                type="password"
-                value={keys[key]}
-                onChange={(e) => setKey(key, e.target.value)}
-                placeholder="Not configured"
-              />
-              <button
-                onClick={() => testProvider(key)}
-                disabled={!keys[key] || status === 'testing'}
-                className={`shrink-0 border rounded-md px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-default ${
-                  status === 'ok'
-                    ? 'border-green text-green'
-                    : status === 'error'
-                      ? 'border-red text-red'
-                      : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
-                }`}
-              >
-                {status === 'testing' ? '...' : status === 'ok' ? 'OK' : status === 'error' ? 'Fail' : 'Test'}
-              </button>
-            </div>
+            <SecretFieldEditor
+              configured={existing[key]}
+              value={keys[key]}
+              onChange={(value) => {
+                setKey(key, value)
+                actionState.clearError(key)
+              }}
+              onSet={() => saveProviderKey(key)}
+              onClear={() => clearProviderKey(key)}
+              setDisabled={actionState.state.status === 'saving' || !keys[key].trim()}
+              clearDisabled={actionState.state.status === 'saving' || !existing[key]}
+              inputAriaLabel={`${name} Provider Key`}
+              setAriaLabel={`Set ${name} Provider Key`}
+              clearAriaLabel={`Clear ${name} Provider Key`}
+              configuredPlaceholder="Rotate key"
+              emptyPlaceholder="Set key"
+              configuredSetLabel="Set New Key"
+              emptySetLabel="Set Key"
+              clearLabel="Clear Key"
+              error={actionState.errorFor(key)}
+              inputTrailing={
+                <button
+                  onClick={() => testProvider(key)}
+                  disabled={!keys[key] || status === 'testing'}
+                  className={`shrink-0 border rounded-md px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-default ${
+                    status === 'ok'
+                      ? 'border-green text-green'
+                      : status === 'error'
+                        ? 'border-red text-red'
+                        : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
+                  }`}
+                >
+                  {status === 'testing' ? '...' : status === 'ok' ? 'OK' : status === 'error' ? 'Fail' : 'Test'}
+                </button>
+              }
+            />
           </Field>
         )
       })}
@@ -342,6 +398,10 @@ function ProviderKeysSection({
           </p>
           {renderGroup('Free', FREE_PROVIDERS)}
           {renderGroup('Paid / Freemium', PAID_PROVIDERS)}
+          <SaveIndicator
+            status={actionState.state.status}
+            onRetry={retryProvider ? () => saveProviderKey(retryProvider) : undefined}
+          />
         </div>
       )}
     </div>

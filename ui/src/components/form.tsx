@@ -37,9 +37,9 @@ interface FieldProps {
 
 export function Field({ label, children }: FieldProps) {
   return (
-    <div className="mb-3">
-      <label className="block text-[13px] text-text-muted mb-1">{label}</label>
+    <label className="block mb-3">
+      <span className="block text-[13px] text-text-muted mb-1">{label}</span>
       {children}
-    </div>
+    </label>
   )
 }

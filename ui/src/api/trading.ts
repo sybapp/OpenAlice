@@ -1,5 +1,14 @@
-import { fetchJson } from './client'
-import type { TradingAccount, AccountInfo, Position, WalletCommitLog, ReconnectResult, PlatformConfig, AccountConfig } from './types'
+import { fetchApi, fetchJson, fetchJsonOrThrow, fetchOkOrThrow, headers } from './client'
+import type {
+  TradingAccount,
+  AccountInfo,
+  Position,
+  WalletCommitLog,
+  ReconnectResult,
+  PlatformConfig,
+  TradingConfigAccount,
+  UpdateTradingAccountRequest,
+} from './types'
 
 // ==================== Unified Trading API ====================
 
@@ -17,7 +26,7 @@ export const tradingApi = {
   // ==================== Per-account ====================
 
   async reconnectAccount(accountId: string): Promise<ReconnectResult> {
-    const res = await fetch(`/api/trading/accounts/${accountId}/reconnect`, { method: 'POST' })
+    const res = await fetchApi(`/api/trading/accounts/${accountId}/reconnect`, { method: 'POST' })
     return res.json()
   },
 
@@ -49,49 +58,31 @@ export const tradingApi = {
 
   // ==================== Trading Config CRUD ====================
 
-  async loadTradingConfig(): Promise<{ platforms: PlatformConfig[]; accounts: AccountConfig[] }> {
+  async loadTradingConfig(): Promise<{ platforms: PlatformConfig[]; accounts: TradingConfigAccount[] }> {
     return fetchJson('/api/trading/config')
   },
 
   async upsertPlatform(platform: PlatformConfig): Promise<PlatformConfig> {
-    const res = await fetch(`/api/trading/config/platforms/${platform.id}`, {
+    return fetchJsonOrThrow(`/api/trading/config/platforms/${platform.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(platform),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || `Failed to save platform (${res.status})`)
-    }
-    return res.json()
+    }, 'Failed to save platform')
   },
 
   async deletePlatform(id: string): Promise<void> {
-    const res = await fetch(`/api/trading/config/platforms/${id}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || `Failed to delete platform (${res.status})`)
-    }
+    await fetchOkOrThrow(`/api/trading/config/platforms/${id}`, { method: 'DELETE' }, 'Failed to delete platform')
   },
 
-  async upsertAccount(account: AccountConfig): Promise<AccountConfig> {
-    const res = await fetch(`/api/trading/config/accounts/${account.id}`, {
+  async upsertAccount(account: UpdateTradingAccountRequest): Promise<TradingConfigAccount> {
+    return fetchJsonOrThrow(`/api/trading/config/accounts/${account.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(account),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || `Failed to save account (${res.status})`)
-    }
-    return res.json()
+    }, 'Failed to save account')
   },
 
   async deleteAccount(id: string): Promise<void> {
-    const res = await fetch(`/api/trading/config/accounts/${id}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || `Failed to delete account (${res.status})`)
-    }
+    await fetchOkOrThrow(`/api/trading/config/accounts/${id}`, { method: 'DELETE' }, 'Failed to delete account')
   },
 }

@@ -1,55 +1,28 @@
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useState, type ComponentType } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
+import { AuthSessionProvider } from './auth/session'
+import { AuthGate } from './components/AuthGate'
 
-const ChatPage = lazy(async () => {
-  const mod = await import('./pages/ChatPage')
-  return { default: mod.ChatPage }
-})
-const PortfolioPage = lazy(async () => {
-  const mod = await import('./pages/PortfolioPage')
-  return { default: mod.PortfolioPage }
-})
-const EventsPage = lazy(async () => {
-  const mod = await import('./pages/EventsPage')
-  return { default: mod.EventsPage }
-})
-const SettingsPage = lazy(async () => {
-  const mod = await import('./pages/SettingsPage')
-  return { default: mod.SettingsPage }
-})
-const AIProviderPage = lazy(async () => {
-  const mod = await import('./pages/AIProviderPage')
-  return { default: mod.AIProviderPage }
-})
-const DataSourcesPage = lazy(async () => {
-  const mod = await import('./pages/DataSourcesPage')
-  return { default: mod.DataSourcesPage }
-})
-const TradingPage = lazy(async () => {
-  const mod = await import('./pages/TradingPage')
-  return { default: mod.TradingPage }
-})
-const BacktestPage = lazy(async () => {
-  const mod = await import('./pages/BacktestPage')
-  return { default: mod.BacktestPage }
-})
-const ConnectorsPage = lazy(async () => {
-  const mod = await import('./pages/ConnectorsPage')
-  return { default: mod.ConnectorsPage }
-})
-const DevPage = lazy(async () => {
-  const mod = await import('./pages/DevPage')
-  return { default: mod.DevPage }
-})
-const HeartbeatPage = lazy(async () => {
-  const mod = await import('./pages/HeartbeatPage')
-  return { default: mod.HeartbeatPage }
-})
-const ToolsPage = lazy(async () => {
-  const mod = await import('./pages/ToolsPage')
-  return { default: mod.ToolsPage }
-})
+function lazyPage<T extends Record<string, ComponentType<any>>>(loader: () => Promise<T>, key: keyof T) {
+  return lazy(async () => {
+    const mod = await loader()
+    return { default: mod[key] }
+  })
+}
+
+const ChatPage = lazyPage(() => import('./pages/ChatPage'), 'ChatPage')
+const PortfolioPage = lazyPage(() => import('./pages/PortfolioPage'), 'PortfolioPage')
+const EventsPage = lazyPage(() => import('./pages/EventsPage'), 'EventsPage')
+const SettingsPage = lazyPage(() => import('./pages/SettingsPage'), 'SettingsPage')
+const AIProviderPage = lazyPage(() => import('./pages/AIProviderPage'), 'AIProviderPage')
+const DataSourcesPage = lazyPage(() => import('./pages/DataSourcesPage'), 'DataSourcesPage')
+const TradingPage = lazyPage(() => import('./pages/TradingPage'), 'TradingPage')
+const BacktestPage = lazyPage(() => import('./pages/BacktestPage'), 'BacktestPage')
+const ConnectorsPage = lazyPage(() => import('./pages/ConnectorsPage'), 'ConnectorsPage')
+const DevPage = lazyPage(() => import('./pages/DevPage'), 'DevPage')
+const HeartbeatPage = lazyPage(() => import('./pages/HeartbeatPage'), 'HeartbeatPage')
+const ToolsPage = lazyPage(() => import('./pages/ToolsPage'), 'ToolsPage')
 
 export type Page =
   | 'chat' | 'portfolio' | 'events' | 'heartbeat' | 'data-sources' | 'connectors'
@@ -80,7 +53,7 @@ function RouteFallback() {
   )
 }
 
-export function App() {
+function AppShell() {
   const [sseConnected, setSseConnected] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -124,5 +97,15 @@ export function App() {
         </Suspense>
       </main>
     </div>
+  )
+}
+
+export function App() {
+  return (
+    <AuthSessionProvider>
+      <AuthGate>
+        <AppShell />
+      </AuthGate>
+    </AuthSessionProvider>
   )
 }

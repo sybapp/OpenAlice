@@ -24,70 +24,88 @@ export interface WebConfig {
   authToken?: string
 }
 
+function createWebApp(args: {
+  ctx: EngineContext
+  session: SessionStore
+  sseClients: Map<string, SSEClient>
+  getAuthToken: () => string | undefined
+}): Hono {
+  const { ctx, session, sseClients, getAuthToken } = args
+  const app = new Hono()
+
+  app.onError((err, c) => {
+    if (err instanceof SyntaxError) {
+      return c.json({ error: 'Invalid JSON' }, 400)
+    }
+    console.error('web: unhandled error:', err)
+    return c.json({ error: err.message }, 500)
+  })
+
+  const authToken = getAuthToken()
+  if (!authToken) {
+    console.warn('web: ⚠ no authToken configured — API is open to all network traffic')
+  }
+
+  app.use('/api/*', cors({
+    origin: authToken ? (origin) => origin : '*',
+    credentials: !!authToken,
+  }))
+  app.use('/api/*', createAuthMiddleware(getAuthToken))
+
+  app.get('/api/auth/check', (c) => {
+    return c.json({ authRequired: !!getAuthToken() })
+  })
+  app.post('/api/auth/verify', async (c) => {
+    const currentToken = getAuthToken()
+    if (!currentToken) return c.json({ valid: true })
+    const body = await c.req.json<{ token?: string }>()
+    return c.json({ valid: body.token === currentToken })
+  })
+
+  app.route('/api/chat', createChatRoutes({ ctx, session, sseClients }))
+  app.route('/api/media', createMediaRoutes())
+  app.route('/api/config', createConfigRoutes({
+    onConnectorsChange: async () => { await ctx.reconnectConnectors() },
+  }))
+  app.route('/api/openbb', createOpenbbRoutes())
+  app.route('/api/events', createEventsRoutes(ctx))
+  app.route('/api/cron', createCronRoutes(ctx))
+  app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
+  app.route('/api/trading/config', createTradingConfigRoutes(ctx))
+  app.route('/api/trading', createTradingRoutes(ctx))
+  app.route('/api/backtest', createBacktestRoutes(ctx))
+  app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
+  app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
+
+  const uiRoot = resolve('dist/ui')
+  app.use('/*', serveStatic({ root: uiRoot }))
+  app.get('*', serveStatic({ root: uiRoot, path: 'index.html' }))
+
+  return app
+}
+
 export class WebPlugin implements Plugin {
   name = 'web'
   private server: ReturnType<typeof serve> | null = null
   private sseClients = new Map<string, SSEClient>()
   private unregisterConnector?: () => void
+  private ctx: EngineContext | null = null
 
   constructor(private config: WebConfig) {}
 
   async start(ctx: EngineContext) {
+    this.ctx = ctx
     // Initialize session (mirrors Telegram's per-user pattern, single user for web)
     const session = new SessionStore('web/default')
     await session.restore()
 
-    const app = new Hono()
-
-    app.onError((err, c) => {
-      if (err instanceof SyntaxError) {
-        return c.json({ error: 'Invalid JSON' }, 400)
-      }
-      console.error('web: unhandled error:', err)
-      return c.json({ error: err.message }, 500)
+    const getAuthToken = () => this.config.authToken
+    const app = createWebApp({
+      ctx,
+      session,
+      sseClients: this.sseClients,
+      getAuthToken,
     })
-
-    const authToken = this.config.authToken
-    if (!authToken) {
-      console.warn('web: ⚠ no authToken configured — API is open to all network traffic')
-    }
-
-    app.use('/api/*', cors({
-      origin: authToken ? (origin) => origin : '*',
-      credentials: !!authToken,
-    }))
-    app.use('/api/*', createAuthMiddleware(authToken))
-
-    // ==================== Auth endpoints (exempt from auth middleware) ====================
-    app.get('/api/auth/check', (c) => {
-      return c.json({ authRequired: !!authToken })
-    })
-    app.post('/api/auth/verify', async (c) => {
-      if (!authToken) return c.json({ valid: true })
-      const body = await c.req.json<{ token?: string }>()
-      return c.json({ valid: body.token === authToken })
-    })
-
-    // ==================== Mount route modules ====================
-    app.route('/api/chat', createChatRoutes({ ctx, session, sseClients: this.sseClients }))
-    app.route('/api/media', createMediaRoutes())
-    app.route('/api/config', createConfigRoutes({
-      onConnectorsChange: async () => { await ctx.reconnectConnectors() },
-    }))
-    app.route('/api/openbb', createOpenbbRoutes())
-    app.route('/api/events', createEventsRoutes(ctx))
-    app.route('/api/cron', createCronRoutes(ctx))
-    app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
-    app.route('/api/trading/config', createTradingConfigRoutes(ctx))
-    app.route('/api/trading', createTradingRoutes(ctx))
-    app.route('/api/backtest', createBacktestRoutes(ctx))
-    app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
-    app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
-
-    // ==================== Serve UI (Vite build output) ====================
-    const uiRoot = resolve('dist/ui')
-    app.use('/*', serveStatic({ root: uiRoot }))
-    app.get('*', serveStatic({ root: uiRoot, path: 'index.html' }))
 
     // ==================== Connector registration ====================
     this.unregisterConnector = ctx.connectorCenter.register(
@@ -104,6 +122,23 @@ export class WebPlugin implements Plugin {
     this.sseClients.clear()
     this.unregisterConnector?.()
     this.server?.close()
+    this.server = null
+  }
+
+  async reconfigure(nextConfig: WebConfig): Promise<'updated' | 'restarted' | 'unchanged'> {
+    const prev = this.config
+    this.config = nextConfig
+
+    if (prev.port === nextConfig.port) {
+      return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
+    }
+
+    const ctx = this.ctx
+    await this.stop()
+    if (ctx) {
+      await this.start(ctx)
+    }
+    return 'restarted'
   }
 
   private createConnector(

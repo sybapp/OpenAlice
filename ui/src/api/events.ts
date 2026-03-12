@@ -1,3 +1,4 @@
+import { fetchJson, withAuthQuery } from './client'
 import type { EventLogEntry } from './types'
 
 export interface EventQueryResult {
@@ -15,9 +16,7 @@ export const eventsApi = {
     if (opts.pageSize) params.set('pageSize', String(opts.pageSize))
     if (opts.type) params.set('type', opts.type)
     const qs = params.toString()
-    const res = await fetch(`/api/events${qs ? `?${qs}` : ''}`)
-    if (!res.ok) throw new Error('Failed to query events')
-    return res.json()
+    return fetchJson(`/api/events${qs ? `?${qs}` : ''}`)
   },
 
   async recent(opts: { afterSeq?: number; limit?: number; type?: string } = {}): Promise<{ entries: EventLogEntry[]; lastSeq: number }> {
@@ -26,13 +25,11 @@ export const eventsApi = {
     if (opts.limit) params.set('limit', String(opts.limit))
     if (opts.type) params.set('type', opts.type)
     const qs = params.toString()
-    const res = await fetch(`/api/events/recent${qs ? `?${qs}` : ''}`)
-    if (!res.ok) throw new Error('Failed to load events')
-    return res.json()
+    return fetchJson(`/api/events/recent${qs ? `?${qs}` : ''}`)
   },
 
   connectSSE(onEvent: (entry: EventLogEntry) => void): EventSource {
-    const es = new EventSource('/api/events/stream')
+    const es = new EventSource(withAuthQuery('/api/events/stream'))
     es.onmessage = (event) => {
       try {
         const entry = JSON.parse(event.data)

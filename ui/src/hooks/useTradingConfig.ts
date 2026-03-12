@@ -1,24 +1,37 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api'
-import type { PlatformConfig, AccountConfig, ReconnectResult } from '../api/types'
+import type {
+  PlatformConfig,
+  TradingConfigAccount,
+  UpdateTradingAccountRequest,
+  ReconnectResult,
+} from '../api/types'
 
 export interface UseTradingConfigResult {
   platforms: PlatformConfig[]
-  accounts: AccountConfig[]
+  accounts: TradingConfigAccount[]
   loading: boolean
   error: string | null
 
   savePlatform: (p: PlatformConfig) => Promise<void>
   deletePlatform: (id: string) => Promise<void>
-  saveAccount: (a: AccountConfig) => Promise<void>
+  saveAccount: (a: UpdateTradingAccountRequest) => Promise<TradingConfigAccount>
   deleteAccount: (id: string) => Promise<void>
   reconnectAccount: (id: string) => Promise<ReconnectResult>
   refresh: () => Promise<void>
 }
 
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id)
+  if (index < 0) return [...items, next]
+  const updated = [...items]
+  updated[index] = next
+  return updated
+}
+
 export function useTradingConfig(): UseTradingConfigResult {
   const [platforms, setPlatforms] = useState<PlatformConfig[]>([])
-  const [accounts, setAccounts] = useState<AccountConfig[]>([])
+  const [accounts, setAccounts] = useState<TradingConfigAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,19 +49,13 @@ export function useTradingConfig(): UseTradingConfigResult {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const savePlatform = useCallback(async (p: PlatformConfig) => {
     await api.trading.upsertPlatform(p)
-    setPlatforms((prev) => {
-      const idx = prev.findIndex((x) => x.id === p.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = p
-        return next
-      }
-      return [...prev, p]
-    })
+    setPlatforms((prev) => upsertById(prev, p))
   }, [])
 
   const deletePlatform = useCallback(async (id: string) => {
@@ -56,17 +63,10 @@ export function useTradingConfig(): UseTradingConfigResult {
     setPlatforms((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
-  const saveAccount = useCallback(async (a: AccountConfig) => {
-    await api.trading.upsertAccount(a)
-    setAccounts((prev) => {
-      const idx = prev.findIndex((x) => x.id === a.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = a
-        return next
-      }
-      return [...prev, a]
-    })
+  const saveAccount = useCallback(async (a: UpdateTradingAccountRequest) => {
+    const saved = await api.trading.upsertAccount(a)
+    setAccounts((prev) => upsertById(prev, saved))
+    return saved
   }, [])
 
   const deleteAccount = useCallback(async (id: string) => {

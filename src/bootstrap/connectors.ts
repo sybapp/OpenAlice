@@ -14,9 +14,73 @@ import { TelegramPlugin } from '../connectors/telegram/index.js'
 import { WebPlugin } from '../connectors/web/index.js'
 import { McpAskPlugin } from '../connectors/mcp-ask/index.js'
 
+function sameNumberArray(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 export interface PluginsResult {
   corePlugins: Plugin[]
   optionalPlugins: Map<string, Plugin>
+}
+
+interface OptionalPluginReconcileArgs {
+  optionalPlugins: Map<string, Plugin>
+  ctx: EngineContext
+  changes: string[]
+  name: string
+  wanted: boolean
+  create: () => Plugin
+  changed: (plugin: Plugin) => boolean
+  startedMessage: string
+  stoppedMessage: string
+  restartedMessage: string
+}
+
+function createMcpAskPlugin(config: Config['connectors']['mcpAsk']): McpAskPlugin {
+  return new McpAskPlugin({
+    port: config.port!,
+    authToken: config.authToken,
+  })
+}
+
+function createTelegramPlugin(config: Config['connectors']['telegram']): TelegramPlugin {
+  return new TelegramPlugin({
+    token: config.botToken!,
+    allowedChatIds: config.chatIds,
+  })
+}
+
+function setOptionalPlugin(optionalPlugins: Map<string, Plugin>, name: string, plugin?: Plugin): void {
+  if (!plugin) return
+  optionalPlugins.set(name, plugin)
+}
+
+async function reconcileOptionalPlugin(args: OptionalPluginReconcileArgs): Promise<void> {
+  const { optionalPlugins, ctx, changes, name, wanted, create, changed, startedMessage, stoppedMessage, restartedMessage } = args
+  const current = optionalPlugins.get(name)
+
+  if (current && !wanted) {
+    await current.stop()
+    optionalPlugins.delete(name)
+    changes.push(stoppedMessage)
+    return
+  }
+
+  if (!current && wanted) {
+    const plugin = create()
+    await plugin.start(ctx)
+    optionalPlugins.set(name, plugin)
+    changes.push(startedMessage)
+    return
+  }
+
+  if (!current || !wanted || !changed(current)) return
+
+  await current.stop()
+  const plugin = create()
+  await plugin.start(ctx)
+  optionalPlugins.set(name, plugin)
+  changes.push(restartedMessage)
 }
 
 export function initPlugins(config: Config, toolCenter: ToolCenter): PluginsResult {
@@ -31,25 +95,30 @@ export function initPlugins(config: Config, toolCenter: ToolCenter): PluginsResu
   }
 
   const optionalPlugins = new Map<string, Plugin>()
-
-  if (config.connectors.mcpAsk.enabled && config.connectors.mcpAsk.port) {
-    optionalPlugins.set('mcp-ask', new McpAskPlugin({ port: config.connectors.mcpAsk.port, authToken: config.connectors.mcpAsk.authToken }))
-  }
-
-  if (config.connectors.telegram.enabled && config.connectors.telegram.botToken) {
-    optionalPlugins.set('telegram', new TelegramPlugin({
-      token: config.connectors.telegram.botToken,
-      allowedChatIds: config.connectors.telegram.chatIds,
-    }))
-  }
+  setOptionalPlugin(
+    optionalPlugins,
+    'mcp-ask',
+    config.connectors.mcpAsk.enabled && config.connectors.mcpAsk.port
+      ? createMcpAskPlugin(config.connectors.mcpAsk)
+      : undefined,
+  )
+  setOptionalPlugin(
+    optionalPlugins,
+    'telegram',
+    config.connectors.telegram.enabled && config.connectors.telegram.botToken
+      ? createTelegramPlugin(config.connectors.telegram)
+      : undefined,
+  )
 
   return { corePlugins, optionalPlugins }
 }
 
-export function createConnectorReconnector(
-  optionalPlugins: Map<string, Plugin>,
-  getCtx: () => EngineContext,
-): () => Promise<ReconnectResult> {
+export function createConnectorReconnector(args: {
+  corePlugins: Plugin[]
+  optionalPlugins: Map<string, Plugin>
+  getCtx: () => EngineContext
+}): () => Promise<ReconnectResult> {
+  const { corePlugins, optionalPlugins, getCtx } = args
   let reconnecting = false
 
   return async (): Promise<ReconnectResult> => {
@@ -60,36 +129,64 @@ export function createConnectorReconnector(
       const ctx = getCtx()
       const changes: string[] = []
 
+      // --- Web ---
+      const webPlugin = corePlugins.find((plugin) => plugin instanceof WebPlugin)
+      if (webPlugin instanceof WebPlugin) {
+        const result = await webPlugin.reconfigure({
+          port: fresh.connectors.web.port,
+          authToken: fresh.connectors.web.authToken,
+        })
+        if (result === 'updated') changes.push('web updated')
+        if (result === 'restarted') changes.push(`web restarted on port ${fresh.connectors.web.port}`)
+      }
+
       // --- MCP Ask ---
       const mcpAskWanted = fresh.connectors.mcpAsk.enabled && !!fresh.connectors.mcpAsk.port
-      const mcpAskRunning = optionalPlugins.has('mcp-ask')
-      if (mcpAskRunning && !mcpAskWanted) {
-        await optionalPlugins.get('mcp-ask')!.stop()
-        optionalPlugins.delete('mcp-ask')
-        changes.push('mcp-ask stopped')
-      } else if (!mcpAskRunning && mcpAskWanted) {
-        const p = new McpAskPlugin({ port: fresh.connectors.mcpAsk.port!, authToken: fresh.connectors.mcpAsk.authToken })
-        await p.start(ctx)
-        optionalPlugins.set('mcp-ask', p)
-        changes.push('mcp-ask started')
-      }
+      await reconcileOptionalPlugin({
+        optionalPlugins,
+        ctx,
+        changes,
+        name: 'mcp-ask',
+        wanted: mcpAskWanted,
+        create: () => createMcpAskPlugin(fresh.connectors.mcpAsk),
+        changed: (plugin) => {
+          const currentConfig = plugin instanceof McpAskPlugin
+            ? plugin.getConfig()
+            : undefined
+          return (
+            !currentConfig ||
+            currentConfig.port !== fresh.connectors.mcpAsk.port ||
+            currentConfig.authToken !== fresh.connectors.mcpAsk.authToken
+          )
+        },
+        startedMessage: 'mcp-ask started',
+        stoppedMessage: 'mcp-ask stopped',
+        restartedMessage: 'mcp-ask restarted',
+      })
 
       // --- Telegram ---
       const telegramWanted = fresh.connectors.telegram.enabled && !!fresh.connectors.telegram.botToken
-      const telegramRunning = optionalPlugins.has('telegram')
-      if (telegramRunning && !telegramWanted) {
-        await optionalPlugins.get('telegram')!.stop()
-        optionalPlugins.delete('telegram')
-        changes.push('telegram stopped')
-      } else if (!telegramRunning && telegramWanted) {
-        const p = new TelegramPlugin({
-          token: fresh.connectors.telegram.botToken!,
-          allowedChatIds: fresh.connectors.telegram.chatIds,
-        })
-        await p.start(ctx)
-        optionalPlugins.set('telegram', p)
-        changes.push('telegram started')
-      }
+      await reconcileOptionalPlugin({
+        optionalPlugins,
+        ctx,
+        changes,
+        name: 'telegram',
+        wanted: telegramWanted,
+        create: () => createTelegramPlugin(fresh.connectors.telegram),
+        changed: (plugin) => {
+          const currentConfig = plugin instanceof TelegramPlugin
+            ? plugin.getConfig()
+            : undefined
+          return (
+            !currentConfig ||
+            currentConfig.token !== fresh.connectors.telegram.botToken ||
+            !sameNumberArray(currentConfig.allowedChatIds, fresh.connectors.telegram.chatIds)
+          )
+        },
+        startedMessage: 'telegram started',
+        stoppedMessage: 'telegram stopped',
+        restartedMessage: 'telegram restarted',
+      })
 
       if (changes.length > 0) {
         console.log(`reconnect: connectors — ${changes.join(', ')}`)

@@ -1,10 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'applying' | 'error'
+type SaveCompletionStatus = Extract<SaveStatus, 'saved' | 'applying'>
+
+export interface SaveResult {
+  status?: SaveCompletionStatus
+}
 
 interface UseAutoSaveOptions<T> {
   data: T
-  save: (data: T) => Promise<void>
+  save: (data: T) => Promise<void | SaveResult>
   delay?: number
   enabled?: boolean
 }
@@ -17,7 +22,7 @@ export function useAutoSave<T>({
 }: UseAutoSaveOptions<T>): { status: SaveStatus; flush: () => void; retry: () => void } {
   const [status, setStatus] = useState<SaveStatus>('idle')
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestDataRef = useRef<T>(data)
   const saveRef = useRef(save)
   const inflightRef = useRef(false)
@@ -27,7 +32,15 @@ export function useAutoSave<T>({
   latestDataRef.current = data
   saveRef.current = save
 
-  const doSave = useCallback(async () => {
+  const clearSaveTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+  }
+
+  const clearStatusTimer = () => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+  }
+
+  const runSave = useCallback(async () => {
     if (inflightRef.current) {
       pendingRef.current = true
       return
@@ -35,14 +48,14 @@ export function useAutoSave<T>({
     inflightRef.current = true
     setStatus('saving')
     try {
-      await saveRef.current(latestDataRef.current)
-      setStatus('saved')
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
-      savedTimerRef.current = setTimeout(() => setStatus('idle'), 2000)
+      const result = await saveRef.current(latestDataRef.current)
+      setStatus(result?.status ?? 'saved')
+      clearStatusTimer()
+      statusTimerRef.current = setTimeout(() => setStatus('idle'), 2000)
       if (pendingRef.current) {
         pendingRef.current = false
         inflightRef.current = false
-        doSave()
+        void runSave()
         return
       }
     } catch {
@@ -58,28 +71,28 @@ export function useAutoSave<T>({
       initialRef.current = false
       return
     }
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(doSave, delay)
+    clearSaveTimer()
+    timerRef.current = setTimeout(runSave, delay)
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      clearSaveTimer()
     }
-  }, [data, delay, enabled, doSave])
+  }, [data, delay, enabled, runSave])
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      clearSaveTimer()
+      clearStatusTimer()
     }
   }, [])
 
   const flush = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    doSave()
-  }, [doSave])
+    clearSaveTimer()
+    void runSave()
+  }, [runSave])
 
   const retry = useCallback(() => {
-    doSave()
-  }, [doSave])
+    void runSave()
+  }, [runSave])
 
   return { status, flush, retry }
 }

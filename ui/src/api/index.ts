@@ -2,27 +2,30 @@
  * Unified API client — re-exports domain modules as the `api` namespace.
  * Existing imports like `import { api } from '../api'` continue to work.
  */
-import { chatApi } from './chat'
-import { configApi } from './config'
-import { eventsApi } from './events'
-import { cronApi } from './cron'
-import { heartbeatApi } from './heartbeat'
-import { tradingApi } from './trading'
-import { backtestApi } from './backtest'
-import { openbbApi } from './openbb'
-import { devApi } from './dev'
-import { toolsApi } from './tools'
+import { chatApi as chat } from './chat'
+import { configApi as config } from './config'
+import { authApi as auth } from './auth'
+import { eventsApi as events } from './events'
+import { cronApi as cron } from './cron'
+import { heartbeatApi as heartbeat } from './heartbeat'
+import { tradingApi as trading } from './trading'
+import { backtestApi as backtest } from './backtest'
+import { openbbApi as openbb } from './openbb'
+import { devApi as dev } from './dev'
+import { toolsApi as tools } from './tools'
+
 export const api = {
-  chat: chatApi,
-  config: configApi,
-  events: eventsApi,
-  cron: cronApi,
-  heartbeat: heartbeatApi,
-  trading: tradingApi,
-  backtest: backtestApi,
-  openbb: openbbApi,
-  dev: devApi,
-  tools: toolsApi,
+  auth,
+  chat,
+  config,
+  events,
+  cron,
+  heartbeat,
+  trading,
+  backtest,
+  openbb,
+  dev,
+  tools,
 }
 
 // Re-export all types for convenience
@@ -57,6 +60,10 @@ export type {
   BacktestGitState,
   SessionEntry,
   ConnectorsConfig,
+  ConfigUpdateResponse,
+  UpdateConnectorsRequest,
+  TradingConfigAccount,
+  UpdateTradingAccountRequest,
   NewsCollectorConfig,
   NewsCollectorFeed,
 } from './types'

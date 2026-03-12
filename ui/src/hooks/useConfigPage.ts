@@ -1,14 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { api, type AppConfig } from '../api'
+import { api, type AppConfig, type ConfigUpdateResponse } from '../api'
 import { useAutoSave, type SaveStatus } from './useAutoSave'
 
-interface UseConfigPageOptions<T> {
+interface UseConfigPageOptions<T, TPayload = T> {
   /** Config section key, e.g. 'crypto', 'securities', 'openbb' */
   section: string
   /** Extract the sub-config from the full AppConfig */
   extract: (full: AppConfig) => T
   /** Auto-save debounce delay in ms (default: 600) */
   delay?: number
+  /** Transform local UI state into the payload sent to the backend. */
+  toPayload?: (data: T) => TPayload
+  /** Derive the success state shown after a save completes. */
+  getSuccessStatus?: (result: ConfigUpdateResponse<T>) => Extract<SaveStatus, 'saved' | 'applying'>
 }
 
 interface UseConfigPageResult<T> {
@@ -20,6 +24,8 @@ interface UseConfigPageResult<T> {
   updateConfig: (patch: Partial<T>) => void
   /** Update config and immediately flush (no debounce) */
   updateConfigImmediate: (patch: Partial<T>) => void
+  /** Replace local config with the latest server-shaped value. */
+  replaceConfig: (next: T) => void
   retry: () => void
 }
 
@@ -27,32 +33,47 @@ interface UseConfigPageResult<T> {
  * Shared hook for config pages (DataSources, Trading, Securities).
  * Handles: load → autoSave → flush → updateConfig/updateConfigImmediate.
  */
-export function useConfigPage<T extends object>({
+export function useConfigPage<T extends object, TPayload = T>({
   section,
   extract,
   delay = 600,
-}: UseConfigPageOptions<T>): UseConfigPageResult<T> {
+  toPayload,
+  getSuccessStatus,
+}: UseConfigPageOptions<T, TPayload>): UseConfigPageResult<T> {
   const [fullConfig, setFullConfig] = useState<AppConfig | null>(null)
   const [config, setConfig] = useState<T | null>(null)
   const [loadError, setLoadError] = useState(false)
   const flushRequestedRef = useRef(false)
+  const extractRef = useRef(extract)
+
+  extractRef.current = extract
+
+  const mergePatch = useCallback((patch: Partial<T>) => {
+    setConfig((prev) => (prev ? { ...prev, ...patch } : prev))
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoadError(false)
+    try {
+      const full = await api.config.load()
+      setFullConfig(full)
+      setConfig(extractRef.current(full))
+    } catch {
+      setLoadError(true)
+    }
+  }, [])
 
   useEffect(() => {
-    api.config
-      .load()
-      .then((full) => {
-        setFullConfig(full)
-        setConfig(extract(full))
-      })
-      .catch(() => setLoadError(true))
-  }, []) // extract is stable (caller should memoize or use inline arrow)
+    void load()
+  }, [load])
 
   const saveConfig = useCallback(
     async (data: T) => {
-      const result = await api.config.updateSection(section, data)
-      setConfig(result as T)
+      const result = await api.config.updateSection<T>(section, toPayload ? toPayload(data) : data)
+      setConfig(result.data)
+      return { status: getSuccessStatus?.(result) ?? 'saved' }
     },
-    [section],
+    [getSuccessStatus, section, toPayload],
   )
 
   const { status, flush, retry } = useAutoSave({
@@ -71,13 +92,26 @@ export function useConfigPage<T extends object>({
   }, [config, flush])
 
   const updateConfig = useCallback((patch: Partial<T>) => {
-    setConfig((prev) => (prev ? { ...prev, ...patch } : prev))
-  }, [])
+    mergePatch(patch)
+  }, [mergePatch])
 
   const updateConfigImmediate = useCallback((patch: Partial<T>) => {
-    setConfig((prev) => (prev ? { ...prev, ...patch } : prev))
     flushRequestedRef.current = true
+    mergePatch(patch)
+  }, [mergePatch])
+
+  const replaceConfig = useCallback((next: T) => {
+    setConfig(next)
   }, [])
 
-  return { config, fullConfig, status, loadError, updateConfig, updateConfigImmediate, retry }
+  return {
+    config,
+    fullConfig,
+    status,
+    loadError,
+    updateConfig,
+    updateConfigImmediate,
+    replaceConfig,
+    retry: loadError ? load : retry,
+  }
 }

@@ -5,6 +5,7 @@ import { createAuthMiddleware } from './auth-middleware.js'
 function buildApp(token: string | undefined) {
   const app = new Hono()
   app.use('*', createAuthMiddleware(token))
+  app.get('/api/auth/check', (c) => c.json({ ok: true }))
   app.get('/test', (c) => c.json({ ok: true }))
   return app
 }
@@ -31,6 +32,18 @@ describe('createAuthMiddleware', () => {
       const res = await app.request('/test', {
         headers: { Authorization: 'Bearer secret-token-123' },
       })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.ok).toBe(true)
+    })
+
+    it('passes through GET requests with authToken query param', async () => {
+      const res = await app.request('/test?authToken=secret-token-123')
+      expect(res.status).toBe(200)
+    })
+
+    it('always allows /api/auth/* routes through', async () => {
+      const res = await app.request('/api/auth/check')
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.ok).toBe(true)

@@ -59,10 +59,10 @@ export interface EngineContext {
   getAccountGit: (accountId: string) => ITradingGit | undefined
   /** Reconnect a specific trading account by ID. */
   reconnectAccount: (accountId: string) => Promise<ReconnectResult>
+  /** Tear down the runtime state for a trading account by ID. */
+  removeTradingAccountRuntime: (accountId: string) => Promise<void>
   /** Reconnect connector plugins (Telegram, MCP-Ask, etc.). */
   reconnectConnectors: () => Promise<ReconnectResult>
-  /** Remove account setup state (git, wallet) when an account is deleted. */
-  removeAccountSetup?: (accountId: string) => void
 }
 
 /** A media attachment collected from tool results (e.g. browser screenshots). */

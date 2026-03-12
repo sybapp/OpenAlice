@@ -44,6 +44,13 @@ export class TelegramPlugin implements Plugin {
     this.claudeCodeConfig = claudeCodeConfig
   }
 
+  getConfig(): TelegramConfig {
+    return {
+      ...this.config,
+      allowedChatIds: [...this.config.allowedChatIds],
+    }
+  }
+
   async start(engineCtx: EngineContext) {
     this.connectorCenter = engineCtx.connectorCenter
 

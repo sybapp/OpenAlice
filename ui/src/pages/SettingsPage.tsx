@@ -1,12 +1,31 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api, type AppConfig } from '../api'
+import { useAuthSession } from '../auth/session'
 import { Toggle } from '../components/Toggle'
 import { SaveIndicator } from '../components/SaveIndicator'
 import { Section, Field, inputClass } from '../components/form'
 import { useAutoSave } from '../hooks/useAutoSave'
 
+function getSessionCopy(authRequired: boolean, sessionState: 'checking' | 'ready' | 'locked') {
+  if (!authRequired) {
+    return {
+      title: 'Web auth is off for this workspace.',
+      description: 'Anyone who can reach the Web UI can open it without a token.',
+      canLock: false,
+    }
+  }
+
+  return {
+    title: sessionState === 'ready' ? 'Unlocked for this tab.' : 'This tab is currently locked.',
+    description: 'Locking only clears the token from this tab. Other tabs keep their own session state.',
+    canLock: sessionState === 'ready',
+  }
+}
+
 export function SettingsPage() {
+  const { authRequired, sessionState, lock } = useAuthSession()
   const [config, setConfig] = useState<AppConfig | null>(null)
+  const sessionCopy = getSessionCopy(authRequired, sessionState)
 
   useEffect(() => {
     api.config.load().then(setConfig).catch(() => {})
@@ -23,6 +42,25 @@ export function SettingsPage() {
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
         {config && (
           <div className="max-w-[640px] space-y-8">
+            <Section
+              id="web-session"
+              title="Web Session"
+              description="Session controls for the current browser tab."
+            >
+              <div className="rounded-lg border border-border bg-bg-secondary/40 px-4 py-3">
+                <p className="text-sm text-text">{sessionCopy.title}</p>
+                <p className="mt-1 text-[12px] text-text-muted">{sessionCopy.description}</p>
+                {sessionCopy.canLock && (
+                  <button
+                    onClick={lock}
+                    className="mt-3 rounded-lg border border-border px-3 py-2 text-[13px] font-medium text-text transition-colors hover:bg-bg-tertiary"
+                  >
+                    Lock this tab
+                  </button>
+                )}
+              </div>
+            </Section>
+
             {/* Agent */}
             <Section id="agent" title="Agent" description="Controls file-system and tool permissions for the AI. Changes apply on the next request.">
               <div className="flex items-center justify-between">
@@ -92,4 +130,3 @@ function CompactionForm({ config }: { config: AppConfig }) {
     </>
   )
 }
-

@@ -213,6 +213,65 @@ function sideForProtection(position: Position): 'buy' | 'sell' {
   return position.side === 'long' ? 'sell' : 'buy'
 }
 
+function toContractRef(params: {
+  aliceId?: string
+  symbol?: string
+  secType?: string
+  currency?: string
+  exchange?: string
+}): Partial<Contract> {
+  const contract: Partial<Contract> = {}
+  if (params.aliceId) contract.aliceId = params.aliceId
+  if (params.symbol) contract.symbol = params.symbol
+  if (params.secType) contract.secType = params.secType as Contract['secType']
+  if (params.currency) contract.currency = params.currency
+  if (params.exchange) contract.exchange = params.exchange
+  return contract
+}
+
+function toOrderResult(result: {
+  success: boolean
+  error?: string
+  orderId?: string
+  filledPrice?: number
+  filledQty?: number
+}, status: 'pending' | 'filled' | 'partially_filled') {
+  return {
+    success: result.success,
+    error: result.error,
+    order: result.success
+      ? {
+          id: result.orderId,
+          status,
+          filledPrice: result.filledPrice,
+          filledQty: result.filledQty,
+        }
+      : undefined,
+  }
+}
+
+function buildModifyOrderChanges(params: {
+  qty?: number
+  price?: number
+  stopPrice?: number
+  trailingAmount?: number
+  trailingPercent?: number
+  type?: OrderRequest['type']
+  timeInForce?: OrderRequest['timeInForce']
+  goodTillDate?: string
+}): Partial<OrderRequest> {
+  const changes: Partial<OrderRequest> = {}
+  if (params.qty != null) changes.qty = params.qty
+  if (params.price != null) changes.price = params.price
+  if (params.stopPrice != null) changes.stopPrice = params.stopPrice
+  if (params.trailingAmount != null) changes.trailingAmount = params.trailingAmount
+  if (params.trailingPercent != null) changes.trailingPercent = params.trailingPercent
+  if (params.type) changes.type = params.type
+  if (params.timeInForce) changes.timeInForce = params.timeInForce
+  if (params.goodTillDate) changes.goodTillDate = params.goodTillDate
+  return changes
+}
+
 function computeStopLossPrice(plan: ProtectionPlan, position: Position, entryPrice: number): number | undefined {
   if (isFinitePositive(plan.stopLossPrice)) return plan.stopLossPrice
   if (!isFinitePositive(plan.stopLossPct)) return undefined
@@ -371,7 +430,14 @@ export interface DispatcherHandle {
   dispose(): void
 }
 
-export function createOperationDispatcher(account: ITradingAccount): DispatcherHandle {
+interface DispatcherOptions {
+  onWatchersChanged?: (watchers: PersistedProtectionWatcher[]) => void | Promise<void>
+}
+
+export function createOperationDispatcher(
+  account: ITradingAccount,
+  options?: DispatcherOptions,
+): DispatcherHandle {
   const protectionWatchers = new Map<string, {
     contractRef: Partial<Contract>
     plan: ProtectionPlan
@@ -380,6 +446,27 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
   let protectionPollTimer: ReturnType<typeof setInterval> | null = null
   let protectionPolling = false
 
+  const getWatchers = (): PersistedProtectionWatcher[] => {
+    const result: PersistedProtectionWatcher[] = []
+    for (const [orderId, w] of protectionWatchers) {
+      result.push({
+        orderId,
+        contractRef: {
+          aliceId: w.contractRef.aliceId,
+          symbol: w.contractRef.symbol,
+          secType: w.contractRef.secType,
+        },
+        plan: w.plan,
+        startedAt: w.startedAt,
+      })
+    }
+    return result
+  }
+
+  const notifyWatchersChanged = () => {
+    void options?.onWatchersChanged?.(getWatchers())
+  }
+
   const stopProtectionWatch = (orderId: string) => {
     if (!protectionWatchers.delete(orderId)) return
 
@@ -387,6 +474,7 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
       clearInterval(protectionPollTimer)
       protectionPollTimer = null
     }
+    notifyWatchersChanged()
   }
 
   const pollProtectionWatchers = async () => {
@@ -459,24 +547,8 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
     })
 
     ensureProtectionPoller()
+    notifyWatchersChanged()
     void pollProtectionWatchers()
-  }
-
-  const getWatchers = (): PersistedProtectionWatcher[] => {
-    const result: PersistedProtectionWatcher[] = []
-    for (const [orderId, w] of protectionWatchers) {
-      result.push({
-        orderId,
-        contractRef: {
-          aliceId: w.contractRef.aliceId,
-          symbol: w.contractRef.symbol,
-          secType: w.contractRef.secType,
-        },
-        plan: w.plan,
-        startedAt: w.startedAt,
-      })
-    }
-    return result
   }
 
   const restoreWatchers = (watchers: PersistedProtectionWatcher[]): void => {
@@ -494,6 +566,7 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
       ensureProtectionPoller()
       void pollProtectionWatchers()
     }
+    notifyWatchersChanged()
   }
 
   const dispose = (): void => {
@@ -502,18 +575,14 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
       protectionPollTimer = null
     }
     protectionWatchers.clear()
+    notifyWatchersChanged()
   }
 
   const dispatch = async (op: Operation): Promise<unknown> => {
     switch (op.action) {
       case 'placeOrder': {
         const p = op.params
-        const contract: Partial<Contract> = {}
-        if (p.aliceId) contract.aliceId = p.aliceId
-        if (p.symbol) contract.symbol = p.symbol
-        if (p.secType) contract.secType = p.secType as Contract['secType']
-        if (p.currency) contract.currency = p.currency
-        if (p.exchange) contract.exchange = p.exchange
+        const contract = toContractRef(p)
 
         const request: OrderRequest = {
           contract: contract as Contract,
@@ -597,75 +666,33 @@ export function createOperationDispatcher(account: ITradingAccount): DispatcherH
           }
         }
 
-        return {
-          success: result.success,
-          error: result.error,
-          order: result.success
-            ? {
-                id: result.orderId,
-                status: result.filledPrice
-                  ? (result.filledQty && request.qty && result.filledQty < request.qty
-                      ? 'partially_filled' : 'filled')
-                  : 'pending',
-                filledPrice: result.filledPrice,
-                filledQty: result.filledQty,
-              }
-            : undefined,
-        }
+        const status = result.filledPrice
+          ? (result.filledQty && request.qty && result.filledQty < request.qty
+              ? 'partially_filled'
+              : 'filled')
+          : 'pending'
+
+        return toOrderResult(result, status)
       }
 
       case 'modifyOrder': {
-        const p = op.params
-        const changes: Partial<OrderRequest> = {}
-        if (p.qty != null) changes.qty = p.qty
-        if (p.price != null) changes.price = p.price
-        if (p.stopPrice != null) changes.stopPrice = p.stopPrice
-        if (p.trailingAmount != null) changes.trailingAmount = p.trailingAmount
-        if (p.trailingPercent != null) changes.trailingPercent = p.trailingPercent
-        if (p.type) changes.type = p.type
-        if (p.timeInForce) changes.timeInForce = p.timeInForce
-        if (p.goodTillDate) changes.goodTillDate = p.goodTillDate
-
-        const result = await account.modifyOrder(p.orderId, changes)
-
-        return {
-          success: result.success,
-          error: result.error,
-          order: result.success
-            ? {
-                id: result.orderId,
-                status: result.filledPrice ? 'filled' : 'pending',
-                filledPrice: result.filledPrice,
-                filledQty: result.filledQty,
-              }
-            : undefined,
-        }
+        const result = await account.modifyOrder(
+          op.params.orderId,
+          buildModifyOrderChanges(op.params),
+        )
+        return toOrderResult(result, result.filledPrice ? 'filled' : 'pending')
       }
 
       case 'closePosition': {
         const p = op.params
-        const contract: Partial<Contract> = {}
-        if (p.aliceId) contract.aliceId = p.aliceId
-        if (p.symbol) contract.symbol = p.symbol
-        if (p.secType) contract.secType = p.secType as Contract['secType']
+        const contract = toContractRef(p)
 
         const result = await account.closePosition(contract as Contract, p.qty)
         if (result.success) {
           clearProtectionIntent(account, contract)
         }
 
-        return {
-          success: result.success,
-          error: result.error,
-          order: result.success
-            ? {
-                id: result.orderId,
-                status: result.filledPrice ? 'filled' : 'pending',
-                filledPrice: result.filledPrice,
-                filledQty: result.filledQty,
-              }
-            : undefined,
-        }
+        return toOrderResult(result, result.filledPrice ? 'filled' : 'pending')
       }
 
       case 'cancelOrder': {

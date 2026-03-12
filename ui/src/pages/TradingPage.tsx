@@ -4,8 +4,16 @@ import { Toggle } from '../components/Toggle'
 import { GuardsSection, CRYPTO_GUARD_TYPES, SECURITIES_GUARD_TYPES } from '../components/guards'
 import { SDKSelector, PLATFORM_TYPE_OPTIONS } from '../components/SDKSelector'
 import { ReconnectButton } from '../components/ReconnectButton'
+import { SecretFieldEditor } from '../components/SecretFieldEditor'
 import { useTradingConfig } from '../hooks/useTradingConfig'
-import type { PlatformConfig, CcxtPlatformConfig, AlpacaPlatformConfig, AccountConfig } from '../api/types'
+import { useSecretFieldAction } from '../hooks/useSecretFieldAction'
+import type {
+  PlatformConfig,
+  CcxtPlatformConfig,
+  AlpacaPlatformConfig,
+  TradingConfigAccount,
+  UpdateTradingAccountRequest,
+} from '../api/types'
 
 // ==================== Dialog state ====================
 
@@ -40,6 +48,12 @@ export function TradingPage() {
   }
 
   const getPlatform = (platformId: string) => tc.platforms.find((p) => p.id === platformId)
+  const editingAccount = dialog?.kind === 'edit'
+    ? tc.accounts.find((a) => a.id === dialog.accountId)
+    : null
+  const editingPlatform = editingAccount
+    ? getPlatform(editingAccount.platformId)
+    : null
 
   const deleteAccountWithPlatform = async (accountId: string) => {
     const account = tc.accounts.find((a) => a.id === accountId)
@@ -95,21 +109,16 @@ export function TradingPage() {
       )}
 
       {/* Edit Dialog */}
-      {dialog?.kind === 'edit' && (() => {
-        const account = tc.accounts.find((a) => a.id === dialog.accountId)
-        const platform = account ? getPlatform(account.platformId) : undefined
-        if (!account || !platform) return null
-        return (
-          <EditDialog
-            account={account}
-            platform={platform}
-            onSaveAccount={tc.saveAccount}
-            onSavePlatform={tc.savePlatform}
-            onDelete={() => deleteAccountWithPlatform(account.id)}
-            onClose={() => setDialog(null)}
-          />
-        )
-      })()}
+      {dialog?.kind === 'edit' && editingAccount && editingPlatform && (
+        <EditDialog
+          account={editingAccount}
+          platform={editingPlatform}
+          onSaveAccount={tc.saveAccount}
+          onSavePlatform={tc.savePlatform}
+          onDelete={() => deleteAccountWithPlatform(editingAccount.id)}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </div>
   )
 }
@@ -161,19 +170,19 @@ function Dialog({ onClose, width, children }: {
 // ==================== Accounts Table ====================
 
 function AccountsTable({ accounts, platforms, onSelect }: {
-  accounts: AccountConfig[]
+  accounts: TradingConfigAccount[]
   platforms: PlatformConfig[]
   onSelect: (id: string) => void
 }) {
   const getPlatform = (platformId: string) => platforms.find((p) => p.id === platformId)
 
-  const getConnectionLabel = (account: AccountConfig) => {
+  const getConnectionLabel = (account: TradingConfigAccount) => {
     const p = getPlatform(account.platformId)
     if (!p) return '—'
     if (p.type === 'ccxt') {
       const parts = [p.exchange]
-      if (p.defaultMarketType === 'swap') parts.push('swap')
-      else parts.push('spot')
+      const marketTypeLabel = p.defaultMarketType === 'swap' ? 'swap' : 'spot'
+      parts.push(marketTypeLabel)
       return parts.join(' \u00b7 ')
     }
     return p.paper ? 'paper' : 'live'
@@ -235,7 +244,7 @@ function AccountsTable({ accounts, platforms, onSelect }: {
 
 function CreateWizard({ existingAccountIds, onSave, onClose }: {
   existingAccountIds: string[]
-  onSave: (platform: PlatformConfig, account: AccountConfig) => Promise<void>
+  onSave: (platform: PlatformConfig, account: UpdateTradingAccountRequest) => Promise<void>
   onClose: () => void
 }) {
   const [step, setStep] = useState(1)
@@ -280,7 +289,7 @@ function CreateWizard({ existingAccountIds, onSave, onClose }: {
       const platform: PlatformConfig = type === 'ccxt'
         ? { id: platformId, type: 'ccxt', exchange, sandbox, demoTrading, defaultMarketType: marketType }
         : { id: platformId, type: 'alpaca', paper }
-      const account: AccountConfig = {
+      const account: UpdateTradingAccountRequest = {
         id: finalId, platformId,
         ...(apiKey && { apiKey }),
         ...(apiSecret && { apiSecret }),
@@ -404,9 +413,9 @@ function CreateWizard({ existingAccountIds, onSave, onClose }: {
 // ==================== Edit Dialog ====================
 
 function EditDialog({ account, platform, onSaveAccount, onSavePlatform, onDelete, onClose }: {
-  account: AccountConfig
+  account: TradingConfigAccount
   platform: PlatformConfig
-  onSaveAccount: (a: AccountConfig) => Promise<void>
+  onSaveAccount: (a: UpdateTradingAccountRequest) => Promise<TradingConfigAccount>
   onSavePlatform: (p: PlatformConfig) => Promise<void>
   onDelete: () => Promise<void>
   onClose: () => void
@@ -416,15 +425,25 @@ function EditDialog({ account, platform, onSaveAccount, onSavePlatform, onDelete
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [guardsOpen, setGuardsOpen] = useState(false)
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [apiSecretDraft, setApiSecretDraft] = useState('')
+  const [passwordDraft, setPasswordDraft] = useState('')
+  const credentialState = useSecretFieldAction<'apiKey' | 'apiSecret' | 'password'>()
 
   useEffect(() => { setAccountDraft(account) }, [account])
   useEffect(() => { setPlatformDraft(platform) }, [platform])
+  useEffect(() => {
+    setApiKeyDraft('')
+    setApiSecretDraft('')
+    setPasswordDraft('')
+    credentialState.reset()
+  }, [account])
 
   const dirty =
     JSON.stringify(accountDraft) !== JSON.stringify(account) ||
     JSON.stringify(platformDraft) !== JSON.stringify(platform)
 
-  const patchAccount = (field: keyof AccountConfig, value: unknown) => {
+  const patchAccount = (field: keyof TradingConfigAccount, value: unknown) => {
     setAccountDraft((d) => ({ ...d, [field]: value }))
   }
 
@@ -439,7 +458,13 @@ function EditDialog({ account, platform, onSaveAccount, onSavePlatform, onDelete
         await onSavePlatform(platformDraft)
       }
       if (JSON.stringify(accountDraft) !== JSON.stringify(account)) {
-        await onSaveAccount(accountDraft)
+        const saved = await onSaveAccount({
+          id: accountDraft.id,
+          platformId: accountDraft.platformId,
+          label: accountDraft.label,
+          guards: accountDraft.guards,
+        })
+        setAccountDraft(saved)
       }
       setMsg('Saved')
       setTimeout(() => setMsg(''), 2000)
@@ -451,6 +476,94 @@ function EditDialog({ account, platform, onSaveAccount, onSavePlatform, onDelete
   }
 
   const guardTypes = platform.type === 'ccxt' ? CRYPTO_GUARD_TYPES : SECURITIES_GUARD_TYPES
+
+  const handleCredentialUpdate = async (
+    field: 'apiKey' | 'apiSecret' | 'password',
+    value: string | null,
+  ) => {
+    credentialState.setSaving(field)
+    try {
+      const saved = await onSaveAccount({
+        id: accountDraft.id,
+        platformId: accountDraft.platformId,
+        label: accountDraft.label,
+        guards: accountDraft.guards,
+        [field]: value,
+      })
+      setAccountDraft(saved)
+      if (field === 'apiKey') setApiKeyDraft('')
+      if (field === 'apiSecret') setApiSecretDraft('')
+      if (field === 'password') setPasswordDraft('')
+      credentialState.setTransientStatus(field, 'saved')
+    } catch (err) {
+      credentialState.setError(field, err instanceof Error ? err.message : 'Failed to update credential')
+    }
+  }
+
+  const credentialFields = [
+    {
+      key: 'apiKey' as const,
+      label: 'API Key',
+      configured: accountDraft.hasApiKey,
+      value: apiKeyDraft,
+      onChange: (value: string) => {
+        setApiKeyDraft(value)
+        credentialState.clearError('apiKey')
+      },
+      onSet: () => handleCredentialUpdate('apiKey', apiKeyDraft.trim()),
+      onClear: () => handleCredentialUpdate('apiKey', null),
+      inputAriaLabel: 'Trading API Key',
+      setAriaLabel: 'Set Trading API Key',
+      clearAriaLabel: 'Clear Trading API Key',
+      configuredPlaceholder: 'Rotate key',
+      emptyPlaceholder: 'Set key',
+      configuredSetLabel: 'Set New Key',
+      emptySetLabel: 'Set Key',
+      clearLabel: 'Clear Key',
+    },
+    {
+      key: 'apiSecret' as const,
+      label: platform.type === 'alpaca' ? 'Secret Key' : 'API Secret',
+      configured: accountDraft.hasApiSecret,
+      value: apiSecretDraft,
+      onChange: (value: string) => {
+        setApiSecretDraft(value)
+        credentialState.clearError('apiSecret')
+      },
+      onSet: () => handleCredentialUpdate('apiSecret', apiSecretDraft.trim()),
+      onClear: () => handleCredentialUpdate('apiSecret', null),
+      inputAriaLabel: 'Trading API Secret',
+      setAriaLabel: 'Set Trading API Secret',
+      clearAriaLabel: 'Clear Trading API Secret',
+      configuredPlaceholder: 'Rotate secret',
+      emptyPlaceholder: 'Set secret',
+      configuredSetLabel: 'Set New Secret',
+      emptySetLabel: 'Set Secret',
+      clearLabel: 'Clear Secret',
+    },
+    ...(platform.type === 'ccxt'
+      ? [{
+          key: 'password' as const,
+          label: 'Password (optional)',
+          configured: accountDraft.hasPassword,
+          value: passwordDraft,
+          onChange: (value: string) => {
+            setPasswordDraft(value)
+            credentialState.clearError('password')
+          },
+          onSet: () => handleCredentialUpdate('password', passwordDraft.trim()),
+          onClear: () => handleCredentialUpdate('password', null),
+          inputAriaLabel: 'Trading Password',
+          setAriaLabel: 'Set Trading Password',
+          clearAriaLabel: 'Clear Trading Password',
+          configuredPlaceholder: 'Rotate password',
+          emptyPlaceholder: 'Set password',
+          configuredSetLabel: 'Set New Password',
+          emptySetLabel: 'Set Password',
+          clearLabel: 'Clear Password',
+        }]
+      : []),
+  ]
 
   return (
     <Dialog onClose={onClose} width="w-[520px]">
@@ -483,17 +596,28 @@ function EditDialog({ account, platform, onSaveAccount, onSavePlatform, onDelete
 
         {/* Credentials */}
         <Section title="Credentials">
-          <Field label="API Key">
-            <input className={inputClass} type="password" value={accountDraft.apiKey || ''} onChange={(e) => patchAccount('apiKey', e.target.value)} placeholder="Not configured" />
-          </Field>
-          <Field label={platform.type === 'alpaca' ? 'Secret Key' : 'API Secret'}>
-            <input className={inputClass} type="password" value={accountDraft.apiSecret || ''} onChange={(e) => patchAccount('apiSecret', e.target.value)} placeholder="Not configured" />
-          </Field>
-          {platform.type === 'ccxt' && (
-            <Field label="Password (optional)">
-              <input className={inputClass} type="password" value={accountDraft.password || ''} onChange={(e) => patchAccount('password', e.target.value)} placeholder="Required by some exchanges (e.g. OKX)" />
+          {credentialFields.map((field) => (
+            <Field key={field.key} label={field.label}>
+              <SecretFieldEditor
+                configured={field.configured}
+                value={field.value}
+                onChange={field.onChange}
+                onSet={field.onSet}
+                onClear={field.onClear}
+                setDisabled={credentialState.state.status === 'saving' || !field.value.trim()}
+                clearDisabled={credentialState.state.status === 'saving' || !field.configured}
+                inputAriaLabel={field.inputAriaLabel}
+                setAriaLabel={field.setAriaLabel}
+                clearAriaLabel={field.clearAriaLabel}
+                configuredPlaceholder={field.configuredPlaceholder}
+                emptyPlaceholder={field.emptyPlaceholder}
+                configuredSetLabel={field.configuredSetLabel}
+                emptySetLabel={field.emptySetLabel}
+                clearLabel={field.clearLabel}
+                error={credentialState.errorFor(field.key)}
+              />
             </Field>
-          )}
+          ))}
         </Section>
 
         {/* Guards */}

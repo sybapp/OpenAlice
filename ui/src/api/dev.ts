@@ -1,3 +1,5 @@
+import { fetchJson, fetchJsonOrThrow, headers } from './client'
+
 export interface RegistryConnector {
   channel: string
   to: string
@@ -29,28 +31,19 @@ export interface SessionInfo {
 
 export const devApi = {
   async registry(): Promise<RegistryResponse> {
-    const res = await fetch('/api/dev/registry')
-    if (!res.ok) throw new Error('Failed to fetch registry')
-    return res.json()
+    return fetchJson('/api/dev/registry')
   },
 
   async send(req: SendRequest): Promise<SendResponse> {
-    const res = await fetch('/api/dev/send', {
+    return fetchJsonOrThrow('/api/dev/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(req),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Unknown error' }))
-      throw new Error(err.error ?? `HTTP ${res.status}`)
-    }
-    return res.json()
+    }, 'Unknown error')
   },
 
   async sessions(): Promise<SessionInfo[]> {
-    const res = await fetch('/api/dev/sessions')
-    if (!res.ok) throw new Error('Failed to fetch sessions')
-    const data = await res.json()
+    const data = await fetchJson<{ sessions: SessionInfo[] }>('/api/dev/sessions')
     return data.sessions
   },
 }

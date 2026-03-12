@@ -28,7 +28,7 @@ export interface AIProviderConfig {
   provider: string
   model: string
   baseUrl?: string
-  apiKeys: { anthropic?: string; openai?: string; google?: string }
+  apiKeys: { anthropic?: boolean; openai?: boolean; google?: boolean }
 }
 
 export interface AppConfig {
@@ -46,15 +46,44 @@ export interface AppConfig {
   [key: string]: unknown
 }
 
+export interface ConfigUpdateResponse<T> {
+  data: T
+  meta?: {
+    reconnectScheduled?: boolean
+  }
+}
+
 export interface ConnectorsConfig {
-  web: { port: number }
+  web: { port: number; hasAuthToken: boolean }
   mcp: { port: number }
-  mcpAsk: { enabled: boolean; port?: number }
+  mcpAsk: { enabled: boolean; port?: number; hasAuthToken: boolean }
   telegram: {
     enabled: boolean
-    botToken?: string
+    hasBotToken: boolean
     botUsername?: string
     chatIds: number[]
+  }
+}
+
+export interface UpdateConnectorsRequest {
+  web?: {
+    port?: number
+    authToken?: string
+    clearAuthToken?: boolean
+  }
+  mcp?: { port?: number }
+  mcpAsk?: {
+    enabled?: boolean
+    port?: number
+    authToken?: string
+    clearAuthToken?: boolean
+  }
+  telegram?: {
+    enabled?: boolean
+    botToken?: string
+    clearBotToken?: boolean
+    botUsername?: string
+    chatIds?: number[]
   }
 }
 
@@ -178,13 +207,23 @@ export interface AlpacaPlatformConfig {
 
 export type PlatformConfig = CcxtPlatformConfig | AlpacaPlatformConfig
 
-export interface AccountConfig {
+export interface TradingConfigAccount {
   id: string
   platformId: string
   label?: string
-  apiKey?: string
-  apiSecret?: string
-  password?: string
+  hasApiKey: boolean
+  hasApiSecret: boolean
+  hasPassword: boolean
+  guards: GuardEntry[]
+}
+
+export interface UpdateTradingAccountRequest {
+  id: string
+  platformId: string
+  label?: string
+  apiKey?: string | null
+  apiSecret?: string | null
+  password?: string | null
   guards: GuardEntry[]
 }
 

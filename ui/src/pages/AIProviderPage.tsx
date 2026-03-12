@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api, type AppConfig, type AIProviderConfig } from '../api'
 import { SaveIndicator } from '../components/SaveIndicator'
+import { SecretFieldEditor } from '../components/SecretFieldEditor'
 import { Section, Field, inputClass } from '../components/form'
-import { useAutoSave, type SaveStatus } from '../hooks/useAutoSave'
+import { useSecretFieldAction } from '../hooks/useSecretFieldAction'
+import { useAutoSave } from '../hooks/useAutoSave'
 
 const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
   anthropic: [
@@ -35,11 +37,33 @@ const SDK_FORMATS = [
   { value: 'google', label: 'Google Compatible' },
 ]
 
+type ProviderKey = 'anthropic' | 'openai' | 'google'
+
+const STANDARD_KEY_PROVIDERS: { value: ProviderKey; label: string }[] = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'google', label: 'Google' },
+]
+
+const SDK_KEY_PROVIDERS: { value: ProviderKey; label: string }[] = [
+  { value: 'openai', label: 'OpenAI Compatible' },
+  { value: 'anthropic', label: 'Anthropic Compatible' },
+  { value: 'google', label: 'Google Compatible' },
+]
+
 /** Detect whether saved config should show as "Custom" in the UI. */
 function detectCustomMode(provider: string, model: string): boolean {
   const presets = PROVIDER_MODELS[provider]
   if (!presets) return true
   return !presets.some((p) => p.value === model)
+}
+
+function toKeyStatus(aiProvider: AIProviderConfig): Record<ProviderKey, boolean> {
+  return {
+    anthropic: !!aiProvider.apiKeys?.anthropic,
+    openai: !!aiProvider.apiKeys?.openai,
+    google: !!aiProvider.apiKeys?.google,
+  }
 }
 
 export function AIProviderPage() {
@@ -95,7 +119,12 @@ export function AIProviderPage() {
             {/* Model (only for Vercel AI SDK) */}
             {config.aiProvider.backend === 'vercel-ai-sdk' && (
               <Section id="model" title="Model" description="Provider, model, and API keys for Vercel AI SDK. Changes take effect on the next request (hot-reload).">
-                <ModelForm aiProvider={config.aiProvider} />
+                <ModelForm
+                  aiProvider={config.aiProvider}
+                  onAiProviderChange={(next) => {
+                    setConfig((current) => current ? { ...current, aiProvider: next } : current)
+                  }}
+                />
               </Section>
             )}
           </div>
@@ -107,7 +136,13 @@ export function AIProviderPage() {
 
 // ==================== Model Form ====================
 
-function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
+function ModelForm({
+  aiProvider,
+  onAiProviderChange,
+}: {
+  aiProvider: AIProviderConfig
+  onAiProviderChange: (next: AIProviderConfig) => void
+}) {
   // Detect whether saved config should render as "Custom" in the UI
   const initCustom = detectCustomMode(aiProvider.provider || 'anthropic', aiProvider.model || '')
   const [uiProvider, setUiProvider] = useState(initCustom ? 'custom' : (aiProvider.provider || 'anthropic'))
@@ -117,8 +152,7 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
   const [baseUrl, setBaseUrl] = useState(aiProvider.baseUrl || '')
   const [showKeys, setShowKeys] = useState(false)
   const [keys, setKeys] = useState({ anthropic: '', openai: '', google: '' })
-  const [keySaveStatus, setKeySaveStatus] = useState<SaveStatus>('idle')
-  const keySavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keyAction = useSecretFieldAction<ProviderKey>()
 
   const isCustomMode = uiProvider === 'custom'
   const effectiveProvider = isCustomMode ? sdkProvider : uiProvider
@@ -127,21 +161,36 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
   const effectiveModel = isCustomMode
     ? customModel
     : (isCustomModelInStandard ? customModel || model : model)
+  const selectedModelValue = isCustomModelInStandard || model === '' ? '__custom__' : model
+  const showCustomModelField = isCustomMode || isCustomModelInStandard || model === ''
+  const customModelLabel = isCustomMode ? 'Model ID' : 'Custom Model ID'
+  const customModelPlaceholder = isCustomMode
+    ? 'e.g. gpt-4o, claude-3-opus'
+    : 'e.g. claude-sonnet-4-5-20250929'
+  const baseUrlPlaceholder = isCustomMode ? 'https://your-relay.example.com/v1' : 'Leave empty for official API'
+  const baseUrlHelp = isCustomMode ? 'Your relay or proxy endpoint.' : 'Custom endpoint for proxy or relay.'
+  const keyHelp = isCustomMode
+    ? 'Enter the API key for your relay. It will be sent under the matching provider header.'
+    : 'Enter API keys below. Leave empty to keep existing value.'
+  const visibleKeyProviders = isCustomMode
+    ? SDK_KEY_PROVIDERS.filter((provider) => provider.value === sdkProvider)
+    : STANDARD_KEY_PROVIDERS
 
   // Auto-save model/provider/baseUrl (but NOT apiKeys — those use manual save)
   const modelData = useMemo(
     () => ({
-      ...aiProvider,
+      backend: aiProvider.backend,
       provider: effectiveProvider,
       model: effectiveModel,
-      ...(baseUrl ? { baseUrl } : { baseUrl: undefined }),
+      baseUrl: baseUrl || null,
     }),
-    [aiProvider, effectiveProvider, effectiveModel, baseUrl],
+    [aiProvider.backend, effectiveProvider, effectiveModel, baseUrl],
   )
 
   const saveModel = useCallback(async (data: Record<string, unknown>) => {
-    await api.config.updateSection('aiProvider', data)
-  }, [])
+    const result = await api.config.updateSection<AIProviderConfig>('aiProvider', data)
+    onAiProviderChange(result.data)
+  }, [onAiProviderChange])
 
   const { status: modelStatus, retry: modelRetry } = useAutoSave({
     data: modelData,
@@ -149,19 +198,11 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
   })
 
   // Derive key status from aiProvider config
-  const keyStatus = useMemo(() => ({
-    anthropic: !!aiProvider.apiKeys?.anthropic,
-    openai: !!aiProvider.apiKeys?.openai,
-    google: !!aiProvider.apiKeys?.google,
-  }), [aiProvider.apiKeys])
-
-  const [liveKeyStatus, setLiveKeyStatus] = useState(keyStatus)
-
-  useEffect(() => setLiveKeyStatus(keyStatus), [keyStatus])
-
-  useEffect(() => () => {
-    if (keySavedTimer.current) clearTimeout(keySavedTimer.current)
-  }, [])
+  const keyStatus = useMemo(() => toKeyStatus(aiProvider), [aiProvider])
+  const keyRetryProvider = keyAction.state.key
+  const keyRetry = keyRetryProvider === null
+    ? undefined
+    : () => handleSaveKey(keyRetryProvider)
 
   const handleProviderChange = (newUiProvider: string) => {
     setUiProvider(newUiProvider)
@@ -192,27 +233,37 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
     }
   }
 
-  const handleSaveKeys = async () => {
-    setKeySaveStatus('saving')
+  const applyKeyUpdate = async (
+    provider: ProviderKey,
+    value: string | null,
+    errorMessage: string,
+  ) => {
+    keyAction.setSaving(provider)
     try {
-      // Merge new keys into current aiProvider config
-      const updatedKeys = { ...aiProvider.apiKeys }
-      if (keys.anthropic) updatedKeys.anthropic = keys.anthropic
-      if (keys.openai) updatedKeys.openai = keys.openai
-      if (keys.google) updatedKeys.google = keys.google
-      await api.config.updateSection('aiProvider', { ...aiProvider, apiKeys: updatedKeys })
-      setLiveKeyStatus({
-        anthropic: !!updatedKeys.anthropic,
-        openai: !!updatedKeys.openai,
-        google: !!updatedKeys.google,
+      const result = await api.config.updateSection<AIProviderConfig>('aiProvider', {
+        apiKeys: { [provider]: value },
       })
-      setKeys({ anthropic: '', openai: '', google: '' })
-      setKeySaveStatus('saved')
-      if (keySavedTimer.current) clearTimeout(keySavedTimer.current)
-      keySavedTimer.current = setTimeout(() => setKeySaveStatus('idle'), 2000)
-    } catch {
-      setKeySaveStatus('error')
+      onAiProviderChange(result.data)
+      setKeys((prev) => ({ ...prev, [provider]: '' }))
+      keyAction.setTransientStatus(provider, 'saved')
+    } catch (err) {
+      keyAction.setError(provider, err instanceof Error ? err.message : errorMessage)
     }
+  }
+
+  const handleSaveKey = async (provider: ProviderKey) => {
+    const value = keys[provider].trim()
+    if (!value) {
+      keyAction.setError(provider, 'Key is required')
+      return
+    }
+
+    await applyKeyUpdate(provider, value, 'Failed to save key')
+  }
+
+  const handleClearKey = async (provider: ProviderKey) => {
+    if (!keyStatus[provider]) return
+    await applyKeyUpdate(provider, null, 'Failed to clear key')
   }
 
   return (
@@ -258,7 +309,7 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
         <Field label="Model">
           <select
             className={inputClass}
-            value={isCustomModelInStandard || model === '' ? '__custom__' : model}
+            value={selectedModelValue}
             onChange={(e) => handleModelSelect(e.target.value)}
           >
             {presets.map((m) => (
@@ -270,13 +321,13 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
       )}
 
       {/* Free-text model ID — always shown in custom mode, or when "Custom..." selected in standard mode */}
-      {(isCustomMode || isCustomModelInStandard || (!isCustomMode && model === '')) && (
-        <Field label={isCustomMode ? 'Model ID' : 'Custom Model ID'}>
+      {showCustomModelField && (
+        <Field label={customModelLabel}>
           <input
             className={inputClass}
             value={customModel || model}
             onChange={(e) => { setCustomModel(e.target.value); setModel(e.target.value) }}
-            placeholder={isCustomMode ? 'e.g. gpt-4o, claude-3-opus' : 'e.g. claude-sonnet-4-5-20250929'}
+            placeholder={customModelPlaceholder}
           />
         </Field>
       )}
@@ -286,10 +337,10 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
           className={inputClass}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={isCustomMode ? 'https://your-relay.example.com/v1' : 'Leave empty for official API'}
+          placeholder={baseUrlPlaceholder}
         />
         <p className="text-[11px] text-text-muted mt-1">
-          {isCustomMode ? 'Your relay or proxy endpoint.' : 'Custom endpoint for proxy or relay.'}
+          {baseUrlHelp}
         </p>
       </Field>
 
@@ -309,48 +360,42 @@ function ModelForm({ aiProvider }: { aiProvider: AIProviderConfig }) {
           </svg>
           API Keys
           <span className="text-[11px] text-text-muted/60 ml-1">
-            ({Object.values(liveKeyStatus).filter(Boolean).length}/{Object.keys(liveKeyStatus).length} configured)
+            ({Object.values(keyStatus).filter(Boolean).length}/{Object.keys(keyStatus).length} configured)
           </span>
         </button>
 
         {showKeys && (
           <div className="mt-3 space-y-3">
-            <p className="text-[11px] text-text-muted">
-              {isCustomMode
-                ? 'Enter the API key for your relay. It will be sent under the matching provider header.'
-                : 'Enter API keys below. Leave empty to keep existing value.'}
-            </p>
-            {(isCustomMode
-              ? SDK_FORMATS.filter((f) => f.value === sdkProvider)
-              : PROVIDERS.filter((p) => p.value !== 'custom')
-            ).map((p) => (
+            <p className="text-[11px] text-text-muted">{keyHelp}</p>
+            {visibleKeyProviders.map((p) => (
               <Field key={p.value} label={isCustomMode ? `API Key (${p.label})` : `${p.label} API Key`}>
-                <div className="relative">
-                  <input
-                    className={inputClass}
-                    type="password"
-                    value={keys[p.value as keyof typeof keys] ?? ''}
-                    onChange={(e) => setKeys((k) => ({ ...k, [p.value]: e.target.value }))}
-                    placeholder={liveKeyStatus[p.value as keyof typeof liveKeyStatus] ? '(configured)' : 'Not configured'}
-                  />
-                  {liveKeyStatus[p.value as keyof typeof liveKeyStatus] && (
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-green">
-                      active
-                    </span>
-                  )}
-                </div>
+                <SecretFieldEditor
+                  configured={keyStatus[p.value]}
+                  value={keys[p.value] ?? ''}
+                  onChange={(value) => {
+                    setKeys((k) => ({ ...k, [p.value]: value }))
+                    keyAction.clearError(p.value)
+                  }}
+                  onSet={() => handleSaveKey(p.value)}
+                  onClear={() => handleClearKey(p.value)}
+                  setDisabled={keyAction.state.status === 'saving' || !keys[p.value].trim()}
+                  clearDisabled={keyAction.state.status === 'saving' || !keyStatus[p.value]}
+                  inputAriaLabel={isCustomMode ? `API Key (${p.label})` : `${p.label} API Key`}
+                  setAriaLabel={`Set ${p.label} API Key`}
+                  clearAriaLabel={`Clear ${p.label} API Key`}
+                  configuredPlaceholder="Rotate key"
+                  emptyPlaceholder="Set key"
+                  configuredSetLabel="Set New Key"
+                  emptySetLabel="Set Key"
+                  clearLabel="Clear Key"
+                  error={keyAction.errorFor(p.value)}
+                />
               </Field>
             ))}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleSaveKeys}
-                disabled={keySaveStatus === 'saving'}
-                className="bg-user-bubble text-white rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-85 disabled:opacity-50"
-              >
-                Save Keys
-              </button>
-              <SaveIndicator status={keySaveStatus} onRetry={handleSaveKeys} />
-            </div>
+            <SaveIndicator
+              status={keyAction.state.status}
+              onRetry={keyRetry}
+            />
           </div>
         )}
       </div>

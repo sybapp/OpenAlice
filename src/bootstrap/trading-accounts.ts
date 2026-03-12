@@ -4,11 +4,10 @@
  * Account initialization and reconnect logic.
  */
 
-import { loadTradingConfig } from '../core/config.js'
+import { loadTradingConfig, type PlatformConfig } from '../core/config.js'
 import type { ReconnectResult } from '../core/types.js'
 import {
   AccountManager,
-  CcxtAccount,
   createCcxtProviderTools,
   wireAccountTrading,
   createPlatformFromConfig,
@@ -19,14 +18,41 @@ import type { AccountSetup, IPlatform } from '../extension/trading/index.js'
 import type { ToolCenter } from '../core/tool-center.js'
 import { gitFilePath, gitArchivePath, loadGitState, createGitPersister } from './trading.js'
 
+type TradingAccountConfig = {
+  id: string
+  platformId: string
+  guards: Array<{ type: string; options: Record<string, unknown> }>
+}
+
 export interface TradingAccountsResult {
   accountManager: AccountManager
   accountSetups: Map<string, AccountSetup>
   ccxtInitPromise: Promise<void>
-  initAccount: (
-    accountCfg: { id: string; platformId: string; guards: Array<{ type: string; options: Record<string, unknown> }> },
-    platform: IPlatform,
-  ) => Promise<boolean>
+  initAccount: (accountCfg: TradingAccountConfig, platform: IPlatform) => Promise<boolean>
+}
+
+function buildPlatformRegistry(platforms: PlatformConfig[]): Map<string, IPlatform> {
+  const registry = new Map<string, IPlatform>()
+  for (const platform of platforms) {
+    registry.set(platform.id, createPlatformFromConfig(platform))
+  }
+  return registry
+}
+
+function registerCcxtTools(args: {
+  toolCenter: ToolCenter
+  accountManager: AccountManager
+  accountSetups: Map<string, AccountSetup>
+}) {
+  const { toolCenter, accountManager, accountSetups } = args
+  toolCenter.register(
+    createCcxtProviderTools({
+      accountManager,
+      getGit: (id) => accountSetups.get(id)?.git,
+      getGitState: (id) => accountSetups.get(id)?.getGitState(),
+    }),
+    'trading-ccxt',
+  )
 }
 
 export async function initTradingAccounts(): Promise<TradingAccountsResult> {
@@ -34,14 +60,11 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
   const accountSetups = new Map<string, AccountSetup>()
 
   const tradingConfig = await loadTradingConfig()
-  const platformRegistry = new Map<string, IPlatform>()
-  for (const pc of tradingConfig.platforms) {
-    platformRegistry.set(pc.id, createPlatformFromConfig(pc))
-  }
+  const platformRegistry = buildPlatformRegistry(tradingConfig.platforms)
   validatePlatformRefs([...platformRegistry.values()], tradingConfig.accounts)
 
   async function initAccount(
-    accountCfg: { id: string; platformId: string; guards: Array<{ type: string; options: Record<string, unknown> }> },
+    accountCfg: TradingAccountConfig,
     platform: IPlatform,
   ): Promise<boolean> {
     const account = createAccountFromConfig(platform, accountCfg)
@@ -87,6 +110,24 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
   return { accountManager, accountSetups, ccxtInitPromise, initAccount }
 }
 
+export async function teardownAccountRuntime(args: {
+  accountId: string
+  accountManager: AccountManager
+  accountSetups: Map<string, AccountSetup>
+}): Promise<void> {
+  const { accountId, accountManager, accountSetups } = args
+  const setup = accountSetups.get(accountId)
+  setup?.disposeDispatcher()
+
+  const currentAccount = accountManager.getAccount(accountId)
+  if (currentAccount) {
+    await currentAccount.close()
+  }
+
+  accountManager.removeAccount(accountId)
+  accountSetups.delete(accountId)
+}
+
 export function createAccountReconnector(deps: {
   accountManager: AccountManager
   accountSetups: Map<string, AccountSetup>
@@ -104,22 +145,14 @@ export function createAccountReconnector(deps: {
     try {
       const freshTrading = await loadTradingConfig()
 
-      const currentAccount = accountManager.getAccount(accountId)
-      if (currentAccount) {
-        await currentAccount.close()
-        accountManager.removeAccount(accountId)
-        accountSetups.delete(accountId)
-      }
+      await teardownAccountRuntime({ accountId, accountManager, accountSetups })
 
       const accCfg = freshTrading.accounts.find((a) => a.id === accountId)
       if (!accCfg) {
         return { success: true, message: `Account "${accountId}" not found in config (removed or disabled)` }
       }
 
-      const freshPlatforms = new Map<string, IPlatform>()
-      for (const pc of freshTrading.platforms) {
-        freshPlatforms.set(pc.id, createPlatformFromConfig(pc))
-      }
+      const freshPlatforms = buildPlatformRegistry(freshTrading.platforms)
 
       const platform = freshPlatforms.get(accCfg.platformId)
       if (!platform) {
@@ -132,14 +165,7 @@ export function createAccountReconnector(deps: {
       }
 
       if (platform.providerType !== 'alpaca') {
-        toolCenter.register(
-          createCcxtProviderTools({
-            accountManager,
-            getGit: (id) => accountSetups.get(id)?.git,
-            getGitState: (id) => accountSetups.get(id)?.getGitState(),
-          }),
-          'trading-ccxt',
-        )
+        registerCcxtTools({ toolCenter, accountManager, accountSetups })
       }
 
       const label = accountManager.getAccount(accountId)?.label ?? accountId

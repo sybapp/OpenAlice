@@ -1,12 +1,11 @@
-import { headers } from './client'
+import { fetchJsonOrThrow, headers } from './client'
 
 export const openbbApi = {
   async testProvider(provider: string, key: string): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch('/api/openbb/test-provider', {
+    return fetchJsonOrThrow('/api/openbb/test-provider', {
       method: 'POST',
       headers,
       body: JSON.stringify({ provider, key }),
-    })
-    return res.json()
+    }, 'OpenBB request failed')
   },
 }

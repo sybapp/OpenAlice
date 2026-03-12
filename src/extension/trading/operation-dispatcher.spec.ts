@@ -519,6 +519,40 @@ describe('createOperationDispatcher', () => {
   // ==================== DispatcherHandle persistence ====================
 
   describe('DispatcherHandle persistence', () => {
+    it('notifies when watcher set changes', async () => {
+      const onWatchersChanged = vi.fn()
+      const notifyingHandle = createOperationDispatcher(account, { onWatchersChanged })
+      const notifyingDispatch = notifyingHandle.dispatch
+
+      account.placeOrder.mockResolvedValue(makeOrderResult({
+        orderId: 'entry-watch-notify',
+        filledPrice: undefined,
+        filledQty: undefined,
+      }))
+
+      await notifyingDispatch({
+        action: 'placeOrder',
+        params: {
+          aliceId: 'binance-BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: 'buy',
+          type: 'limit',
+          qty: 0.5,
+          price: 90000,
+          protection: { stopLossPct: 0.8 },
+        },
+      })
+
+      expect(onWatchersChanged).toHaveBeenCalled()
+      expect(onWatchersChanged.mock.lastCall?.[0]).toHaveLength(1)
+
+      notifyingHandle.dispose()
+
+      await vi.waitFor(() => {
+        expect(onWatchersChanged.mock.lastCall?.[0]).toEqual([])
+      })
+    })
+
     it('getWatchers() returns active watchers', async () => {
       account.placeOrder.mockResolvedValue(makeOrderResult({
         orderId: 'entry-w1',
@@ -551,6 +585,7 @@ describe('createOperationDispatcher', () => {
     it('restoreWatchers() restarts poller and can arm protection', async () => {
       vi.useFakeTimers()
       try {
+        const onWatchersChanged = vi.fn()
         account.setPositions([
           makePosition({
             contract: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
@@ -583,7 +618,7 @@ describe('createOperationDispatcher', () => {
         ])
 
         // Create a fresh handle and restore watchers into it
-        const handle2 = createOperationDispatcher(account)
+        const handle2 = createOperationDispatcher(account, { onWatchersChanged })
         handle2.restoreWatchers([{
           orderId: 'entry-restored',
           contractRef: { aliceId: 'binance-BTCUSDT', symbol: 'BTCUSDT', secType: 'CRYPTO' },
@@ -599,6 +634,9 @@ describe('createOperationDispatcher', () => {
           (call) => call[0].type === 'stop' && call[0].reduceOnly === true,
         )
         expect(stopCalls.length).toBe(1)
+        await vi.waitFor(() => {
+          expect(onWatchersChanged.mock.lastCall?.[0]).toEqual([])
+        })
 
         handle2.dispose()
       } finally {

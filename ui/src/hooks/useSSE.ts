@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { withAuthQuery } from '../api/client'
 
 interface UseSSEOptions {
   url: string
@@ -27,7 +28,7 @@ export function useSSE({ url, onMessage, onStatus, enabled = true }: UseSSEOptio
 
     const connect = () => {
       if (disposed) return
-      es = new EventSource(url)
+      es = new EventSource(withAuthQuery(url))
 
       es.onopen = () => {
         backoff = 1000

@@ -36,6 +36,10 @@ export class McpAskPlugin implements Plugin {
 
   constructor(private config: McpAskConfig) {}
 
+  getConfig(): McpAskConfig {
+    return { ...this.config }
+  }
+
   private async getSession(sessionId: string): Promise<SessionStore> {
     let session = this.sessions.get(sessionId)
     if (!session) {

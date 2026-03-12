@@ -22,7 +22,7 @@ export interface AccountSetup {
   account: ITradingAccount
   git: ITradingGit
   getGitState: () => Promise<GitState>
-  disposeDispatcher?: () => void
+  disposeDispatcher: () => void
 }
 
 // ==================== Wiring ====================
@@ -42,26 +42,30 @@ export function wireAccountTrading(
   },
 ): AccountSetup {
   const getGitState = createWalletStateBridge(account)
-  const handle = createOperationDispatcher(account)
+  let git: ITradingGit | null = null
+  const persistState = async (watchers: GitExportState['protectionWatchers']) => {
+    if (!options.onCommit || !git) return
+    const state = git.exportState()
+    state.protectionWatchers = watchers
+    await options.onCommit(state)
+  }
+  const handle = createOperationDispatcher(account, {
+    onWatchersChanged: (watchers) => {
+      void persistState(watchers)
+    },
+  })
   const guards = resolveGuards(options.guards ?? [])
   const guardedDispatcher = createGuardPipeline(handle.dispatch, account, guards)
-
-  const wrappedOnCommit = options.onCommit
-    ? async (state: GitExportState) => {
-        state.protectionWatchers = handle.getWatchers()
-        await options.onCommit!(state)
-      }
-    : undefined
 
   const gitConfig = {
     executeOperation: guardedDispatcher,
     getGitState,
-    onCommit: wrappedOnCommit,
+    onCommit: options.onCommit ? () => persistState(handle.getWatchers()) : undefined,
     archivePath: options.archivePath,
     maxActiveCommits: options.maxActiveCommits,
   }
 
-  const git = options.savedState
+  git = options.savedState
     ? TradingGit.restore(options.savedState, gitConfig)
     : new TradingGit(gitConfig)
 

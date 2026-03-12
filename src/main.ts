@@ -5,22 +5,40 @@
  */
 
 import { loadConfig } from './core/config.js'
-import type { EngineContext } from './core/types.js'
+import type { EngineContext, Plugin } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { CcxtAccount, createCcxtProviderTools } from './extension/trading/index.js'
+import type { AccountResolver } from './extension/trading/adapter.js'
 import { createCronListener } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
 import { NewsCollector } from './extension/research/news-collector/index.js'
 import { ensureDefaultSkillPacks } from './core/skills/registry.js'
 
-import { initTradingAccounts, createAccountReconnector } from './bootstrap/trading-accounts.js'
+import { initTradingAccounts, createAccountReconnector, teardownAccountRuntime } from './bootstrap/trading-accounts.js'
 import { initServices } from './bootstrap/services.js'
 import { registerAllTools } from './bootstrap/tools.js'
 import { initAIProviders } from './bootstrap/ai.js'
 import { initPlugins, createConnectorReconnector } from './bootstrap/connectors.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function registerCcxtTools(toolCenter: EngineContext['toolCenter'], resolver: AccountResolver) {
+  toolCenter.register(createCcxtProviderTools(resolver), 'trading-ccxt')
+}
+
+async function startPlugins(plugins: Iterable<Plugin>, ctx: EngineContext) {
+  for (const plugin of plugins) {
+    await plugin.start(ctx)
+    console.log(`plugin started: ${plugin.name}`)
+  }
+}
+
+async function stopPlugins(plugins: Iterable<Plugin>) {
+  for (const plugin of plugins) {
+    await plugin.stop()
+  }
+}
 
 async function main() {
   const config = await loadConfig()
@@ -77,22 +95,27 @@ async function main() {
   // ---- Reconnect handlers ----
   const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount, toolCenter })
   let ctx: EngineContext
-  const reconnectConnectors = createConnectorReconnector(optionalPlugins, () => ctx)
+  const reconnectConnectors = createConnectorReconnector({ corePlugins, optionalPlugins, getCtx: () => ctx })
+  const getAccountGit = (id: string) => accountSetups.get(id)?.git
+  const getAccountGitState = (id: string) => accountSetups.get(id)?.getGitState()
+  const ccxtResolver: AccountResolver = {
+    accountManager,
+    getGit: getAccountGit,
+    getGitState: getAccountGitState,
+  }
+  const getPlugins = () => [...corePlugins, ...optionalPlugins.values()]
 
   // ---- Engine Context ----
   ctx = {
     config, connectorCenter, engine, eventLog, heartbeat, cronEngine, toolCenter,
     accountManager, backtest, marketData,
-    getAccountGit: (id) => accountSetups.get(id)?.git,
+    getAccountGit,
     reconnectAccount,
+    removeTradingAccountRuntime: (accountId) => teardownAccountRuntime({ accountId, accountManager, accountSetups }),
     reconnectConnectors,
-    removeAccountSetup: (id) => { accountSetups.delete(id) },
   }
 
-  for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
-    await plugin.start(ctx)
-    console.log(`plugin started: ${plugin.name}`)
-  }
+  await startPlugins(getPlugins(), ctx)
 
   console.log('engine: started')
 
@@ -102,14 +125,7 @@ async function main() {
       (s) => s.account instanceof CcxtAccount,
     )
     if (!hasCcxt) return
-    toolCenter.register(
-      createCcxtProviderTools({
-        accountManager,
-        getGit: (id) => accountSetups.get(id)?.git,
-        getGitState: (id) => accountSetups.get(id)?.getGitState(),
-      }),
-      'trading-ccxt',
-    )
+    registerCcxtTools(toolCenter, ccxtResolver)
     console.log('ccxt: provider tools registered')
   })
 
@@ -121,8 +137,9 @@ async function main() {
     heartbeat.stop()
     cronListener.stop()
     cronEngine.stop()
-    for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
-      await plugin.stop()
+    await stopPlugins(getPlugins())
+    for (const setup of accountSetups.values()) {
+      setup.disposeDispatcher()
     }
     await newsStore.close()
     await eventLog.close()
