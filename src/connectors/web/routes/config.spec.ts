@@ -149,6 +149,20 @@ describe('createConfigRoutes', () => {
     })
   })
 
+  it('rejects invalid config sections', async () => {
+    const app = createConfigRoutes()
+    const res = await app.request('/unknown', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'Invalid section "unknown". Valid: connectors, aiProvider, openbb',
+    })
+  })
+
   it('wraps connector updates and preserves masked secrets when saving', async () => {
     mocks.loadConfig.mockResolvedValue(fullConfig)
     mocks.writeConfigSection.mockImplementation(async (_section, data) => data)
@@ -380,6 +394,42 @@ describe('createConfigRoutes', () => {
     })
   })
 
+  it('rejects invalid ai backends when switching providers', async () => {
+    const app = createConfigRoutes()
+    const res = await app.request('/ai-provider', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        backend: 'unsupported-backend',
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'Invalid backend. Must be "claude-code", "codex-cli", or "vercel-ai-sdk".',
+    })
+  })
+
+  it('reports configured AI key presence through the status endpoint', async () => {
+    mocks.readAIProviderConfig.mockResolvedValue({
+      apiKeys: {
+        anthropic: 'anthropic-secret',
+        openai: '',
+        google: 'google-secret',
+      },
+    })
+
+    const app = createConfigRoutes()
+    const res = await app.request('/api-keys/status')
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      anthropic: true,
+      openai: false,
+      google: true,
+    })
+  })
+
   it('tests provider credentials through the in-process sdk when sdk mode is enabled', async () => {
     const execute = vi.fn().mockResolvedValue([{ id: 'GDP' }])
     mocks.readOpenbbConfig.mockResolvedValue({
@@ -447,5 +497,111 @@ describe('createConfigRoutes', () => {
         },
       }),
     )
+  })
+
+  it('maps external provider test timeouts to a friendly API error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('request timeout'))
+    mocks.readOpenbbConfig.mockResolvedValue({
+      ...fullConfig.openbb,
+      dataBackend: 'openbb',
+    })
+
+    const app = createOpenbbRoutes()
+    const res = await app.request('/test-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'fred',
+        key: 'fred-secret',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: false, error: 'Cannot reach OpenBB API' })
+  })
+
+  it('returns the upstream http error body when external provider testing fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('provider unavailable', { status: 503 }))
+    mocks.readOpenbbConfig.mockResolvedValue({
+      ...fullConfig.openbb,
+      dataBackend: 'openbb',
+    })
+
+    const app = createOpenbbRoutes()
+    const res = await app.request('/test-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'fmp',
+        key: 'fmp-secret',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'OpenBB returned 503: provider unavailable',
+    })
+  })
+
+  it('allows clearing ai provider baseUrl while preserving unrelated api keys', async () => {
+    mocks.loadConfig.mockResolvedValue({
+      ...fullConfig,
+      aiProvider: {
+        ...fullConfig.aiProvider,
+        baseUrl: 'https://proxy.example.com',
+        apiKeys: {
+          anthropic: 'anthropic-secret',
+          openai: 'openai-secret',
+        },
+      },
+    })
+    mocks.writeConfigSection.mockImplementation(async (_section, data) => data)
+
+    const app = createConfigRoutes()
+    const res = await app.request('/aiProvider', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'anthropic',
+        baseUrl: '',
+      }),
+    })
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mocks.writeConfigSection).toHaveBeenCalledWith('aiProvider', {
+      backend: 'claude-code',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      apiKeys: {
+        anthropic: 'anthropic-secret',
+        openai: 'openai-secret',
+      },
+    })
+    expect(body.apiKeys).toEqual({
+      anthropic: true,
+      openai: true,
+    })
+  })
+
+  it('rejects unknown OpenBB providers and missing keys during provider tests', async () => {
+    const app = createOpenbbRoutes()
+
+    const unknown = await app.request('/test-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'unknown', key: 'secret' }),
+    })
+    expect(unknown.status).toBe(400)
+    expect(await unknown.json()).toEqual({ ok: false, error: 'Unknown provider: unknown' })
+
+    const missingKey = await app.request('/test-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'fred', key: '' }),
+    })
+    expect(missingKey.status).toBe(400)
+    expect(await missingKey.json()).toEqual({ ok: false, error: 'No API key provided' })
   })
 })

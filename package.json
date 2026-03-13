@@ -10,6 +10,7 @@
     "build:ui": "cd ui && pnpm install && pnpm build",
     "build:backend": "tsup src/main.ts --format esm --dts",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:ui": "cd ui && pnpm test",
     "test:watch": "vitest"
   },
@@ -50,6 +51,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.8",
+    "@vitest/coverage-v8": "4.0.18",
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.3",
     "tsup": "^8.5.1",

@@ -149,4 +149,69 @@ describe('TraderPage', () => {
       })
     })
   })
+
+  it('runs and deletes trader jobs', async () => {
+    render(<TraderPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Momentum Job now' }))
+    await waitFor(() => {
+      expect(traderApi.runJob).toHaveBeenCalledWith('job-1')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Momentum Job' }))
+    await waitFor(() => {
+      expect(traderApi.removeJob).toHaveBeenCalledWith('job-1')
+    })
+  })
+
+  it('shows an error when manual review fails', async () => {
+    traderApi.runReview.mockRejectedValueOnce(new Error('review unavailable'))
+
+    render(<TraderPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Global Review' }))
+
+    expect(await screen.findByText('review unavailable')).toBeInTheDocument()
+  })
+
+  it('edits a review job in place', async () => {
+    traderApi.listReviewJobs.mockResolvedValue({
+      jobs: [{
+        id: 'review-1',
+        name: 'Weekly Review',
+        enabled: true,
+        strategyId: undefined,
+        schedule: { kind: 'every', every: '24h' },
+        state: { nextRunAtMs: null, lastRunAtMs: null, lastStatus: null, consecutiveErrors: 0 },
+        createdAt: Date.now(),
+      }],
+    })
+
+    render(<TraderPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Weekly Review' }))
+
+    const input = await screen.findByDisplayValue('Weekly Review')
+    fireEvent.change(input, { target: { value: 'Weekly Review v2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(traderApi.updateReviewJob).toHaveBeenCalledWith('review-1', {
+        name: 'Weekly Review v2',
+        strategyId: undefined,
+        schedule: { kind: 'every', every: '24h' },
+      })
+    })
+  })
+
+  it('validates trader job creation before calling the API', async () => {
+    render(<TraderPage />)
+
+    const addButtons = await screen.findAllByRole('button', { name: '+ Add Job' })
+    fireEvent.click(addButtons[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(await screen.findByText('Name is required')).toBeInTheDocument()
+    expect(traderApi.addJob).not.toHaveBeenCalled()
+  })
 })

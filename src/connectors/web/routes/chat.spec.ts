@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StreamableResult } from '../../../core/ai-provider.js'
-import { createChatRoutes } from './chat.js'
+import { createChatRoutes, createMediaRoutes } from './chat.js'
 
 function makeSession() {
   return {
@@ -10,6 +13,10 @@ function makeSession() {
 }
 
 describe('createChatRoutes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('streams provider events to SSE clients with requestId and returns the final response', async () => {
     const send = vi.fn()
     const sseClients = new Map([
@@ -117,5 +124,52 @@ describe('createChatRoutes', () => {
     )
 
     persistSpy.mockRestore()
+  })
+
+  it('rejects empty chat messages with a 400 response', async () => {
+    const session = makeSession()
+    const app = createChatRoutes({
+      ctx: {
+        eventLog: { append: vi.fn() },
+        engine: { askWithSession: vi.fn() },
+      } as never,
+      session: session as never,
+      sseClients: new Map(),
+    })
+
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: '   ' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'message is required' })
+  })
+})
+
+describe('createMediaRoutes', () => {
+  it('serves persisted images and rejects invalid paths', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'openalice-media-'))
+    const mediaFile = join(tempDir, 'sample.png')
+    await writeFile(mediaFile, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+    const mediaStore = await import('../../../core/media-store.js')
+    const resolveSpy = vi.spyOn(mediaStore, 'resolveMediaPath').mockImplementation((name) => {
+      if (name === '2026-03-13/ace-aim-air.png') return mediaFile
+      throw new Error('invalid media path')
+    })
+
+    const app = createMediaRoutes()
+
+    const ok = await app.request('/2026-03-13/ace-aim-air.png')
+    expect(ok.status).toBe(200)
+    expect(ok.headers.get('Content-Type')).toBe('image/png')
+
+    const notFound = await app.request('/../../etc/passwd')
+    expect(notFound.status).toBe(404)
+
+    resolveSpy.mockRestore()
+    await rm(tempDir, { recursive: true, force: true })
   })
 })

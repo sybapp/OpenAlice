@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type NewsCollectorConfig, type OpenbbConfig } from '../api'
@@ -200,5 +200,62 @@ describe('DataSourcesPage', () => {
         port: 7001,
       },
     })
+  })
+
+  it('shows a failed connection state when the external openbb health check fails', async () => {
+    openbbConfig = {
+      ...openbbConfig,
+      dataBackend: 'openbb',
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 503 }))
+
+    render(<DataSourcesPage />)
+
+    await userEvent.click(screen.getByRole('button', { name: /Test Connection/i }))
+
+    expect(await screen.findByRole('button', { name: 'Failed' })).toBeInTheDocument()
+  })
+
+  it('renders the embedded api server switch from the current config state', () => {
+    openbbConfig = {
+      ...openbbConfig,
+      apiServer: {
+        enabled: true,
+        port: 6905,
+      },
+    }
+
+    render(<DataSourcesPage />)
+
+    expect(screen.getAllByRole('switch')[0]).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByDisplayValue('6905')).toBeInTheDocument()
+  })
+
+  it('keeps provider key drafts and shows inline errors when saving fails', async () => {
+    vi.spyOn(api.config, 'updateSection').mockRejectedValueOnce(new Error('provider save failed'))
+
+    render(<DataSourcesPage />)
+
+    await userEvent.click(screen.getByRole('button', { name: /Provider API Keys/i }))
+    await userEvent.type(screen.getByLabelText('FMP Provider Key'), 'fmp-secret')
+    await userEvent.click(screen.getByLabelText('Set FMP Provider Key'))
+
+    expect(await screen.findByText('provider save failed')).toBeInTheDocument()
+    expect(screen.getByLabelText('FMP Provider Key')).toHaveValue('fmp-secret')
+    expect(openbbReplaceConfig).not.toHaveBeenCalled()
+  })
+
+  it('marks provider connection tests as failed when the API check throws', async () => {
+    vi.spyOn(api.openbb, 'testProvider').mockRejectedValueOnce(new Error('network down'))
+
+    render(<DataSourcesPage />)
+
+    await userEvent.click(screen.getByRole('button', { name: /Provider API Keys/i }))
+    await userEvent.type(screen.getByLabelText('FMP Provider Key'), 'fmp-secret')
+    const fmpField = screen.getByText('FMP').closest('label')
+    expect(fmpField).toBeTruthy()
+    await userEvent.click(within(fmpField as HTMLLabelElement).getByRole('button', { name: 'Test' }))
+
+    expect(await within(fmpField as HTMLLabelElement).findByRole('button', { name: 'Fail' })).toBeInTheDocument()
   })
 })

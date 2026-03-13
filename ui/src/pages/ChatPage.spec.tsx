@@ -80,4 +80,34 @@ describe('ChatPage streaming', () => {
     expect(screen.queryByText('draft answer')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Read' })).toBeInTheDocument()
   })
+
+  it('shows a notification when sending fails and keeps streamed tool results', async () => {
+    const sendDeferred = createDeferred<never>()
+    vi.spyOn(api.chat, 'send').mockReturnValue(sendDeferred.promise)
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('22222222-2222-2222-2222-222222222222')
+
+    render(<ChatPage />)
+
+    await userEvent.type(screen.getByPlaceholderText('Message Alice...'), 'hello again')
+    await userEvent.click(screen.getByLabelText('Send message'))
+
+    await act(async () => {
+      sseMessage({
+        type: 'stream',
+        requestId: '22222222-2222-2222-2222-222222222222',
+        event: { type: 'tool_use', id: 'tool-2', name: 'Search', input: { q: 'BTC' } },
+      })
+      sseMessage({
+        type: 'stream',
+        requestId: '22222222-2222-2222-2222-222222222222',
+        event: { type: 'tool_result', tool_use_id: 'tool-2', content: 'done' },
+      })
+      sendDeferred.reject(new Error('network down'))
+      await sendDeferred.promise.catch(() => undefined)
+    })
+
+    expect(await screen.findByText('Error: network down')).toBeInTheDocument()
+    expect(screen.queryByText('...')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Send message')).toBeEnabled()
+  })
 })
