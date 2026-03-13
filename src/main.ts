@@ -14,6 +14,7 @@ import { createCronListener } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
 import { NewsCollector } from './extension/research/news-collector/index.js'
 import { ensureDefaultSkillPacks } from './core/skills/registry.js'
+import { startEmbeddedOpenBBServer } from './openbb/api-server.js'
 
 import { initTradingAccounts, createAccountReconnector, teardownAccountRuntime } from './bootstrap/trading-accounts.js'
 import { initServices } from './bootstrap/services.js'
@@ -50,6 +51,10 @@ async function main() {
   // ---- Services (Brain, EventLog, Cron, OpenBB, SymbolIndex) ----
   const services = await initServices(config)
   const { brain, instructions, eventLog, cronEngine, newsStore, marketData } = services
+
+  if (config.openbb.apiServer.enabled) {
+    startEmbeddedOpenBBServer(config.openbb.apiServer.port)
+  }
 
   // ---- Tool Center ----
   const toolCenter = await registerAllTools({ config, accountManager, accountSetups, services, brain })

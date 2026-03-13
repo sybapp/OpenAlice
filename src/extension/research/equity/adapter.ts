@@ -8,9 +8,9 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { OpenBBEquityClient } from '@/openbb/equity/client'
+import type { EquityClientLike } from '@/openbb/sdk/types'
 
-export function createEquityTools(equityClient: OpenBBEquityClient) {
+export function createEquityTools(equityClient: EquityClientLike) {
   return {
     equityGetProfile: tool({
       description: `Get company profile and key valuation metrics for a stock.

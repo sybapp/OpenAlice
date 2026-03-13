@@ -7,10 +7,10 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { OpenBBNewsClient } from '@/openbb/news/client'
+import type { NewsClientLike } from '@/openbb/sdk/types'
 
 export function createNewsTools(
-  newsClient: OpenBBNewsClient,
+  newsClient: NewsClientLike,
   providers: { companyProvider: string; worldProvider: string },
 ) {
   return {

@@ -1,8 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { OpenBBEquityClient } from '@/openbb/equity/client'
-import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
-import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
 import type { BrooksPaAnalyzeOutput, Timeframes } from './types'
 import {
   analyzeBrooksPa,
@@ -52,9 +50,9 @@ async function loadInputData(input: z.infer<typeof inputSchema>, clients: Return
 }
 
 export function createBrooksPaTools(
-  equityClient: OpenBBEquityClient,
-  cryptoClient: OpenBBCryptoClient,
-  currencyClient: OpenBBCurrencyClient,
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
 ) {
   const clients = createMarketDataClients(equityClient, cryptoClient, currencyClient)
 

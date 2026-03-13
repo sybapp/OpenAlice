@@ -15,7 +15,7 @@
 
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { resolve, dirname } from 'path'
-import type { OpenBBEquityClient } from './client'
+import type { EquityClientLike } from '../sdk/types.js'
 
 // ==================== Types ====================
 
@@ -57,7 +57,7 @@ export class SymbolIndex {
    * 优先从磁盘缓存加载（<24h），否则从 OpenBB API 拉取全量列表。
    * API 失败时降级到过期缓存。全部失败则以空索引启动（不中断）。
    */
-  async load(client: OpenBBEquityClient): Promise<void> {
+  async load(client: EquityClientLike): Promise<void> {
     // 1. 尝试读缓存
     const cached = await this.readCache()
     if (cached && !this.isExpired(cached.cachedAt)) {
@@ -124,7 +124,7 @@ export class SymbolIndex {
 
   // ==================== Internal ====================
 
-  private async fetchFromApi(client: OpenBBEquityClient): Promise<SymbolEntry[]> {
+  private async fetchFromApi(client: EquityClientLike): Promise<SymbolEntry[]> {
     const allEntries: SymbolEntry[] = []
     const seen = new Set<string>()
 

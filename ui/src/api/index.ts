@@ -63,6 +63,7 @@ export type {
   BacktestGitState,
   SessionEntry,
   ConnectorsConfig,
+  OpenbbConfig,
   ConfigUpdateResponse,
   UpdateConnectorsRequest,
   TradingConfigAccount,

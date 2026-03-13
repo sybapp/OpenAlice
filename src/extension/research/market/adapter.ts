@@ -12,13 +12,12 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { SymbolIndex } from '@/openbb/equity/SymbolIndex'
-import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
-import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
+import type { CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
 
 export function createMarketSearchTools(
   symbolIndex: SymbolIndex,
-  cryptoClient: OpenBBCryptoClient,
-  currencyClient: OpenBBCurrencyClient,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
 ) {
   return {
     marketSearchForResearch: tool({

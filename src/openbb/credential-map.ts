@@ -35,3 +35,20 @@ export function buildCredentialsHeader(
 
   return Object.keys(mapped).length > 0 ? JSON.stringify(mapped) : undefined
 }
+
+/**
+ * Build credentials for the in-process OpenTypeBB executor.
+ * Uses the same provider-key mapping as the HTTP header helper.
+ */
+export function buildSDKCredentials(
+  providerKeys: Record<string, string | undefined> | undefined,
+): Record<string, string> {
+  if (!providerKeys) return {}
+
+  const mapped: Record<string, string> = {}
+  for (const [k, v] of Object.entries(providerKeys)) {
+    if (v && keyMapping[k]) mapped[keyMapping[k]] = v
+  }
+
+  return mapped
+}

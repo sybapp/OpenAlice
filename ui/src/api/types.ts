@@ -97,6 +97,24 @@ export interface ConnectorsConfig {
   }
 }
 
+export interface OpenbbConfig {
+  enabled: boolean
+  apiUrl: string
+  providers: {
+    equity: string
+    crypto: string
+    currency: string
+    newsCompany: string
+    newsWorld: string
+  }
+  providerKeys?: Record<string, boolean>
+  dataBackend: 'sdk' | 'openbb'
+  apiServer: {
+    enabled: boolean
+    port: number
+  }
+}
+
 export interface UpdateConnectorsRequest {
   web?: {
     port?: number

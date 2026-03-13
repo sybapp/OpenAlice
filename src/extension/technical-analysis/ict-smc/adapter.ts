@@ -1,8 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { OpenBBEquityClient } from '@/openbb/equity/client'
-import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
-import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
 import { createMarketDataClients, getBarsByTf } from '@/extension/technical-analysis/brooks-pa/ohlcv'
 import { detectFairValueGaps } from './analyzer/fvg'
 import { detectLiquidityPools } from './analyzer/liquidity'
@@ -24,9 +22,9 @@ async function loadBars(params: {
   symbol: string
   timeframe: string
   lookbackBars: number
-  equityClient: OpenBBEquityClient
-  cryptoClient: OpenBBCryptoClient
-  currencyClient: OpenBBCurrencyClient
+  equityClient: EquityClientLike
+  cryptoClient: CryptoClientLike
+  currencyClient: CurrencyClientLike
 }) {
   return await getBarsByTf({
     asset: params.asset,
@@ -38,9 +36,9 @@ async function loadBars(params: {
 }
 
 export function createIctSmcTools(
-  equityClient: OpenBBEquityClient,
-  cryptoClient: OpenBBCryptoClient,
-  currencyClient: OpenBBCurrencyClient,
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
 ) {
   return {
     ictSmcDetectSwings: tool({

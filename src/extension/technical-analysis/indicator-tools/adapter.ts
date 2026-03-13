@@ -1,8 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { OpenBBEquityClient } from '@/openbb/equity/client'
-import type { OpenBBCryptoClient } from '@/openbb/crypto/client'
-import type { OpenBBCurrencyClient } from '@/openbb/currency/client'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
 import { IndicatorCalculator, fetchOhlcvByCalendarDays, createOhlcvTtlCache, getCalendarDaysForInterval } from '@/extension/technical-analysis/indicator-kit/index'
 import type { IndicatorContext, OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
 
@@ -14,9 +12,9 @@ function getCacheKey(asset: string, symbol: string, interval: string): string {
 
 function buildContext(
   asset: 'equity' | 'crypto' | 'currency',
-  equityClient: OpenBBEquityClient,
-  cryptoClient: OpenBBCryptoClient,
-  currencyClient: OpenBBCurrencyClient,
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
 ): IndicatorContext {
   return {
     getHistoricalData: async (symbol, interval) => {
@@ -46,9 +44,9 @@ function buildContext(
 }
 
 export function createIndicatorTools(
-  equityClient: OpenBBEquityClient,
-  cryptoClient: OpenBBCryptoClient,
-  currencyClient: OpenBBCurrencyClient,
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
 ) {
   return {
     calculateIndicator: tool({

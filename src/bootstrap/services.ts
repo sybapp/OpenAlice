@@ -18,6 +18,23 @@ import { OpenBBCurrencyClient } from '../openbb/currency/index.js'
 import { OpenBBEconomyClient } from '../openbb/economy/index.js'
 import { OpenBBCommodityClient } from '../openbb/commodity/index.js'
 import { OpenBBNewsClient } from '../openbb/news/index.js'
+import {
+  buildRouteMap,
+  SDKCommodityClient,
+  SDKCryptoClient,
+  SDKCurrencyClient,
+  SDKEconomyClient,
+  SDKEquityClient,
+  getSDKExecutor,
+  SDKNewsClient,
+  type CommodityClientLike,
+  type CryptoClientLike,
+  type CurrencyClientLike,
+  type EconomyClientLike,
+  type EquityClientLike,
+  type NewsClientLike,
+} from '../openbb/sdk/index.js'
+import { buildSDKCredentials } from '../openbb/credential-map.js'
 import type { BacktestBar } from '../extension/trading/index.js'
 
 const BRAIN_FILE = resolve('data/brain/commit.json')
@@ -122,15 +139,37 @@ export async function initServices(config: Config) {
   })
   await newsStore.init()
 
-  // ---- OpenBB Clients ----
+  // ---- OpenBB / OpenTypeBB Clients ----
   const providerKeys = config.openbb.providerKeys
   const { providers } = config.openbb
-  const equityClient = new OpenBBEquityClient(config.openbb.apiUrl, providers.equity, providerKeys)
-  const cryptoClient = new OpenBBCryptoClient(config.openbb.apiUrl, providers.crypto, providerKeys)
-  const currencyClient = new OpenBBCurrencyClient(config.openbb.apiUrl, providers.currency, providerKeys)
-  const commodityClient = new OpenBBCommodityClient(config.openbb.apiUrl, undefined, providerKeys)
-  const economyClient = new OpenBBEconomyClient(config.openbb.apiUrl, undefined, providerKeys)
-  const newsClient = new OpenBBNewsClient(config.openbb.apiUrl, undefined, providerKeys)
+  const dataBackend = config.openbb.dataBackend ?? 'sdk'
+
+  let equityClient: EquityClientLike
+  let cryptoClient: CryptoClientLike
+  let currencyClient: CurrencyClientLike
+  let commodityClient: CommodityClientLike
+  let economyClient: EconomyClientLike
+  let newsClient: NewsClientLike
+
+  if (dataBackend === 'openbb') {
+    equityClient = new OpenBBEquityClient(config.openbb.apiUrl, providers.equity, providerKeys)
+    cryptoClient = new OpenBBCryptoClient(config.openbb.apiUrl, providers.crypto, providerKeys)
+    currencyClient = new OpenBBCurrencyClient(config.openbb.apiUrl, providers.currency, providerKeys)
+    commodityClient = new OpenBBCommodityClient(config.openbb.apiUrl, undefined, providerKeys)
+    economyClient = new OpenBBEconomyClient(config.openbb.apiUrl, undefined, providerKeys)
+    newsClient = new OpenBBNewsClient(config.openbb.apiUrl, undefined, providerKeys)
+  } else {
+    const executor = getSDKExecutor()
+    const routeMap = buildRouteMap()
+    const credentials = buildSDKCredentials(providerKeys)
+
+    equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
+    cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
+    currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
+    commodityClient = new SDKCommodityClient(executor, 'commodity', undefined, credentials, routeMap)
+    economyClient = new SDKEconomyClient(executor, 'economy', undefined, credentials, routeMap)
+    newsClient = new SDKNewsClient(executor, 'news', undefined, credentials, routeMap)
+  }
 
   const marketData = {
     async getBacktestBars(query: { assetType: 'equity' | 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {

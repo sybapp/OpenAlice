@@ -47,6 +47,9 @@ importers:
       hono:
         specifier: ^4.12.5
         version: 4.12.5
+      opentypebb:
+        specifier: link:./packages/opentypebb
+        version: link:packages/opentypebb
       pino:
         specifier: ^10.3.1
         version: 10.3.1
