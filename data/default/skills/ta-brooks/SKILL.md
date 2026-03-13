@@ -5,12 +5,10 @@ compatibility:
   tools:
     preferred:
       - brooksPaAnalyze
-      - brooksPa*
       - market-search*
       - equity*
     allow:
       - brooksPaAnalyze
-      - brooksPa*
       - market-search*
       - equity*
     deny:
@@ -31,13 +29,15 @@ Use for price action, candle structure, trend-versus-range judgment, breakout fo
 ## Instructions
 Start with deterministic analysis tools instead of feeding long raw OHLCV sequences into the model.
 
-Prefer brooksPaAnalyze as the primary structure-reading tool. If Brooks sub-tools are available, use them to derive structure first and let the model consume only the aggregated structure plus the latest decision window.
+Prefer `brooksPaAnalyze` as the single entry point. The tool returns **v2 layered output**:
+- `core`: stable fields intended for trading decisions / programmatic use
+- `detailed`: full deterministic breakdown intended for UI, debugging, and post-trade review
 
-Only reason over the structured tool output and the most recent 10 bars in the current decision window.
+Default to `detailLevel: full` for human analysis. For automated/trading-mode decisions, prefer `detailLevel: core`.
+
+Only reason over the tool output and the most recent decision-window bars included in the output. Do not reason over long raw bar history.
 
 Summarize the result in Brooks-style terminology: trend, range, breakout, follow-through, failed breakout, channel, wedge, second entry, support/resistance, and invalidation.
-
-The model should make judgments and summaries, not replace the low-level structure recognizer.
 
 ## Safety notes
 Do not place trades. Do not mutate cron state. If a request asks for execution, explain the analysis and note that trading tools are outside this skill policy.

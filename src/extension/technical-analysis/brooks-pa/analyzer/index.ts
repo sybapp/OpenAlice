@@ -11,7 +11,7 @@ import type {
 import {
   averageTrueRange,
   checkMidpointAvoidance,
-  classifyBarType,
+  classifyBarTypeFromFeatures,
   countDirectionalBars,
   highestHigh,
   lowestLow,
@@ -31,6 +31,8 @@ function clampConfidence(value: number): number {
 function toRecentBars(bars: OhlcvData[], recentBars: number): RecentBar[] {
   return bars.slice(-recentBars).map((bar, i, arr): RecentBar => {
     const index = bars.length - arr.length + i
+    const features = summarizeBarFeatures(bar)
+    const barType = classifyBarTypeFromFeatures(bar, features)
     return {
       index,
       date: bar.date,
@@ -38,8 +40,8 @@ function toRecentBars(bars: OhlcvData[], recentBars: number): RecentBar[] {
       high: bar.high,
       low: bar.low,
       close: bar.close,
-      barType: classifyBarType(bar),
-      features: summarizeBarFeatures(bar),
+      barType,
+      features,
     }
   })
 }

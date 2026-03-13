@@ -1,12 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
-import { createMarketDataClients, getBarsByTf } from '@/extension/technical-analysis/brooks-pa/ohlcv'
-import { detectFairValueGaps } from './analyzer/fvg'
-import { detectLiquidityPools } from './analyzer/liquidity'
-import { detectBosChoch, detectStructure, summarizeIctDecisionWindow } from './analyzer/structure'
-import { detectSwings } from './analyzer/swings'
-import type { IctSmcAnalyzeOutput } from './types'
+import type { OhlcvStore } from '@/extension/technical-analysis/indicator-kit/index'
+import { analyzeIctSmc, type IctSmcAnalyzeOutputV2 } from './analyze'
 
 const inputSchema = z.object({
   asset: z.enum(['equity', 'crypto', 'currency']),
@@ -15,147 +10,56 @@ const inputSchema = z.object({
   lookbackBars: z.number().int().positive().optional(),
   recentBars: z.number().int().positive().optional(),
   swingLookback: z.number().int().min(1).max(10).optional(),
+  detailLevel: z.enum(['core', 'full']).optional(),
 })
 
-async function loadBars(params: {
-  asset: 'equity' | 'crypto' | 'currency'
-  symbol: string
-  timeframe: string
-  lookbackBars: number
-  equityClient: EquityClientLike
-  cryptoClient: CryptoClientLike
-  currencyClient: CurrencyClientLike
-}) {
-  return await getBarsByTf({
-    asset: params.asset,
-    symbol: params.symbol,
-    interval: params.timeframe,
-    lookbackBars: params.lookbackBars,
-    clients: createMarketDataClients(params.equityClient, params.cryptoClient, params.currencyClient),
-  })
-}
-
-export function createIctSmcTools(
-  equityClient: EquityClientLike,
-  cryptoClient: CryptoClientLike,
-  currencyClient: CurrencyClientLike,
-) {
+export function createIctSmcTools(store: OhlcvStore) {
   return {
-    ictSmcDetectSwings: tool({
-      description: 'Detect deterministic ICT/SMC swing highs and swing lows from OHLCV.',
-      inputSchema,
-      execute: async (input) => {
-        const bars = await loadBars({
-          asset: input.asset,
-          symbol: input.symbol,
-          timeframe: input.timeframe ?? '5m',
-          lookbackBars: input.lookbackBars ?? 300,
-          equityClient,
-          cryptoClient,
-          currencyClient,
-        })
-        return detectSwings(bars, input.swingLookback ?? 2)
-      },
-    }),
-    ictSmcDetectLiquidity: tool({
-      description: 'Detect deterministic ICT/SMC liquidity pools such as equal highs and equal lows.',
-      inputSchema,
-      execute: async (input) => {
-        const bars = await loadBars({
-          asset: input.asset,
-          symbol: input.symbol,
-          timeframe: input.timeframe ?? '5m',
-          lookbackBars: input.lookbackBars ?? 300,
-          equityClient,
-          cryptoClient,
-          currencyClient,
-        })
-        const swings = detectSwings(bars, input.swingLookback ?? 2)
-        return detectLiquidityPools(swings, bars)
-      },
-    }),
-    ictSmcDetectFvg: tool({
-      description: 'Detect deterministic ICT/SMC fair value gaps and whether they have been filled.',
-      inputSchema,
-      execute: async (input) => {
-        const bars = await loadBars({
-          asset: input.asset,
-          symbol: input.symbol,
-          timeframe: input.timeframe ?? '5m',
-          lookbackBars: input.lookbackBars ?? 300,
-          equityClient,
-          cryptoClient,
-          currencyClient,
-        })
-        return detectFairValueGaps(bars)
-      },
-    }),
-    ictSmcDetectStructure: tool({
-      description: 'Detect deterministic ICT/SMC BOS, CHOCH, displacement, mitigation, and premium-discount state.',
-      inputSchema,
-      execute: async (input) => {
-        const bars = await loadBars({
-          asset: input.asset,
-          symbol: input.symbol,
-          timeframe: input.timeframe ?? '5m',
-          lookbackBars: input.lookbackBars ?? 300,
-          equityClient,
-          cryptoClient,
-          currencyClient,
-        })
-        const swings = detectSwings(bars, input.swingLookback ?? 2)
-        const liquidity = detectLiquidityPools(swings, bars)
-        const fvgs = detectFairValueGaps(bars)
-        return detectStructure({ swings, bars, fvgs, liquidity })
-      },
-    }),
     ictSmcAnalyze: tool({
-      description: 'Aggregate deterministic ICT/SMC structure analysis and return only structured outputs plus the recent decision window.',
+      description: `Aggregate deterministic ICT/SMC analysis (read-only).
+
+Returns v2 output with two layers:
+- core: stable decision fields
+- detailed: full detection output for UI/debug (optional via detailLevel)`,
       inputSchema,
-      execute: async (input): Promise<IctSmcAnalyzeOutput> => {
+      execute: async (input): Promise<IctSmcAnalyzeOutputV2> => {
         const timeframe = input.timeframe ?? '5m'
         const lookbackBars = input.lookbackBars ?? 300
         const recentBars = input.recentBars ?? 10
         const swingLookback = input.swingLookback ?? 2
-        const bars = await loadBars({
+
+        const bars = await store.fetch({
           asset: input.asset,
           symbol: input.symbol,
-          timeframe,
+          interval: timeframe,
+          strategy: 'bars',
           lookbackBars,
-          equityClient,
-          cryptoClient,
-          currencyClient,
         })
-        const swings = detectSwings(bars, swingLookback)
-        const liquidity = detectLiquidityPools(swings, bars)
-        const fvgs = detectFairValueGaps(bars)
-        const bosChoch = detectBosChoch(swings, bars)
-        const structure = detectStructure({ swings, bars, fvgs, liquidity })
-        const decisionWindow = summarizeIctDecisionWindow({
-          tf: timeframe,
-          bars: bars.slice(-recentBars),
-          liquidity,
-          structure,
-        })
-        return {
+
+        const out = analyzeIctSmc({
           symbol: input.symbol,
           timeframe,
           lookbackBars,
           recentBars,
-          swings,
-          liquidity,
-          fvgs,
-          structure: {
-            ...structure,
-            bos: bosChoch.bos,
-            choch: bosChoch.choch,
-            latestSwingHigh: bosChoch.latestSwingHigh,
-            latestSwingLow: bosChoch.latestSwingLow,
-            bias: bosChoch.bias,
-          },
-          decisionWindow,
+          swingLookback,
+          bars,
+        })
+
+        if ((input.detailLevel ?? 'full') === 'core') {
+          return {
+            version: out.version,
+            symbol: out.symbol,
+            timeframe: out.timeframe,
+            lookbackBars: out.lookbackBars,
+            recentBars: out.recentBars,
+            core: out.core,
+          }
         }
+
+        return out
       },
     }),
   }
 }
+
+export type { IctSmcAnalyzeOutputV2 as IctSmcAnalyzeOutput }

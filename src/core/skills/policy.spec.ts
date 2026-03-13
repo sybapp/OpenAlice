@@ -70,7 +70,6 @@ describe('skill tool policy', () => {
   it('validates tool references against inventory by tool name or group', () => {
     const warnings = validateSkillToolReferences(baseSkill, [
       { name: 'brooksPaAnalyze', group: 'analysis', description: '' },
-      { name: 'brooksPaDetectStructure', group: 'analysis', description: '' },
       { name: 'marketSearchForResearch', group: 'market-search', description: '' },
       { name: 'tradingCommit', group: 'trading', description: '' },
       { name: 'cronAdd', group: 'cron', description: '' },

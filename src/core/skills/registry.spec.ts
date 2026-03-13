@@ -42,7 +42,7 @@ describe('skill registry', () => {
     expect(skills.find((skill) => skill.id === 'ta-brooks')).toMatchObject({
       label: 'Brooks Price Action',
       preferredTools: expect.arrayContaining(['brooksPaAnalyze']),
-      toolAllow: expect.arrayContaining(['brooksPaAnalyze', 'brooksPa*']),
+      toolAllow: expect.arrayContaining(['brooksPaAnalyze', 'market-search*', 'equity*']),
       outputSchema: 'AnalysisReport',
       analysisMode: 'tool-first',
       decisionWindowBars: 10,
@@ -50,14 +50,14 @@ describe('skill registry', () => {
       safetyNotes: expect.stringContaining('Do not place trades'),
     })
     expect(skills.find((skill) => skill.id === 'ta-ict-smc')).toMatchObject({
-      preferredTools: expect.arrayContaining(['ictSmcAnalyze', 'ictSmc*']),
-      toolAllow: expect.arrayContaining(['ictSmcAnalyze', 'ictSmc*']),
-      instructions: expect.stringContaining('Run deterministic ICT/SMC structure tools first'),
+      preferredTools: expect.arrayContaining(['ictSmcAnalyze']),
+      toolAllow: expect.arrayContaining(['ictSmcAnalyze', 'market-search*']),
+      instructions: expect.stringContaining('Run deterministic ICT/SMC tools first'),
     })
     expect(skills.find((skill) => skill.id === 'ta-brooks-ict-smc')).toMatchObject({
       label: 'Brooks + ICT / SMC Confluence',
       preferredTools: expect.arrayContaining(['brooksPaAnalyze', 'ictSmcAnalyze']),
-      toolAllow: expect.arrayContaining(['brooksPa*', 'ictSmc*']),
+      toolAllow: expect.arrayContaining(['brooksPaAnalyze', 'ictSmcAnalyze']),
       instructions: expect.stringContaining('highlights agreement and disagreement between the two frameworks'),
     })
   })

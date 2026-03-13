@@ -36,6 +36,7 @@ import {
 } from '../openbb/sdk/index.js'
 import { buildSDKCredentials } from '../openbb/credential-map.js'
 import type { BacktestBar } from '../extension/trading/index.js'
+import { createOhlcvStore } from '../extension/technical-analysis/indicator-kit/index.js'
 
 const BRAIN_FILE = resolve('data/brain/commit.json')
 const FRONTAL_LOBE_FILE = resolve('data/brain/frontal-lobe.md')
@@ -191,9 +192,12 @@ export async function initServices(config: Config) {
   const symbolIndex = new SymbolIndex()
   await symbolIndex.load(equityClient)
 
+  const ohlcvStore = createOhlcvStore({ equityClient, cryptoClient, currencyClient })
+
   return {
     brain, instructions, eventLog, cronEngine, newsStore,
     equityClient, cryptoClient, currencyClient, commodityClient, economyClient, newsClient,
     symbolIndex, marketData, providers,
+    ohlcvStore,
   }
 }

@@ -1,53 +1,9 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from '@/openbb/sdk/types'
-import { IndicatorCalculator, fetchOhlcvByCalendarDays, createOhlcvTtlCache, getCalendarDaysForInterval } from '@/extension/technical-analysis/indicator-kit/index'
-import type { IndicatorContext, OhlcvData } from '@/extension/technical-analysis/indicator-kit/index'
+import { IndicatorCalculator, getCalendarDaysForInterval } from '@/extension/technical-analysis/indicator-kit/index'
+import type { IndicatorContext, OhlcvStore } from '@/extension/technical-analysis/indicator-kit/index'
 
-const ohlcvCache = createOhlcvTtlCache()
-
-function getCacheKey(asset: string, symbol: string, interval: string): string {
-  return `${asset}:${symbol}:${interval}`
-}
-
-function buildContext(
-  asset: 'equity' | 'crypto' | 'currency',
-  equityClient: EquityClientLike,
-  cryptoClient: CryptoClientLike,
-  currencyClient: CurrencyClientLike,
-): IndicatorContext {
-  return {
-    getHistoricalData: async (symbol, interval) => {
-      const cacheKey = getCacheKey(asset, symbol, interval)
-      const cached = ohlcvCache.get(cacheKey)
-      if (cached) return cached
-
-      const calendarDays = getCalendarDaysForInterval(interval)
-
-      let results: OhlcvData[]
-      switch (asset) {
-        case 'equity':
-          results = await fetchOhlcvByCalendarDays({ client: equityClient, symbol, interval, calendarDays })
-          break
-        case 'crypto':
-          results = await fetchOhlcvByCalendarDays({ client: cryptoClient, symbol, interval, calendarDays })
-          break
-        case 'currency':
-          results = await fetchOhlcvByCalendarDays({ client: currencyClient, symbol, interval, calendarDays })
-          break
-      }
-
-      ohlcvCache.set(cacheKey, results)
-      return results
-    },
-  }
-}
-
-export function createIndicatorTools(
-  equityClient: EquityClientLike,
-  cryptoClient: CryptoClientLike,
-  currencyClient: CurrencyClientLike,
-) {
+export function createIndicatorTools(store: OhlcvStore) {
   return {
     calculateIndicator: tool({
       description: `Calculate technical indicators for any asset (equity, crypto, currency) using formula expressions.
@@ -71,7 +27,17 @@ Use the corresponding search tool first to resolve the correct symbol.`,
         precision: z.number().int().min(0).max(10).optional().describe('Decimal places (default: 4)'),
       }),
       execute: async ({ asset, formula, precision }) => {
-        const context = buildContext(asset, equityClient, cryptoClient, currencyClient)
+        const context: IndicatorContext = {
+          getHistoricalData: (symbol, interval) =>
+            store.fetch({
+              asset,
+              symbol,
+              interval,
+              strategy: 'calendar',
+              calendarDays: getCalendarDaysForInterval(interval),
+            }),
+        }
+
         const calculator = new IndicatorCalculator(context)
         return await calculator.calculate(formula, precision)
       },

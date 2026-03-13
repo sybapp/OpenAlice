@@ -36,6 +36,7 @@ export async function registerAllTools(deps: {
   const {
     cronEngine, equityClient, cryptoClient, currencyClient,
     newsClient, newsStore, symbolIndex, providers,
+    ohlcvStore,
   } = services
 
   const toolCenter = new ToolCenter()
@@ -67,9 +68,9 @@ export async function registerAllTools(deps: {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news-archive')
   }
 
-  toolCenter.register(createIndicatorTools(equityClient, cryptoClient, currencyClient), 'analysis')
-  toolCenter.register(createBrooksPaTools(equityClient, cryptoClient, currencyClient), 'analysis')
-  toolCenter.register(createIctSmcTools(equityClient, cryptoClient, currencyClient), 'analysis')
+  toolCenter.register(createIndicatorTools(ohlcvStore), 'analysis')
+  toolCenter.register(createBrooksPaTools(ohlcvStore), 'analysis')
+  toolCenter.register(createIctSmcTools(ohlcvStore), 'analysis')
 
   for (const skill of await listSkillPacks()) {
     for (const warning of validateSkillToolReferences(skill, toolCenter.getInventory())) {

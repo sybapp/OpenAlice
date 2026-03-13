@@ -8,12 +8,16 @@ export function summarizeBarFeatures(bar: OhlcvData): BarFeatureSummary {
   return { tr, body, bodyPct }
 }
 
-export function classifyBarType(bar: OhlcvData): BarType {
-  const { tr, bodyPct } = summarizeBarFeatures(bar)
+export function classifyBarTypeFromFeatures(bar: OhlcvData, features: BarFeatureSummary): BarType {
+  const { tr, bodyPct } = features
 
   if (tr === 0) return 'doji'
   if (bodyPct < 0.2) return 'doji'
   return bar.close >= bar.open ? 'bull' : 'bear'
+}
+
+export function classifyBarType(bar: OhlcvData): BarType {
+  return classifyBarTypeFromFeatures(bar, summarizeBarFeatures(bar))
 }
 
 export function round(value: number, digits = 4): number {

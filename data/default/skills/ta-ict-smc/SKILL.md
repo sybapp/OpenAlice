@@ -5,11 +5,9 @@ compatibility:
   tools:
     preferred:
       - ictSmcAnalyze
-      - ictSmc*
       - market-search*
     allow:
       - ictSmcAnalyze
-      - ictSmc*
       - market-search*
     deny:
       - trading*
@@ -27,13 +25,15 @@ analysisMode: tool-first
 Use for ICT/SMC structure analysis, liquidity targeting, imbalance reading, displacement quality, and narrative framing around swing structure.
 
 ## Instructions
-Run deterministic ICT/SMC structure tools first. Prefer ictSmcAnalyze as the main entry point, and use ictSmc* sub-tools when you need to inspect swings, liquidity, FVGs, or structure components directly.
+Run deterministic ICT/SMC tools first. Prefer `ictSmcAnalyze` as the single entry point. The tool returns **v2 layered output**:
+- `core`: stable fields intended for trading decisions / programmatic use
+- `detailed`: full deterministic breakdown intended for UI, debugging, and post-trade review
+
+Default to `detailLevel: full` for human analysis. For automated/trading-mode decisions, prefer `detailLevel: core`.
 
 Focus the narrative on liquidity pools, liquidity sweeps, fair value gaps, imbalance, BOS, CHOCH, mitigation, premium/discount, and invalidation.
 
-Only consume structured signals plus the most recent 10 decision-window bars. Do not reason over long raw bar history.
-
-The model should synthesize the structured market story and propose bias, thesis, evidence, and invalidation in ICT/SMC terms rather than replacing the structure detector.
+Only consume structured tool output and the decision-window bars included in the output. Do not reason over long raw bar history.
 
 ## Safety notes
 Analysis only. Trading and cron mutation tools are denied in this mode.
