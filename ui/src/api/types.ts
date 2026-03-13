@@ -222,7 +222,7 @@ export interface Position {
   liquidationPrice?: number
 }
 
-export interface WalletCommitLog {
+export interface TradingCommitLog {
   hash: string
   message: string
   operations: Array<{ symbol: string; action: string; change: string; status: string }>

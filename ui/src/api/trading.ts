@@ -3,12 +3,16 @@ import type {
   TradingAccount,
   AccountInfo,
   Position,
-  WalletCommitLog,
+  TradingCommitLog,
   ReconnectResult,
   PlatformConfig,
   TradingConfigAccount,
   UpdateTradingAccountRequest,
 } from './types'
+
+function tradingAccountPath(accountId: string, suffix: string): string {
+  return `/api/trading/accounts/${accountId}/${suffix}`
+}
 
 // ==================== Unified Trading API ====================
 
@@ -26,34 +30,38 @@ export const tradingApi = {
   // ==================== Per-account ====================
 
   async reconnectAccount(accountId: string): Promise<ReconnectResult> {
-    const res = await fetchApi(`/api/trading/accounts/${accountId}/reconnect`, { method: 'POST' })
+    const res = await fetchApi(tradingAccountPath(accountId, 'reconnect'), { method: 'POST' })
     return res.json()
   },
 
   async accountInfo(accountId: string): Promise<AccountInfo> {
-    return fetchJson(`/api/trading/accounts/${accountId}/account`)
+    return fetchJson(tradingAccountPath(accountId, 'account'))
   },
 
   async positions(accountId: string): Promise<{ positions: Position[] }> {
-    return fetchJson(`/api/trading/accounts/${accountId}/positions`)
+    return fetchJson(tradingAccountPath(accountId, 'positions'))
   },
 
   async orders(accountId: string): Promise<{ orders: unknown[] }> {
-    return fetchJson(`/api/trading/accounts/${accountId}/orders`)
+    return fetchJson(tradingAccountPath(accountId, 'orders'))
   },
 
   async marketClock(accountId: string): Promise<{ isOpen: boolean; nextOpen: string; nextClose: string }> {
-    return fetchJson(`/api/trading/accounts/${accountId}/market-clock`)
+    return fetchJson(tradingAccountPath(accountId, 'market-clock'))
   },
 
-  async walletLog(accountId: string, limit = 20, symbol?: string): Promise<{ commits: WalletCommitLog[] }> {
+  async tradingLog(accountId: string, limit = 20, symbol?: string): Promise<{ commits: TradingCommitLog[] }> {
     const params = new URLSearchParams({ limit: String(limit) })
     if (symbol) params.set('symbol', symbol)
-    return fetchJson(`/api/trading/accounts/${accountId}/wallet/log?${params}`)
+    return fetchJson(`${tradingAccountPath(accountId, 'trading/log')}?${params}`)
   },
 
-  async walletShow(accountId: string, hash: string): Promise<unknown> {
-    return fetchJson(`/api/trading/accounts/${accountId}/wallet/show/${hash}`)
+  async tradingShow(accountId: string, hash: string): Promise<unknown> {
+    return fetchJson(tradingAccountPath(accountId, `trading/show/${hash}`))
+  },
+
+  async tradingStatus(accountId: string): Promise<unknown> {
+    return fetchJson(tradingAccountPath(accountId, 'trading/status'))
   },
 
   // ==================== Trading Config CRUD ====================

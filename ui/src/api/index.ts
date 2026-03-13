@@ -46,7 +46,7 @@ export type {
   TradingAccount,
   AccountInfo,
   Position,
-  WalletCommitLog,
+  TradingCommitLog,
   ReconnectResult,
   BacktestBar,
   BacktestRunMode,

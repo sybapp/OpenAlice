@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, type Position, type WalletCommitLog } from '../api'
+import { api, type Position, type TradingCommitLog } from '../api'
 
 // ==================== Types ====================
 
@@ -16,7 +16,7 @@ interface AccountData {
   provider: string
   label: string
   positions: Position[]
-  walletLog: WalletCommitLog[]
+  tradingLog: TradingCommitLog[]
   error?: string
 }
 
@@ -25,7 +25,46 @@ interface PortfolioData {
   accounts: AccountData[]
 }
 
+interface AccountSource {
+  id: string
+  label: string
+  provider: string
+  equity: number
+  unrealizedPnL: number
+  error?: string
+}
+
+interface PositionWithAccount extends Position {
+  accountLabel: string
+  accountProvider: string
+}
+
+interface CommitWithAccount extends TradingCommitLog {
+  accountLabel: string
+  accountProvider: string
+}
+
 const EMPTY: PortfolioData = { equity: null, accounts: [] }
+
+function withAccountMeta<T>(items: T[], account: Pick<AccountData, 'label' | 'provider'>): Array<T & { accountLabel: string; accountProvider: string }> {
+  return items.map((item) => ({
+    ...item,
+    accountLabel: account.label,
+    accountProvider: account.provider,
+  }))
+}
+
+async function fetchAccountData(acct: { id: string; provider: string; label: string }): Promise<AccountData> {
+  try {
+    const [posResp, logResp] = await Promise.all([
+      api.trading.positions(acct.id),
+      api.trading.tradingLog(acct.id, 10),
+    ])
+    return { ...acct, positions: posResp.positions, tradingLog: logResp.commits }
+  } catch {
+    return { ...acct, positions: [], tradingLog: [], error: 'Not connected' }
+  }
+}
 
 // ==================== Page ====================
 
@@ -50,18 +89,19 @@ export function PortfolioPage() {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const allPositions = data.accounts.flatMap(a =>
-    a.positions.map(p => ({ ...p, accountLabel: a.label, accountProvider: a.provider })),
-  )
-  const allWalletLogs = data.accounts.flatMap(a =>
-    a.walletLog.map(c => ({ ...c, accountLabel: a.label, accountProvider: a.provider })),
-  )
+  const allPositions = data.accounts.flatMap((account) => withAccountMeta(account.positions, account))
+  const allTradingLogs = data.accounts.flatMap((account) => withAccountMeta(account.tradingLog, account))
 
   // Merge equity per-account data with provider info + per-account unrealizedPnL from positions
-  const accountSources = (data.equity?.accounts ?? []).map(eq => {
-    const acct = data.accounts.find(a => a.id === eq.id)
-    const unrealizedPnL = acct?.positions.reduce((sum, p) => sum + p.unrealizedPnL, 0) ?? 0
-    return { ...eq, provider: acct?.provider ?? '', unrealizedPnL, error: acct?.error }
+  const accountSources: AccountSource[] = (data.equity?.accounts ?? []).map((equityAccount) => {
+    const account = data.accounts.find((item) => item.id === equityAccount.id)
+    const unrealizedPnL = account?.positions.reduce((sum, position) => sum + position.unrealizedPnL, 0) ?? 0
+    return {
+      ...equityAccount,
+      provider: account?.provider ?? '',
+      unrealizedPnL,
+      error: account?.error,
+    }
   })
 
   return (
@@ -114,8 +154,8 @@ export function PortfolioPage() {
             <p className="text-center py-8 text-[13px] text-text-muted">No open positions.</p>
           )}
 
-          {allWalletLogs.length > 0 && (
-            <TradeLog commits={allWalletLogs} />
+          {allTradingLogs.length > 0 && (
+            <TradeLog commits={allTradingLogs} />
           )}
         </div>
       </div>
@@ -135,19 +175,7 @@ async function fetchPortfolioData(): Promise<PortfolioData> {
     const equity = equityResult.status === 'fulfilled' ? equityResult.value : null
     const accountsList = accountsResult.status === 'fulfilled' ? accountsResult.value.accounts : []
 
-    const accounts = await Promise.all(
-      accountsList.map(async (acct): Promise<AccountData> => {
-        try {
-          const [posResp, logResp] = await Promise.all([
-            api.trading.positions(acct.id),
-            api.trading.walletLog(acct.id, 10),
-          ])
-          return { ...acct, positions: posResp.positions, walletLog: logResp.commits }
-        } catch {
-          return { ...acct, positions: [], walletLog: [], error: 'Not connected' }
-        }
-      }),
-    )
+    const accounts = await Promise.all(accountsList.map((account) => fetchAccountData(account)))
 
     return { equity, accounts }
   } catch {
@@ -195,22 +223,22 @@ const PROVIDER_COLORS: Record<string, string> = {
   alpaca: 'bg-green',
 }
 
-function AccountStrip({ sources }: { sources: Array<{ id: string; label: string; provider: string; equity: number; unrealizedPnL: number; error?: string }> }) {
+function AccountStrip({ sources }: { sources: AccountSource[] }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {sources.map(s => {
-        const dotColor = PROVIDER_COLORS[s.provider] || 'bg-text-muted'
+      {sources.map((source) => {
+        const dotColor = PROVIDER_COLORS[source.provider] || 'bg-text-muted'
         return (
-          <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-[12px]">
+          <div key={source.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-[12px]">
             <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-            <span className="text-text font-medium">{s.label}</span>
-            <span className="text-text-muted">{fmt(s.equity)}</span>
-            {s.unrealizedPnL !== 0 && (
-              <span className={s.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}>
-                {fmtPnl(s.unrealizedPnL)}
+            <span className="text-text font-medium">{source.label}</span>
+            <span className="text-text-muted">{fmt(source.equity)}</span>
+            {source.unrealizedPnL !== 0 && (
+              <span className={source.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}>
+                {fmtPnl(source.unrealizedPnL)}
               </span>
             )}
-            {s.error && <span className="text-text-muted/50">{s.error}</span>}
+            {source.error && <span className="text-text-muted/50">{source.error}</span>}
           </div>
         )
       })}
@@ -219,11 +247,6 @@ function AccountStrip({ sources }: { sources: Array<{ id: string; label: string;
 }
 
 // ==================== Positions Table ====================
-
-interface PositionWithAccount extends Position {
-  accountLabel: string
-  accountProvider: string
-}
 
 function PositionsTable({ positions }: { positions: PositionWithAccount[] }) {
   const hasLeverage = positions.some(p => p.leverage > 1)
@@ -281,11 +304,6 @@ function PositionsTable({ positions }: { positions: PositionWithAccount[] }) {
 }
 
 // ==================== Trade Log ====================
-
-interface CommitWithAccount extends WalletCommitLog {
-  accountLabel: string
-  accountProvider: string
-}
 
 function TradeLog({ commits }: { commits: CommitWithAccount[] }) {
   const sorted = [...commits]
