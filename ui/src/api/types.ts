@@ -188,6 +188,74 @@ export interface CronJob {
   createdAt: number
 }
 
+export interface TraderJobState {
+  nextRunAtMs: number | null
+  lastRunAtMs: number | null
+  lastStatus: 'ok' | 'error' | null
+  consecutiveErrors: number
+}
+
+export interface TraderStrategySummary {
+  id: string
+  label: string
+  enabled: boolean
+  sources: string[]
+  asset: 'crypto' | 'equity'
+  symbols: string[]
+}
+
+export interface TraderStrategyDetail extends TraderStrategySummary {
+  timeframes: {
+    context: string
+    structure: string
+    execution: string
+  }
+  riskBudget: {
+    perTradeRiskPercent: number
+    maxGrossExposurePercent: number
+    maxPositions: number
+    maxDailyLossPercent?: number
+  }
+  behaviorRules: {
+    preferences: string[]
+    prohibitions: string[]
+  }
+  executionPolicy: {
+    allowedOrderTypes: Array<'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'>
+    requireProtection: boolean
+    allowMarketOrders: boolean
+    allowOvernight: boolean
+  }
+}
+
+export interface TraderJob {
+  id: string
+  name: string
+  enabled: boolean
+  schedule: CronSchedule
+  strategyId: string
+  state: TraderJobState
+  createdAt: number
+}
+
+export interface TraderReviewJob {
+  id: string
+  name: string
+  enabled: boolean
+  schedule: CronSchedule
+  strategyId?: string
+  state: TraderReviewJobState
+  createdAt: number
+}
+
+export interface TraderReviewResult {
+  updated: boolean
+  summary: string
+  strategyId?: string
+}
+
+export type TraderReviewJobState = TraderJobState
+
 // ==================== Trading ====================
 
 export interface TradingAccount {

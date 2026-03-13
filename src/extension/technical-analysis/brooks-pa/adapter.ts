@@ -20,6 +20,7 @@ const inputSchema = z.object({
     band: z.number().min(0).max(0.5).optional(),
   }).optional(),
   detailLevel: z.enum(['core', 'full']).optional(),
+  dropUnclosed: z.boolean().optional(),
 })
 
 export function createBrooksPaTools(store: OhlcvStore) {
@@ -54,6 +55,7 @@ Uses strict bars lookback (default 300) and recentBars (default 10) for executio
             interval: timeframes.context,
             strategy: 'bars',
             lookbackBars,
+            dropUnclosed: input.dropUnclosed,
           }),
           store.fetch({
             asset: input.asset,
@@ -61,6 +63,7 @@ Uses strict bars lookback (default 300) and recentBars (default 10) for executio
             interval: timeframes.structure,
             strategy: 'bars',
             lookbackBars,
+            dropUnclosed: input.dropUnclosed,
           }),
           store.fetch({
             asset: input.asset,
@@ -68,6 +71,7 @@ Uses strict bars lookback (default 300) and recentBars (default 10) for executio
             interval: timeframes.execution,
             strategy: 'bars',
             lookbackBars,
+            dropUnclosed: input.dropUnclosed,
           }),
         ])
 

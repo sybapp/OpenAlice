@@ -11,6 +11,7 @@ const inputSchema = z.object({
   recentBars: z.number().int().positive().optional(),
   swingLookback: z.number().int().min(1).max(10).optional(),
   detailLevel: z.enum(['core', 'full']).optional(),
+  dropUnclosed: z.boolean().optional(),
 })
 
 export function createIctSmcTools(store: OhlcvStore) {
@@ -34,6 +35,7 @@ Returns v2 output with two layers:
           interval: timeframe,
           strategy: 'bars',
           lookbackBars,
+          dropUnclosed: input.dropUnclosed,
         })
 
         const out = analyzeIctSmc({

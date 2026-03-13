@@ -18,6 +18,7 @@ import { createTradingConfigRoutes } from './routes/trading-config.js'
 import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
 import { createBacktestRoutes } from './routes/backtest.js'
+import { createTraderRoutes } from './routes/trader.js'
 
 export interface WebConfig {
   port: number
@@ -70,6 +71,7 @@ function createWebApp(args: {
   app.route('/api/openbb', createOpenbbRoutes())
   app.route('/api/events', createEventsRoutes(ctx))
   app.route('/api/cron', createCronRoutes(ctx))
+  app.route('/api/trader', createTraderRoutes(ctx))
   app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
   app.route('/api/trading/config', createTradingConfigRoutes(ctx))
   app.route('/api/trading', createTradingRoutes(ctx))

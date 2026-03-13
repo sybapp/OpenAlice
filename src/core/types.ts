@@ -2,6 +2,7 @@ import type { AccountManager, BacktestRunManager } from '../extension/trading/in
 import type { ITradingGit } from '../extension/trading/git/interfaces.js'
 import type { CronEngine } from '../task/cron/engine.js'
 import type { Heartbeat } from '../task/heartbeat/index.js'
+import type { TraderJobEngine, TraderReviewJobEngine, TraderReviewResult } from '../task/trader/index.js'
 import type { Config } from './config.js'
 import type { ConnectorCenter } from './connector-center.js'
 import type { Engine } from './engine.js'
@@ -49,6 +50,8 @@ export interface EngineContext {
   eventLog: EventLog
   heartbeat: Heartbeat
   cronEngine: CronEngine
+  trader: TraderJobEngine
+  traderReview: TraderReviewJobEngine
   toolCenter: ToolCenter
 
   // Trading (unified account model)
@@ -63,6 +66,8 @@ export interface EngineContext {
   removeTradingAccountRuntime: (accountId: string) => Promise<void>
   /** Reconnect connector plugins (Telegram, MCP-Ask, etc.). */
   reconnectConnectors: () => Promise<ReconnectResult>
+  /** Run a manual trader review summary and write it to Brain. */
+  runTraderReview: (strategyId?: string) => Promise<TraderReviewResult>
 }
 
 /** A media attachment collected from tool results (e.g. browser screenshots). */

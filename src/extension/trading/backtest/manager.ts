@@ -1,5 +1,6 @@
 import { createEventLog } from '../../../core/event-log.js'
 import { SessionStore } from '../../../core/session.js'
+import { setSessionSkill } from '../../../core/skills/session-skill.js'
 import { wireAccountTrading } from '../factory.js'
 import { HistoricalMarketReplay } from './HistoricalMarketReplay.js'
 import { BacktestAccount } from './BacktestAccount.js'
@@ -16,6 +17,8 @@ import {
   type BacktestRunRecord,
 } from './types.js'
 import type { Operation } from '../git/types.js'
+import { getTraderStrategy } from '../../../task/trader/strategy.js'
+import { buildTraderSystemPrompt } from '../../../task/trader/prompt.js'
 
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
@@ -77,6 +80,13 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       })
 
       const strategyConfig = config.strategy
+      const traderStrategy = strategyConfig.mode === 'ai' && strategyConfig.strategyId
+        ? await getTraderStrategy(strategyConfig.strategyId)
+        : null
+      if (traderStrategy && session) {
+        await setSessionSkill(session, 'trader-auto')
+      }
+
       const strategyDriver = strategyConfig.mode === 'scripted'
         ? new ScriptedBacktestStrategyDriver({
             strategy: ({ step }) => strategyConfig.decisions.find((entry) => entry.step === step)?.operations ?? [],
@@ -84,9 +94,9 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         : new AIBacktestStrategyDriver({
             eventLog,
             ask: async (context) => {
-              const prompt = buildAIBacktestPrompt(strategyConfig.prompt, context)
+              const prompt = buildAIBacktestPrompt(strategyConfig, context, traderStrategy)
               const result = await options.engine.askWithSession(prompt, session!, {
-                systemPrompt: strategyConfig.systemPrompt,
+                systemPrompt: traderStrategy ? buildTraderSystemPrompt(traderStrategy) : strategyConfig.systemPrompt,
                 maxHistoryEntries: strategyConfig.maxHistoryEntries,
                 historyPreamble: 'The following is the prior backtest decision history for this run.',
               })
@@ -195,13 +205,20 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
   }
 }
 
-function buildAIBacktestPrompt(basePrompt: string, context: { runId: string; step: number; timestamp: string; accountId: string; bars: unknown; account?: unknown; positions?: unknown; orders?: unknown }): string {
+function buildAIBacktestPrompt(
+  strategyConfig: { prompt: string; strategyId?: string },
+  context: { runId: string; step: number; timestamp: string; accountId: string; bars: unknown; account?: unknown; positions?: unknown; orders?: unknown },
+  traderStrategy: Awaited<ReturnType<typeof getTraderStrategy>>,
+): string {
   return [
-    basePrompt,
+    traderStrategy
+      ? `Backtest the strategy "${traderStrategy.id}" (${traderStrategy.label}) using the structured context below. Follow the configured sources, universe, timeframes, and risk budget as guidance.`
+      : strategyConfig.prompt,
     '',
     'Respond with JSON only using this shape:',
     '{"text":"short explanation","operations":[{"action":"placeOrder","params":{...}}]}',
     '',
+    traderStrategy ? `Strategy:\n${JSON.stringify(traderStrategy, null, 2)}\n` : '',
     'Context:',
     JSON.stringify(context, null, 2),
   ].join('\n')

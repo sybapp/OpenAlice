@@ -25,8 +25,9 @@ Use the corresponding search tool first to resolve the correct symbol.`,
         asset: z.enum(['equity', 'crypto', 'currency']).describe('Asset class'),
         formula: z.string().describe("Formula expression, e.g. SMA(CLOSE('AAPL', '1d'), 50)"),
         precision: z.number().int().min(0).max(10).optional().describe('Decimal places (default: 4)'),
+        dropUnclosed: z.boolean().optional().describe('Drop the latest still-open bar before indicator calculation (default: false)'),
       }),
-      execute: async ({ asset, formula, precision }) => {
+      execute: async ({ asset, formula, precision, dropUnclosed }) => {
         const context: IndicatorContext = {
           getHistoricalData: (symbol, interval) =>
             store.fetch({
@@ -35,6 +36,7 @@ Use the corresponding search tool first to resolve the correct symbol.`,
               interval,
               strategy: 'calendar',
               calendarDays: getCalendarDaysForInterval(interval),
+              dropUnclosed,
             }),
         }
 

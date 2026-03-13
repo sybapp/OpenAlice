@@ -18,6 +18,7 @@ const SettingsPage = lazyPage(() => import('./pages/SettingsPage'), 'SettingsPag
 const AIProviderPage = lazyPage(() => import('./pages/AIProviderPage'), 'AIProviderPage')
 const DataSourcesPage = lazyPage(() => import('./pages/DataSourcesPage'), 'DataSourcesPage')
 const TradingPage = lazyPage(() => import('./pages/TradingPage'), 'TradingPage')
+const TraderPage = lazyPage(() => import('./pages/TraderPage'), 'TraderPage')
 const BacktestPage = lazyPage(() => import('./pages/BacktestPage'), 'BacktestPage')
 const ConnectorsPage = lazyPage(() => import('./pages/ConnectorsPage'), 'ConnectorsPage')
 const DevPage = lazyPage(() => import('./pages/DevPage'), 'DevPage')
@@ -26,7 +27,7 @@ const ToolsPage = lazyPage(() => import('./pages/ToolsPage'), 'ToolsPage')
 
 export type Page =
   | 'chat' | 'portfolio' | 'events' | 'heartbeat' | 'data-sources' | 'connectors'
-  | 'trading' | 'backtest'
+  | 'trading' | 'trader' | 'backtest'
   | 'ai-provider' | 'settings' | 'tools' | 'dev'
 
 /** Page type → URL path mapping. Chat is the root, everything else maps to /slug. */
@@ -39,6 +40,7 @@ export const ROUTES: Record<Page, string> = {
   'connectors': '/connectors',
   'tools': '/tools',
   'trading': '/trading',
+  'trader': '/trader',
   'backtest': '/backtest',
   'ai-provider': '/ai-provider',
   'settings': '/settings',
@@ -88,6 +90,7 @@ function AppShell() {
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/trading" element={<TradingPage />} />
+            <Route path="/trader" element={<TraderPage />} />
             <Route path="/backtest" element={<BacktestPage />} />
             <Route path="/ai-provider" element={<AIProviderPage />} />
             <Route path="/settings" element={<SettingsPage />} />

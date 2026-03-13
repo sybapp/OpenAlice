@@ -158,6 +158,7 @@ export interface ScriptedBacktestRunStrategyConfig {
 export interface AIBacktestRunStrategyConfig {
   mode: 'ai'
   prompt: string
+  strategyId?: string
   systemPrompt?: string
   maxHistoryEntries?: number
 }

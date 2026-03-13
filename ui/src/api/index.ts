@@ -9,6 +9,7 @@ import { eventsApi as events } from './events'
 import { cronApi as cron } from './cron'
 import { heartbeatApi as heartbeat } from './heartbeat'
 import { tradingApi as trading } from './trading'
+import { traderApi as trader } from './trader'
 import { backtestApi as backtest } from './backtest'
 import { openbbApi as openbb } from './openbb'
 import { devApi as dev } from './dev'
@@ -22,6 +23,7 @@ export const api = {
   cron,
   heartbeat,
   trading,
+  trader,
   backtest,
   openbb,
   dev,
@@ -43,6 +45,11 @@ export type {
   CronSchedule,
   CronJobState,
   CronJob,
+  TraderJob,
+  TraderReviewJob,
+  TraderStrategySummary,
+  TraderStrategyDetail,
+  TraderReviewResult,
   TradingAccount,
   AccountInfo,
   Position,

@@ -12,6 +12,13 @@ import { CcxtAccount, createCcxtProviderTools } from './extension/trading/index.
 import type { AccountResolver } from './extension/trading/adapter.js'
 import { createCronListener } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
+import {
+  createTraderJobEngine,
+  createTraderListener,
+  createTraderReviewJobEngine,
+  createTraderReviewListener,
+  runTraderReview,
+} from './task/trader/index.js'
 import { NewsCollector } from './extension/research/news-collector/index.js'
 import { ensureDefaultSkillPacks } from './core/skills/registry.js'
 import { startEmbeddedOpenBBServer } from './openbb/api-server.js'
@@ -67,10 +74,29 @@ async function main() {
 
   // ---- Cron Lifecycle ----
   await cronEngine.start()
+  const trader = createTraderJobEngine({ eventLog })
+  await trader.start()
+  const traderReview = createTraderReviewJobEngine({ eventLog })
+  await traderReview.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
   const cronListener = createCronListener({ connectorCenter, eventLog, engine, session: cronSession })
   cronListener.start()
+  const traderListener = createTraderListener({
+    engine,
+    eventLog,
+    brain,
+    accountManager,
+    getAccountGit: (id) => accountSetups.get(id)?.git,
+  })
+  traderListener.start()
+  const traderReviewListener = createTraderReviewListener({
+    eventLog,
+    brain,
+    accountManager,
+    getAccountGit: (id) => accountSetups.get(id)?.git,
+  })
+  traderReviewListener.start()
   console.log('cron: engine + listener started')
   // ---- Heartbeat ----
   const heartbeat = createHeartbeat({
@@ -112,12 +138,13 @@ async function main() {
 
   // ---- Engine Context ----
   ctx = {
-    config, connectorCenter, engine, eventLog, heartbeat, cronEngine, toolCenter,
+    config, connectorCenter, engine, eventLog, heartbeat, cronEngine, trader, traderReview, toolCenter,
     accountManager, backtest, marketData,
     getAccountGit,
     reconnectAccount,
     removeTradingAccountRuntime: (accountId) => teardownAccountRuntime({ accountId, accountManager, accountSetups }),
     reconnectConnectors,
+    runTraderReview: (strategyId) => runTraderReview(strategyId, { brain, accountManager, getAccountGit, eventLog }),
   }
 
   await startPlugins(getPlugins(), ctx)
@@ -142,6 +169,10 @@ async function main() {
     heartbeat.stop()
     cronListener.stop()
     cronEngine.stop()
+    traderListener.stop()
+    trader.stop()
+    traderReviewListener.stop()
+    traderReview.stop()
     await stopPlugins(getPlugins())
     for (const setup of accountSetups.values()) {
       setup.disposeDispatcher()

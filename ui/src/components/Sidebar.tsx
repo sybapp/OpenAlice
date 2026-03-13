@@ -109,6 +109,20 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    page: 'trader' as const,
+    label: 'Trader',
+    icon: (active: boolean) => (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 20h16" />
+        <path d="M6 16l4-4 3 2 5-7" />
+        <circle cx="6" cy="16" r="1" fill="currentColor" stroke="none" />
+        <circle cx="10" cy="12" r="1" fill="currentColor" stroke="none" />
+        <circle cx="13" cy="14" r="1" fill="currentColor" stroke="none" />
+        <circle cx="18" cy="7" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     page: 'trading' as const,
     label: 'Trading',
     icon: (active: boolean) => (
