@@ -18,6 +18,26 @@ interface ChatDeps {
   sseClients: Map<string, SSEClient>
 }
 
+async function persistResultMedia(
+  session: SessionStore,
+  resultMedia: Array<{ type: 'image'; path: string }> | undefined,
+): Promise<Array<{ type: 'image'; url: string }>> {
+  const media: Array<{ type: 'image'; url: string }> = []
+  for (const item of resultMedia ?? []) {
+    const name = await persistMedia(item.path)
+    media.push({ type: 'image', url: `/api/media/${name}` })
+  }
+
+  if (media.length > 0) {
+    await session.appendAssistant(
+      media.map((item) => ({ type: 'image' as const, url: item.url })),
+      'engine',
+    )
+  }
+
+  return media
+}
+
 /** Chat routes: POST /, GET /history, GET /events (SSE) */
 export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
   const app = new Hono()
@@ -61,12 +81,7 @@ export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
       reply: result.text, durationMs: Date.now() - receivedEntry.ts,
     })
 
-    // Persist media files with content-addressable 3-word names
-    const media: Array<{ type: 'image'; url: string }> = []
-    for (const m of result.media ?? []) {
-      const name = await persistMedia(m.path)
-      media.push({ type: 'image', url: `/api/media/${name}` })
-    }
+    const media = await persistResultMedia(session, result.media)
 
     return c.json({ text: result.text, media, requestId })
   })

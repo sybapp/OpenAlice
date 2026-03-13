@@ -5,6 +5,7 @@ import { createChatRoutes } from './chat.js'
 function makeSession() {
   return {
     readActive: vi.fn(async () => []),
+    appendAssistant: vi.fn(async () => undefined),
   }
 }
 
@@ -73,5 +74,48 @@ describe('createChatRoutes', () => {
       reply: 'final answer',
       durationMs: expect.any(Number),
     }))
+  })
+
+  it('persists returned media into session history for reloads', async () => {
+    const session = makeSession()
+    const app = createChatRoutes({
+      ctx: {
+        eventLog: {
+          append: vi.fn()
+            .mockResolvedValueOnce({ ts: 1000 })
+            .mockResolvedValueOnce({ ts: 1100 }),
+        },
+        engine: {
+          askWithSession: vi.fn(() => new StreamableResult((async function* () {
+            yield {
+              type: 'done' as const,
+              result: {
+                text: 'final answer',
+                media: [{ type: 'image' as const, path: '/tmp/chat-image.png' }],
+              },
+            }
+          })())),
+        },
+      } as never,
+      session: session as never,
+      sseClients: new Map(),
+    })
+
+    const mediaStore = await import('../../../core/media-store.js')
+    const persistSpy = vi.spyOn(mediaStore, 'persistMedia').mockResolvedValue('2026-03-13/chat-image.png')
+
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'hello', requestId: 'req-media' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(session.appendAssistant).toHaveBeenCalledWith(
+      [{ type: 'image', url: '/api/media/2026-03-13/chat-image.png' }],
+      'engine',
+    )
+
+    persistSpy.mockRestore()
   })
 })

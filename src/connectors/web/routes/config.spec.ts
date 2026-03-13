@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
   writeConfigSection: vi.fn(),
+  readAIConfig: vi.fn(),
+  writeAIConfig: vi.fn(),
   readAIProviderConfig: vi.fn(),
   readOpenbbConfig: vi.fn(),
   buildSDKCredentials: vi.fn(),
@@ -13,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../core/config.js', () => ({
   loadConfig: mocks.loadConfig,
   writeConfigSection: mocks.writeConfigSection,
+  readAIConfig: mocks.readAIConfig,
+  writeAIConfig: mocks.writeAIConfig,
   readAIProviderConfig: mocks.readAIProviderConfig,
   readOpenbbConfig: mocks.readOpenbbConfig,
   validSections: ['connectors', 'aiProvider', 'openbb'],
@@ -105,6 +109,8 @@ describe('createConfigRoutes', () => {
   beforeEach(() => {
     mocks.loadConfig.mockReset()
     mocks.writeConfigSection.mockReset()
+    mocks.readAIConfig.mockReset()
+    mocks.writeAIConfig.mockReset()
     mocks.readOpenbbConfig.mockReset()
     mocks.buildSDKCredentials.mockReset()
     mocks.buildRouteMap.mockReset()

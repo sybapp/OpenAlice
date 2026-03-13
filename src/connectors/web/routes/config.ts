@@ -3,12 +3,14 @@ import {
   loadConfig,
   writeConfigSection,
   readAIProviderConfig,
+  readAIConfig,
   readOpenbbConfig,
   validSections,
   type ConfigSection,
   type Config,
+  writeAIConfig,
+  type AIBackend,
 } from '../../../core/config.js'
-import { readAIConfig, writeAIConfig, type AIBackend } from '../../../core/ai-config.js'
 import { buildSDKCredentials } from '../../../openbb/credential-map.js'
 import { buildRouteMap, getSDKExecutor } from '../../../openbb/sdk/index.js'
 import {

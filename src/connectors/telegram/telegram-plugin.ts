@@ -7,7 +7,7 @@ import type { TelegramConfig, ParsedMessage } from './types.js'
 import { buildParsedMessage } from './helpers.js'
 import { MediaGroupMerger } from './media-group.js'
 import { SessionStore } from '../../core/session'
-import { readAIConfig, writeAIConfig, type AIBackend } from '../../core/ai-config'
+import { readAIConfig, writeAIConfig, type AIBackend } from '../../core/config.js'
 import type { ConnectorCenter, Connector } from '../../core/connector-center.js'
 
 const MAX_MESSAGE_LENGTH = 4096

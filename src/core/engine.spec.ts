@@ -418,6 +418,34 @@ describe('Engine', () => {
         expect.objectContaining({ kind: 'text', text: 'Analyze BTCUSD' }),
       ])
     })
+
+    it('keeps image-only assistant entries visible in chat history', () => {
+      const entries: SessionEntry[] = [
+        {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'image', url: '/api/media/2026-03-13/chat-image.png' },
+            ],
+          },
+          uuid: 'a1',
+          parentUuid: null,
+          sessionId: 'test-session',
+          timestamp: new Date().toISOString(),
+        },
+      ]
+
+      expect(toChatHistory(entries)).toEqual([
+        {
+          kind: 'text',
+          role: 'assistant',
+          text: '',
+          timestamp: entries[0].timestamp,
+          media: [{ type: 'image', url: '/api/media/2026-03-13/chat-image.png' }],
+        },
+      ])
+    })
   })
 
   // -------------------- error handling --------------------

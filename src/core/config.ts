@@ -251,6 +251,8 @@ export type Config = {
   tools: z.infer<typeof toolsSchema>
 }
 
+export type AIBackend = z.infer<typeof aiProviderSchema>['backend']
+
 // ==================== Loader ====================
 
 /** Read a JSON config file. Returns undefined if file does not exist. */
@@ -278,6 +280,15 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
     await writeFile(resolve(CONFIG_DIR, filename), JSON.stringify(parsed, null, 2) + '\n')
   }
   return parsed
+}
+
+async function readSectionWithFallback<T>(filename: string, schema: z.ZodType<T>): Promise<T> {
+  try {
+    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, filename), 'utf-8'))
+    return schema.parse(raw)
+  } catch {
+    return schema.parse({})
+  }
 }
 
 export async function loadConfig(): Promise<Config> {
@@ -461,42 +472,35 @@ export async function writeAccountsConfig(accounts: AccountConfig[]): Promise<vo
 
 /** Read agent config from disk (called per-request for hot-reload). */
 export async function readAgentConfig() {
-  try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'agent.json'), 'utf-8'))
-    return agentSchema.parse(raw)
-  } catch {
-    return agentSchema.parse({})
-  }
+  return readSectionWithFallback('agent.json', agentSchema)
 }
 
 /** Read AI provider config from disk (called per-request for hot-reload). */
 export async function readAIProviderConfig() {
-  try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'ai-provider.json'), 'utf-8'))
-    return aiProviderSchema.parse(raw)
-  } catch {
-    return aiProviderSchema.parse({})
-  }
+  return readSectionWithFallback('ai-provider.json', aiProviderSchema)
+}
+
+export async function readAIConfig(): Promise<{ backend: AIBackend }> {
+  const config = await readAIProviderConfig()
+  return { backend: config.backend }
+}
+
+export async function writeAIConfig(backend: AIBackend): Promise<void> {
+  const current = await readAIProviderConfig()
+  await writeConfigSection('aiProvider', {
+    ...current,
+    backend,
+  })
 }
 
 /** Read OpenBB config from disk (called per-request for hot-reload). */
 export async function readOpenbbConfig() {
-  try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'openbb.json'), 'utf-8'))
-    return openbbSchema.parse(raw)
-  } catch {
-    return openbbSchema.parse({})
-  }
+  return readSectionWithFallback('openbb.json', openbbSchema)
 }
 
 /** Read tools config from disk (called per-request for hot-reload). */
 export async function readToolsConfig() {
-  try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'tools.json'), 'utf-8'))
-    return toolsSchema.parse(raw)
-  } catch {
-    return toolsSchema.parse({})
-  }
+  return readSectionWithFallback('tools.json', toolsSchema)
 }
 
 // ==================== Writer ====================
