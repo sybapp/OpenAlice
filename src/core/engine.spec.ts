@@ -4,9 +4,11 @@ import { MockLanguageModelV3 } from 'ai/test'
 import { Engine } from './engine.js'
 import { AgentCenter } from './agent-center.js'
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from './compaction.js'
+import { createLocalCommandRouter } from './commands/router.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { createModelFromConfig } from './model-factory.js'
 import type { SessionStore, SessionEntry } from './session.js'
+import type { EngineContext } from './types.js'
 import { getSessionSkillIdFromEntries } from './skills/session-skill.js'
 import { toChatHistory, toModelMessages, toTextHistory } from './session.js'
 
@@ -48,7 +50,7 @@ function makeEngine(overrides: MakeEngineOpts = {}): Engine {
   const provider = new VercelAIProvider(() => tools, instructions, maxSteps, compaction)
   const agentCenter = new AgentCenter(provider)
 
-  return new Engine({ agentCenter })
+  return new Engine({ agentCenter, commandRouter: createLocalCommandRouter() })
 }
 
 /** In-memory SessionStore mock (no filesystem). */
@@ -128,6 +130,7 @@ vi.mock('./compaction.js', async (importOriginal) => {
   return {
     ...actual,
     compactIfNeeded: vi.fn().mockResolvedValue({ compacted: false, method: 'none' }),
+    forceCompact: vi.fn(),
   }
 })
 
@@ -206,6 +209,37 @@ describe('Engine', () => {
       expect(askSpy).not.toHaveBeenCalled()
       expect(session.appendUser).toHaveBeenCalledWith('/skill list', 'human', { kind: 'local_command' })
       expect(session.appendAssistant).toHaveBeenCalledWith(expect.stringContaining('Available skills:'), 'engine', { kind: 'local_command' })
+    })
+
+    it('short-circuits /compact commands when runtime context is provided', async () => {
+      const { forceCompact } = await import('./compaction.js')
+      vi.mocked(forceCompact).mockResolvedValueOnce({ preTokens: 321 })
+
+      const model = makeMockModel('session response')
+      const engine = makeEngine({ model })
+      const session = makeSessionMock()
+      const askSpy = vi.spyOn(AgentCenter.prototype, 'askWithSession')
+      const engineContext = {
+        config: {
+          agent: {
+            evolutionMode: false,
+            claudeCode: {
+              disallowedTools: [],
+            },
+          },
+        },
+      } as unknown as EngineContext
+
+      const result = await engine.askWithSession('/compact', session, {
+        commandContext: { engineContext, source: 'web', surface: 'web-chat' },
+      })
+
+      expect(result.text).toBe('Compacted. Pre-compaction: ~321 tokens.')
+      expect(result.media).toEqual([])
+      expect(forceCompact).toHaveBeenCalledWith(session, expect.any(Function))
+      expect(askSpy).not.toHaveBeenCalled()
+      expect(session.appendUser).toHaveBeenCalledWith('/compact', 'human', { kind: 'local_command' })
+      expect(session.appendAssistant).toHaveBeenCalledWith('Compacted. Pre-compaction: ~321 tokens.', 'engine', { kind: 'local_command' })
     })
 
     it('appends user message to session before generating', async () => {

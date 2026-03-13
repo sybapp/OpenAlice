@@ -34,6 +34,12 @@ export function createChatRoutes({ ctx, session, sseClients }: ChatDeps) {
 
     const resultStream = ctx.engine.askWithSession(message, session, {
       historyPreamble: 'The following is the recent conversation from the Web UI. Use it as context if the user references earlier messages.',
+      commandContext: {
+        actorId: 'web/default',
+        engineContext: ctx,
+        source: 'web',
+        surface: 'web-chat',
+      },
     })
 
     for await (const event of resultStream) {

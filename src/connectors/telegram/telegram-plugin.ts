@@ -6,10 +6,7 @@ import type { Plugin, EngineContext, MediaAttachment } from '../../core/types.js
 import type { TelegramConfig, ParsedMessage } from './types.js'
 import { buildParsedMessage } from './helpers.js'
 import { MediaGroupMerger } from './media-group.js'
-import { askClaudeCode } from '../../ai-providers/claude-code/index.js'
-import type { ClaudeCodeConfig } from '../../ai-providers/claude-code/index.js'
 import { SessionStore } from '../../core/session'
-import { forceCompact } from '../../core/compaction'
 import { readAIConfig, writeAIConfig, type AIBackend } from '../../core/ai-config'
 import type { ConnectorCenter, Connector } from '../../core/connector-center.js'
 
@@ -24,7 +21,6 @@ const BACKEND_LABELS: Record<AIBackend, string> = {
 export class TelegramPlugin implements Plugin {
   name = 'telegram'
   private config: TelegramConfig
-  private claudeCodeConfig: ClaudeCodeConfig
   private bot: Bot | null = null
   private connectorCenter: ConnectorCenter | null = null
   private merger: MediaGroupMerger | null = null
@@ -38,10 +34,8 @@ export class TelegramPlugin implements Plugin {
 
   constructor(
     config: Omit<TelegramConfig, 'pollingTimeout'> & { pollingTimeout?: number },
-    claudeCodeConfig: ClaudeCodeConfig = {},
   ) {
     this.config = { pollingTimeout: 30, ...config }
-    this.claudeCodeConfig = claudeCodeConfig
   }
 
   getConfig(): TelegramConfig {
@@ -53,13 +47,6 @@ export class TelegramPlugin implements Plugin {
 
   async start(engineCtx: EngineContext) {
     this.connectorCenter = engineCtx.connectorCenter
-
-    // Inject agent config into Claude Code config (used by /compact command)
-    this.claudeCodeConfig = {
-      disallowedTools: engineCtx.config.agent.claudeCode.disallowedTools,
-      maxTurns: engineCtx.config.agent.claudeCode.maxTurns,
-      ...this.claudeCodeConfig,
-    }
 
     const bot = new Bot(this.config.token)
 
@@ -104,7 +91,7 @@ export class TelegramPlugin implements Plugin {
     bot.command('compact', async (ctx) => {
       const userId = ctx.from?.id
       if (!userId) return
-      await this.handleCompactCommand(ctx.chat.id, userId)
+      await this.handleCompactCommand(ctx.chat.id, userId, engineCtx)
     })
 
     // ── Callback queries (inline keyboard presses) ──
@@ -245,6 +232,15 @@ export class TelegramPlugin implements Plugin {
     return session
   }
 
+  private buildCommandContext(engineCtx: EngineContext, userId: number, surface: 'telegram-chat' | 'telegram-command') {
+    return {
+      actorId: String(userId),
+      engineContext: engineCtx,
+      source: 'telegram' as const,
+      surface,
+    }
+  }
+
   /**
    * Sends "typing..." chat action and refreshes it every 4 seconds.
    * Returns a function to stop the indicator.
@@ -280,6 +276,7 @@ export class TelegramPlugin implements Plugin {
         const session = await this.getSession(message.from.id)
         const result = await engineCtx.engine.askWithSession(prompt, session, {
           historyPreamble: 'The following is the recent conversation from this Telegram chat. Use it as context if the user references earlier messages.',
+          commandContext: this.buildCommandContext(engineCtx, message.from.id, 'telegram-chat'),
         })
         stopTyping()
         await this.sendReplyWithPlaceholder(message.chatId, result.text, result.media, placeholder?.message_id)
@@ -308,23 +305,14 @@ export class TelegramPlugin implements Plugin {
     }
   }
 
-  private async handleCompactCommand(chatId: number, userId: number) {
+  private async handleCompactCommand(chatId: number, userId: number, engineCtx: EngineContext) {
     const session = await this.getSession(userId)
     await this.sendReply(chatId, '> Compacting session...')
 
-    const result = await forceCompact(
-      session,
-      async (summarizePrompt) => {
-        const r = await askClaudeCode(summarizePrompt, { ...this.claudeCodeConfig, maxTurns: 1 })
-        return r.text
-      },
-    )
-
-    if (!result) {
-      await this.sendReply(chatId, 'Session is empty, nothing to compact.')
-    } else {
-      await this.sendReply(chatId, `Compacted. Pre-compaction: ~${result.preTokens} tokens.`)
-    }
+    const result = await engineCtx.engine.askWithSession('/compact', session, {
+      commandContext: this.buildCommandContext(engineCtx, userId, 'telegram-command'),
+    })
+    await this.sendReply(chatId, result.text)
   }
 
   private async sendSettingsMenu(chatId: number) {

@@ -15,13 +15,16 @@ import type { MediaAttachment } from './types.js'
 import type { SessionStore } from './session.js'
 import { StreamableResult, type AskOptions, type ProviderEvent } from './ai-provider.js'
 import type { AgentCenter } from './agent-center.js'
-import { handleSkillCommand } from './skills/command.js'
+import type { LocalCommandContext } from './commands/types.js'
+import { type LocalCommandRouter } from './commands/router.js'
 
 // ==================== Types ====================
 
 export interface EngineOpts {
   /** The AgentCenter that owns provider routing. */
   agentCenter: AgentCenter
+  /** Handles slash-style local commands before provider routing. */
+  commandRouter: LocalCommandRouter
 }
 
 export interface EngineResult {
@@ -30,13 +33,19 @@ export interface EngineResult {
   media: MediaAttachment[]
 }
 
+export interface EngineAskOptions extends AskOptions {
+  commandContext?: Omit<LocalCommandContext, 'session'>
+}
+
 // ==================== Engine ====================
 
 export class Engine {
   private agentCenter: AgentCenter
+  private commandRouter: LocalCommandRouter
 
   constructor(opts: EngineOpts) {
     this.agentCenter = opts.agentCenter
+    this.commandRouter = opts.commandRouter
   }
 
   // ==================== Public API ====================
@@ -47,23 +56,27 @@ export class Engine {
   }
 
   /** Prompt with session — routed through the configured AI provider. */
-  askWithSession(prompt: string, session: SessionStore, opts?: AskOptions): StreamableResult {
+  askWithSession(prompt: string, session: SessionStore, opts?: EngineAskOptions): StreamableResult {
     const self = this
 
     async function* generate(): AsyncGenerator<ProviderEvent> {
-      const localCommand = await handleSkillCommand(prompt, session)
+      const { commandContext, ...providerOpts } = opts ?? {}
+      const localCommand = await self.commandRouter.handle(prompt, {
+        session,
+        ...commandContext,
+      })
       if (localCommand.handled) {
         yield {
           type: 'done',
           result: {
             text: localCommand.text ?? '',
-            media: [],
+            media: localCommand.media,
           },
         }
         return
       }
 
-      yield* self.agentCenter.askWithSession(prompt, session, opts)
+      yield* self.agentCenter.askWithSession(prompt, session, providerOpts)
     }
 
     return new StreamableResult(generate())

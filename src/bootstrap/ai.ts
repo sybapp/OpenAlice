@@ -10,6 +10,7 @@ import type { ToolCenter } from '../core/tool-center.js'
 import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
+import { createLocalCommandRouter } from '../core/commands/router.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
 import { CodexCliProvider } from '../ai-providers/codex-cli/index.js'
@@ -35,7 +36,7 @@ export function initAIProviders(config: Config, toolCenter: ToolCenter, instruct
   const router = new ProviderRouter(vercelProvider, claudeCodeProvider, codexCliProvider)
 
   const agentCenter = new AgentCenter(router)
-  const engine = new Engine({ agentCenter })
+  const engine = new Engine({ agentCenter, commandRouter: createLocalCommandRouter() })
 
   const backtestStorage = createBacktestStorage()
   const backtest = createBacktestRunManager({ storage: backtestStorage, engine })
