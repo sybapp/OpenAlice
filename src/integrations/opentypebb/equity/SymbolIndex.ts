@@ -1,28 +1,30 @@
 /**
  * Equity Symbol Index — 本地正则搜索
  *
- * 为了让 AI 能用正则/关键词搜索 equity symbol，我们在启动时从 OpenBB API
- * 拉取全量 symbol 列表并缓存到 data/cache/equity/symbols.json。
+ * 为了让 AI 能用正则/关键词搜索 equity symbol，我们在启动时从
+ * OpenTypeBB 已实现的 equity discovery endpoints 预热一批 symbol，
+ * 并缓存到 runtime/cache/equity/symbols.json。
+ *
  * 搜索在本地内存中进行，不依赖 API 的搜索能力。
  *
- * 当前缓存的数据源（免费，不需要 API key）：
- * - SEC (sec): ~10,000 美股上市公司，来自 SEC EDGAR
- * - TMX (tmx): ~3,600 加拿大上市公司，来自多伦多交易所
- *
- * 扩展方法：在 SOURCES 数组中添加新的 provider 即可。
- * 需要 API key 的 provider（intrinio, nasdaq, tradier）暂未接入。
+ * 注意：TypeScript 版 OpenTypeBB 当前并未注册 Python 侧的 sec/tmx
+ * equity-search provider，所以这里不能再假设“全量 search provider”
+ * 一定存在。我们改为基于当前 registry 中已实现的 discovery models
+ * 构建一个“够用且稳定”的 symbol 索引。
  */
 
 import { readFile, writeFile, mkdir } from 'fs/promises'
-import { resolve, dirname } from 'path'
+import { dirname, join } from 'path'
+import { createRegistry } from 'opentypebb'
 import type { EquityClientLike } from '../sdk/types.js'
+import { RUNTIME_CACHE_DIR } from '../../../core/paths.js'
 
 // ==================== Types ====================
 
 export interface SymbolEntry {
   symbol: string
   name: string
-  source: string  // 来源 provider，如 "sec"、"tmx"
+  source: string
   [key: string]: unknown
 }
 
@@ -35,10 +37,18 @@ interface CacheEnvelope {
 
 // ==================== Config ====================
 
-/** 免费 provider 列表 — 扩展时在这里加 */
-const SOURCES = ['sec', 'tmx'] as const
+const SUPPORTED_PROVIDERS = new Set(createRegistry().providers.keys())
 
-const CACHE_FILE = resolve('data/cache/equity/symbols.json')
+const SOURCE_PLANS = [
+  { provider: 'yfinance', method: 'getActive', limit: 200 },
+  { provider: 'yfinance', method: 'getGainers', limit: 200 },
+  { provider: 'yfinance', method: 'getLosers', limit: 200 },
+  { provider: 'fmp', method: 'getActive', limit: 200 },
+  { provider: 'fmp', method: 'getGainers', limit: 200 },
+  { provider: 'fmp', method: 'getLosers', limit: 200 },
+] as const
+
+const CACHE_FILE = join(RUNTIME_CACHE_DIR, 'equity', 'symbols.json')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 // ==================== SymbolIndex ====================
@@ -71,7 +81,7 @@ export class SymbolIndex {
       const entries = await this.fetchFromApi(client)
       this.entries = entries
       await this.writeCache(entries)
-      console.log(`equity: fetched ${entries.length} symbols from API (${SOURCES.join(', ')})`)
+      console.log(`equity: fetched ${entries.length} symbols from discovery endpoints`)
       return
     } catch (err) {
       console.warn('equity: API fetch failed:', err)
@@ -128,24 +138,31 @@ export class SymbolIndex {
     const allEntries: SymbolEntry[] = []
     const seen = new Set<string>()
 
-    for (const source of SOURCES) {
+    for (const plan of SOURCE_PLANS) {
+      if (!SUPPORTED_PROVIDERS.has(plan.provider)) {
+        console.log(`equity: skipping unsupported provider ${plan.provider}`)
+        continue
+      }
+
       try {
-        const results = await client.search({ query: '', provider: source })
-        for (const r of results) {
-          const symbol = (r as Record<string, unknown>).symbol as string | undefined
-          if (symbol && !seen.has(symbol)) {
-            seen.add(symbol)
-            allEntries.push({
-              ...(r as Record<string, unknown>),
-              symbol,
-              name: ((r as Record<string, unknown>).name as string) ?? '',
-              source,
-            })
-          }
+        const method = client[plan.method] as ((params: Record<string, unknown>) => Promise<Record<string, unknown>[]>) | undefined
+        if (!method) continue
+
+        const results = await method.call(client, { provider: plan.provider, limit: plan.limit })
+        const normalized = results
+          .map((entry) => this.normalizeEntry(entry, `${plan.provider}/${plan.method}`))
+          .filter((entry): entry is SymbolEntry => entry !== null)
+
+        for (const entry of normalized) {
+          const key = entry.symbol.toUpperCase()
+          if (seen.has(key)) continue
+          seen.add(key)
+          allEntries.push(entry)
         }
-        console.log(`equity: ${source} → ${results.length} symbols`)
+
+        console.log(`equity: ${plan.provider}/${plan.method} -> ${normalized.length} symbols`)
       } catch (err) {
-        console.warn(`equity: failed to fetch from ${source}:`, err)
+        console.warn(`equity: failed to fetch from ${plan.provider}/${plan.method}:`, err)
       }
     }
 
@@ -170,7 +187,7 @@ export class SymbolIndex {
       await mkdir(dirname(CACHE_FILE), { recursive: true })
       const envelope: CacheEnvelope = {
         cachedAt: new Date().toISOString(),
-        sources: [...SOURCES],
+        sources: SOURCE_PLANS.map((plan) => `${plan.provider}/${plan.method}`),
         count: entries.length,
         entries,
       }
@@ -182,5 +199,26 @@ export class SymbolIndex {
 
   private isExpired(cachedAt: string): boolean {
     return Date.now() - new Date(cachedAt).getTime() > CACHE_TTL_MS
+  }
+
+  private normalizeEntry(entry: Record<string, unknown>, source: string): SymbolEntry | null {
+    const rawSymbol = typeof entry.symbol === 'string' ? entry.symbol.trim() : ''
+    if (!rawSymbol) return null
+
+    const nameCandidate = [
+      entry.name,
+      entry.long_name,
+      entry.short_name,
+      entry.description,
+      entry.title,
+      entry.symbol,
+    ].find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+    return {
+      ...entry,
+      symbol: rawSymbol,
+      name: nameCandidate?.trim() ?? rawSymbol,
+      source,
+    }
   }
 }
