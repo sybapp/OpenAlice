@@ -121,12 +121,10 @@ async function writeOpenbbSection(body: unknown): Promise<Config['openbb']> {
   const current = (await loadConfig()).openbb
   const input = isRecord(body) ? body : {}
   const providersInput = isRecord(input.providers) ? input.providers : {}
-  const apiServerInput = isRecord(input.apiServer) ? input.apiServer : {}
   const mergedProviderKeys = mergeSecretRecord(current.providerKeys, input.providerKeys)
 
   const merged: Config['openbb'] = {
     enabled: resolveBoolean(input, 'enabled', current.enabled),
-    apiUrl: resolveString(input, 'apiUrl', current.apiUrl),
     providers: {
       equity: resolveString(providersInput, 'equity', current.providers.equity),
       crypto: resolveString(providersInput, 'crypto', current.providers.crypto),
@@ -135,11 +133,6 @@ async function writeOpenbbSection(body: unknown): Promise<Config['openbb']> {
       newsWorld: resolveString(providersInput, 'newsWorld', current.providers.newsWorld),
     },
     providerKeys: mergedProviderKeys,
-    dataBackend: (resolveString(input, 'dataBackend', current.dataBackend) === 'openbb' ? 'openbb' : 'sdk'),
-    apiServer: {
-      enabled: resolveBoolean(apiServerInput, 'enabled', current.apiServer.enabled),
-      port: resolveNumber(apiServerInput, 'port', current.apiServer.port),
-    },
   }
 
   return writeConfigSection('openbb', merged) as Promise<Config['openbb']>
@@ -283,11 +276,11 @@ export function createOpenbbRoutes() {
   }
 
   const app = new Hono()
+  const routeMap = buildRouteMap()
 
   function parseSdkParams(endpoint: OpenbbTestEndpoint): { model: string; provider: string; params: Record<string, unknown> } {
     const url = new URL(endpoint.path, 'http://localhost')
     const routePath = url.pathname.replace(/^\/api\/v1/, '')
-    const routeMap = buildRouteMap()
     const model = routeMap.get(routePath)
 
     if (!model) {
@@ -330,39 +323,18 @@ export function createOpenbbRoutes() {
     await executor.execute(providerName, model, params, credentials)
   }
 
-  async function testProviderViaHttp(endpoint: OpenbbTestEndpoint, key: string) {
-    const openbbConfig = await readOpenbbConfig()
-    const credHeader = JSON.stringify({ [endpoint.credField]: key })
-    const url = `${openbbConfig.apiUrl}${endpoint.path}`
-
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'X-OpenBB-Credentials': credHeader },
-    })
-
-    if (res.ok) return
-    const body = await res.text().catch(() => '')
-    throw new Error(`OpenBB returned ${res.status}: ${body.slice(0, 200)}`)
-  }
-
   app.post('/test-provider', async (c) => {
     try {
       const { provider, key } = await c.req.json<{ provider: string; key: string }>()
       const endpoint = TEST_ENDPOINTS[provider]
       if (!endpoint) return c.json({ ok: false, error: `Unknown provider: ${provider}` }, 400)
       if (!key) return c.json({ ok: false, error: 'No API key provided' }, 400)
-
-      const openbbConfig = await readOpenbbConfig()
-      if (openbbConfig.dataBackend === 'sdk') {
-        await testProviderViaSdk(provider, key)
-      } else {
-        await testProviderViaHttp(endpoint, key)
-      }
+      await testProviderViaSdk(provider, key)
 
       return c.json({ ok: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      return c.json({ ok: false, error: msg.includes('timeout') ? 'Cannot reach OpenBB API' : msg })
+      return c.json({ ok: false, error: msg })
     }
   })
 

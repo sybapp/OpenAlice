@@ -20,6 +20,10 @@ const DEFAULT_OPENBB_PROVIDERS: OpenbbProviderMap = {
   newsWorld: 'fmp',
 }
 
+function isEnabled(value: boolean | undefined): boolean {
+  return value !== false
+}
+
 /** Combine two save statuses for the header indicator */
 function combineStatus(a: SaveStatus, b: SaveStatus): SaveStatus {
   if (a === 'error' || b === 'error') return 'error'
@@ -44,23 +48,14 @@ export function DataSourcesPage() {
   const loadError = openbb.loadError || news.loadError
   const retry = () => { openbb.retry(); news.retry() }
 
-  // Derive selected data source IDs from enabled flags
-  const selected: string[] = []
-  if (openbb.config) {
-    if (openbb.config.enabled !== false) selected.push('openbb')
-  } else {
-    selected.push('openbb') // default enabled
-  }
-  if (news.config) {
-    if (news.config.enabled !== false) selected.push('newsCollector')
-  } else {
-    selected.push('newsCollector') // default enabled
-  }
+  const selected = [
+    ...(isEnabled(openbb.config?.enabled) ? ['openbb'] : []),
+    ...(isEnabled(news.config?.enabled) ? ['newsCollector'] : []),
+  ]
 
   const handleToggle = (id: string) => {
     if (id === 'openbb' && openbb.config) {
-      const cur = openbb.config.enabled !== false
-      openbb.updateConfigImmediate({ enabled: !cur } as Partial<OpenbbConfig>)
+      openbb.updateConfigImmediate({ enabled: !isEnabled(openbb.config.enabled) } as Partial<OpenbbConfig>)
     } else if (id === 'newsCollector' && news.config) {
       news.updateConfigImmediate({ enabled: !news.config.enabled })
     }
@@ -104,7 +99,6 @@ export function DataSourcesPage() {
             <>
               <ConnectionSection
                 openbb={openbb.config}
-                onChange={openbb.updateConfig}
                 onChangeImmediate={openbb.updateConfigImmediate}
               />
               <ProviderKeysSection
@@ -155,117 +149,20 @@ const ASSET_LABELS: Record<string, string> = {
 
 interface ConnectionSectionProps {
   openbb: OpenbbConfig
-  onChange: (patch: Partial<OpenbbConfig>) => void
   onChangeImmediate: (patch: Partial<OpenbbConfig>) => void
 }
 
-function ConnectionSection({ openbb, onChange, onChangeImmediate }: ConnectionSectionProps) {
-  const [testing, setTesting] = useState(false)
-  const [testStatus, setTestStatus] = useState<'idle' | 'ok' | 'error'>('idle')
-
-  const apiUrl = openbb.apiUrl || 'http://localhost:6900'
-  const dataBackend = openbb.dataBackend || 'sdk'
-  const apiServer = openbb.apiServer ?? { enabled: false, port: 6901 }
+function ConnectionSection({ openbb, onChangeImmediate }: ConnectionSectionProps) {
   const providers: OpenbbProviderMap = openbb.providers ?? DEFAULT_OPENBB_PROVIDERS
-
-  const testConnection = async () => {
-    setTesting(true)
-    setTestStatus('idle')
-    try {
-      const res = await fetch(`${apiUrl}/api/v1/equity/search?query=AAPL&provider=sec`, { signal: AbortSignal.timeout(5000) })
-      setTestStatus(res.ok ? 'ok' : 'error')
-    } catch {
-      setTestStatus('error')
-    } finally {
-      setTesting(false)
-    }
-  }
 
   return (
     <Section
       title="Market Data Engine"
-      description="Choose whether Alice uses the in-process OpenTypeBB SDK or an external OpenBB HTTP server. Backend changes apply the next time Alice starts."
+      description="Alice uses the built-in OpenTypeBB SDK for market data, financials, and macro indicators."
     >
       <div className="mb-4">
-        <label className="block text-[13px] text-text-muted mb-1.5">Backend</label>
-        <div className="flex gap-2">
-          {(['sdk', 'openbb'] as const).map((backend) => (
-            <button
-              key={backend}
-              type="button"
-              onClick={() => { onChangeImmediate({ dataBackend: backend }); setTestStatus('idle') }}
-              className={`rounded-lg border px-3 py-2 text-[13px] font-medium transition-colors ${
-                dataBackend === backend
-                  ? 'border-accent bg-accent/10 text-text'
-                  : 'border-border text-text-muted hover:text-text hover:bg-bg-tertiary'
-              }`}
-            >
-              {backend === 'sdk' ? 'SDK Mode' : 'External OpenBB'}
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] text-text-muted/70">
-          {dataBackend === 'sdk'
-            ? 'SDK mode runs OpenTypeBB in-process with no Python or sidecar dependency.'
-            : 'External mode connects to a separate OpenBB-compatible HTTP server.'}
-        </p>
-      </div>
-
-      {dataBackend === 'openbb' && (
-        <>
-      <Field label="API URL">
-        <input
-          className={inputClass}
-          value={apiUrl}
-          onChange={(e) => { onChange({ apiUrl: e.target.value }); setTestStatus('idle') }}
-          placeholder="http://localhost:6900"
-        />
-      </Field>
-
-      <div className="flex items-center gap-2 mt-1 mb-4">
-        <button
-          onClick={testConnection}
-          disabled={testing}
-          className={`border rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer transition-colors disabled:opacity-50 ${
-            testStatus === 'ok'
-              ? 'border-green text-green'
-              : testStatus === 'error'
-                ? 'border-red text-red'
-                : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
-          }`}
-        >
-          {testing ? 'Testing...' : testStatus === 'ok' ? 'Connected' : testStatus === 'error' ? 'Failed' : 'Test Connection'}
-        </button>
-        {testStatus !== 'idle' && (
-          <div className={`w-2 h-2 rounded-full ${testStatus === 'ok' ? 'bg-green' : 'bg-red'}`} />
-        )}
-      </div>
-        </>
-      )}
-
-      <div className="mb-4 rounded-lg border border-border bg-bg-secondary/40 px-3 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[13px] text-text">Embedded API Server</div>
-            <div className="text-[11px] text-text-muted/70">
-              Expose an OpenBB-compatible HTTP API from Alice itself on <span className="font-mono">http://localhost:{apiServer.port}</span>.
-            </div>
-          </div>
-          <Toggle
-            checked={apiServer.enabled}
-            onChange={(enabled) => onChangeImmediate({ apiServer: { ...apiServer, enabled } })}
-          />
-        </div>
-        <div className="mt-3">
-          <label className="block text-[11px] text-text-muted mb-0.5">Server Port</label>
-          <input
-            className={inputClass}
-            type="number"
-            min={1024}
-            max={65535}
-            value={apiServer.port}
-            onChange={(e) => onChange({ apiServer: { ...apiServer, port: Number(e.target.value) || 6901 } })}
-          />
+        <div className="rounded-lg border border-border bg-bg-secondary/40 px-3 py-3 text-[12px] text-text-muted">
+          OpenTypeBB runs in-process with no Python sidecar and no external OpenBB server dependency.
         </div>
       </div>
 
@@ -275,29 +172,24 @@ function ConnectionSection({ openbb, onChange, onChangeImmediate }: ConnectionSe
         <div className="grid grid-cols-2 gap-2">
           {Object.entries(PROVIDER_OPTIONS).map(([asset, options]) => {
             const providerKey = asset as keyof OpenbbProviderMap
-            const nextProviders: OpenbbProviderMap = {
-              ...providers,
-              [providerKey]: providers[providerKey],
-            }
-
             return (
-            <div key={asset}>
-              <label className="block text-[11px] text-text-muted mb-0.5">{ASSET_LABELS[providerKey]}</label>
-              <select
-                className={inputClass}
-                value={providers[providerKey] || 'yfinance'}
-                onChange={(e) => onChangeImmediate({
-                  providers: {
-                    ...nextProviders,
-                    [providerKey]: e.target.value,
-                  },
-                })}
-              >
-                {options.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
+              <div key={asset}>
+                <label className="block text-[11px] text-text-muted mb-0.5">{ASSET_LABELS[providerKey]}</label>
+                <select
+                  className={inputClass}
+                  value={providers[providerKey] || 'yfinance'}
+                  onChange={(e) => onChangeImmediate({
+                    providers: {
+                      ...providers,
+                      [providerKey]: e.target.value,
+                    },
+                  })}
+                >
+                  {options.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
             )
           })}
         </div>

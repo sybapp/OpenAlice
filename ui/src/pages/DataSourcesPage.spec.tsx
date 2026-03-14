@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type NewsCollectorConfig, type OpenbbConfig } from '../api'
@@ -15,7 +15,6 @@ const newsRetry = vi.fn()
 
 let openbbConfig: OpenbbConfig = {
   enabled: true,
-  apiUrl: 'http://localhost:6900',
   providers: {
     equity: 'yfinance',
     crypto: 'yfinance',
@@ -26,11 +25,6 @@ let openbbConfig: OpenbbConfig = {
   providerKeys: {
     fred: true,
     fmp: false,
-  },
-  dataBackend: 'sdk',
-  apiServer: {
-    enabled: false,
-    port: 6901,
   },
 }
 
@@ -73,7 +67,6 @@ describe('DataSourcesPage', () => {
   beforeEach(() => {
     openbbConfig = {
       enabled: true,
-      apiUrl: 'http://localhost:6900',
       providers: {
         equity: 'yfinance',
         crypto: 'yfinance',
@@ -84,11 +77,6 @@ describe('DataSourcesPage', () => {
       providerKeys: {
         fred: true,
         fmp: false,
-      },
-      dataBackend: 'sdk',
-      apiServer: {
-        enabled: false,
-        port: 6901,
       },
     }
 
@@ -149,86 +137,26 @@ describe('DataSourcesPage', () => {
     }))
   })
 
-  it('defaults to sdk mode and updates backend and embedded api server settings explicitly', async () => {
+  it('renders the built-in OpenTypeBB SDK mode without external server controls', () => {
     render(<DataSourcesPage />)
 
-    expect(screen.getByRole('button', { name: 'SDK Mode' })).toBeInTheDocument()
+    expect(screen.getAllByText(/built-in OpenTypeBB SDK/i).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /External OpenBB/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Test Connection/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/OpenTypeBB in-process/i)).toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: 'External OpenBB' }))
-    expect(openbbUpdateConfigImmediate).toHaveBeenCalledWith({ dataBackend: 'openbb' })
-
-    openbbConfig = {
-      ...openbbConfig,
-      dataBackend: 'openbb',
-    }
+    expect(screen.queryAllByRole('switch')).toHaveLength(1)
+    expect(screen.getByText(/no Python sidecar and no external OpenBB server dependency/i)).toBeInTheDocument()
   })
 
-  it('shows external openbb connection fields and lets users edit server settings', async () => {
-    openbbConfig = {
-      ...openbbConfig,
-      dataBackend: 'openbb',
-    }
-
+  it('updates default providers immediately in sdk-only mode', async () => {
     render(<DataSourcesPage />)
 
-    expect(screen.getByRole('button', { name: /Test Connection/i })).toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('API URL'), {
-      target: { value: 'http://remote-host:7000' },
-    })
-    expect(openbbUpdateConfig).toHaveBeenCalledWith({
-      apiUrl: 'http://remote-host:7000',
-    })
-
-    await userEvent.click(screen.getAllByRole('switch')[0])
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[0], 'fmp')
     expect(openbbUpdateConfigImmediate).toHaveBeenCalledWith({
-      apiServer: {
-        enabled: true,
-        port: 6901,
+      providers: {
+        ...openbbConfig.providers,
+        equity: 'fmp',
       },
     })
-
-    const serverPortInput = screen.getByDisplayValue('6901')
-    fireEvent.change(serverPortInput, {
-      target: { value: '7001' },
-    })
-    expect(openbbUpdateConfig).toHaveBeenCalledWith({
-      apiServer: {
-        enabled: false,
-        port: 7001,
-      },
-    })
-  })
-
-  it('shows a failed connection state when the external openbb health check fails', async () => {
-    openbbConfig = {
-      ...openbbConfig,
-      dataBackend: 'openbb',
-    }
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 503 }))
-
-    render(<DataSourcesPage />)
-
-    await userEvent.click(screen.getByRole('button', { name: /Test Connection/i }))
-
-    expect(await screen.findByRole('button', { name: 'Failed' })).toBeInTheDocument()
-  })
-
-  it('renders the embedded api server switch from the current config state', () => {
-    openbbConfig = {
-      ...openbbConfig,
-      apiServer: {
-        enabled: true,
-        port: 6905,
-      },
-    }
-
-    render(<DataSourcesPage />)
-
-    expect(screen.getAllByRole('switch')[0]).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByDisplayValue('6905')).toBeInTheDocument()
   })
 
   it('keeps provider key drafts and shows inline errors when saving fails', async () => {

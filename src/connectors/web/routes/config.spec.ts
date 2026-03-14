@@ -56,7 +56,6 @@ const fullConfig = {
   securities: { provider: { type: 'none' }, guards: [] },
   openbb: {
     enabled: true,
-    apiUrl: 'http://localhost:6900',
     providers: {
       equity: 'yfinance',
       crypto: 'yfinance',
@@ -65,11 +64,6 @@ const fullConfig = {
       newsWorld: 'fmp',
     },
     providerKeys: {},
-    dataBackend: 'sdk',
-    apiServer: {
-      enabled: false,
-      port: 6901,
-    },
   },
   compaction: {
     maxContextTokens: 200_000,
@@ -142,11 +136,6 @@ describe('createConfigRoutes', () => {
       anthropic: true,
     })
     expect(body.openbb.providerKeys).toEqual({})
-    expect(body.openbb.dataBackend).toBe('sdk')
-    expect(body.openbb.apiServer).toEqual({
-      enabled: false,
-      port: 6901,
-    })
   })
 
   it('rejects invalid config sections', async () => {
@@ -327,7 +316,6 @@ describe('createConfigRoutes', () => {
     expect(res.status).toBe(200)
     expect(mocks.writeConfigSection).toHaveBeenCalledWith('openbb', {
       enabled: true,
-      apiUrl: 'http://localhost:6900',
       providers: {
         equity: 'yfinance',
         crypto: 'yfinance',
@@ -339,11 +327,6 @@ describe('createConfigRoutes', () => {
         fmp: 'fmp-secret',
         intrinio: 'intrinio-secret',
       },
-      dataBackend: 'sdk',
-      apiServer: {
-        enabled: false,
-        port: 6901,
-      },
     })
     expect(body.providerKeys).toEqual({
       fmp: true,
@@ -351,7 +334,7 @@ describe('createConfigRoutes', () => {
     })
   })
 
-  it('persists the OpenTypeBB backend selector and embedded api server settings', async () => {
+  it('persists provider updates for the SDK-only OpenTypeBB engine', async () => {
     mocks.loadConfig.mockResolvedValue(fullConfig)
     mocks.writeConfigSection.mockImplementation(async (_section, data) => data)
 
@@ -360,10 +343,9 @@ describe('createConfigRoutes', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        dataBackend: 'openbb',
-        apiServer: {
-          enabled: true,
-          port: 6902,
+        providers: {
+          equity: 'fmp',
+          newsWorld: 'benzinga',
         },
       }),
     })
@@ -372,25 +354,21 @@ describe('createConfigRoutes', () => {
     expect(res.status).toBe(200)
     expect(mocks.writeConfigSection).toHaveBeenCalledWith('openbb', {
       enabled: true,
-      apiUrl: 'http://localhost:6900',
       providers: {
-        equity: 'yfinance',
+        equity: 'fmp',
         crypto: 'yfinance',
         currency: 'yfinance',
         newsCompany: 'yfinance',
-        newsWorld: 'fmp',
+        newsWorld: 'benzinga',
       },
       providerKeys: {},
-      dataBackend: 'openbb',
-      apiServer: {
-        enabled: true,
-        port: 6902,
-      },
     })
-    expect(body.dataBackend).toBe('openbb')
-    expect(body.apiServer).toEqual({
-      enabled: true,
-      port: 6902,
+    expect(body.providers).toEqual({
+      equity: 'fmp',
+      crypto: 'yfinance',
+      currency: 'yfinance',
+      newsCompany: 'yfinance',
+      newsWorld: 'benzinga',
     })
   })
 
@@ -434,7 +412,6 @@ describe('createConfigRoutes', () => {
     const execute = vi.fn().mockResolvedValue([{ id: 'GDP' }])
     mocks.readOpenbbConfig.mockResolvedValue({
       ...fullConfig.openbb,
-      dataBackend: 'sdk',
       providerKeys: { fmp: 'persisted-key' },
     })
     mocks.buildRouteMap.mockReturnValue(new Map([
@@ -467,80 +444,6 @@ describe('createConfigRoutes', () => {
     }, {
       fred_api_key: 'fred-secret',
       fmp_api_key: 'persisted-key',
-    })
-  })
-
-  it('falls back to external http provider testing when openbb mode is enabled', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 200 }))
-    mocks.readOpenbbConfig.mockResolvedValue({
-      ...fullConfig.openbb,
-      dataBackend: 'openbb',
-    })
-
-    const app = createOpenbbRoutes()
-    const res = await app.request('/test-provider', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'eia',
-        key: 'eia-secret',
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'http://localhost:6900/api/v1/commodity/short_term_energy_outlook?provider=eia',
-      expect.objectContaining({
-        headers: {
-          'X-OpenBB-Credentials': JSON.stringify({ eia_api_key: 'eia-secret' }),
-        },
-      }),
-    )
-  })
-
-  it('maps external provider test timeouts to a friendly API error', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('request timeout'))
-    mocks.readOpenbbConfig.mockResolvedValue({
-      ...fullConfig.openbb,
-      dataBackend: 'openbb',
-    })
-
-    const app = createOpenbbRoutes()
-    const res = await app.request('/test-provider', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'fred',
-        key: 'fred-secret',
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: false, error: 'Cannot reach OpenBB API' })
-  })
-
-  it('returns the upstream http error body when external provider testing fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('provider unavailable', { status: 503 }))
-    mocks.readOpenbbConfig.mockResolvedValue({
-      ...fullConfig.openbb,
-      dataBackend: 'openbb',
-    })
-
-    const app = createOpenbbRoutes()
-    const res = await app.request('/test-provider', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'fmp',
-        key: 'fmp-secret',
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
-      ok: false,
-      error: 'OpenBB returned 503: provider unavailable',
     })
   })
 

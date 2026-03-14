@@ -166,7 +166,7 @@ All config lives in `data/config/` as JSON files with Zod validation. Missing fi
 | `crypto.json` | CCXT exchange config + API keys, allowed symbols, guards |
 | `securities.json` | Alpaca broker config + API keys, allowed symbols, guards |
 | `connectors.json` | Web/MCP server ports, Telegram bot credentials + enable, MCP Ask enable |
-| `openbb.json` | OpenBB API URL, per-asset-class data providers, provider API keys |
+| `openbb.json` | OpenTypeBB SDK defaults and provider API keys |
 | `news-collector.json` | RSS feeds, fetch interval, retention period, OpenBB piggyback toggle |
 | `compaction.json` | Context window limits, auto-compaction thresholds |
 | `heartbeat.json` | Heartbeat enable/disable, interval, active hours |
@@ -190,7 +190,6 @@ src/
     agent-center.ts          # Centralized AI agent management, owns ProviderRouter
     ai-provider.ts           # AIProvider interface + ProviderRouter (runtime switching)
     tool-center.ts           # Centralized tool registry (Vercel + MCP export)
-    ai-config.ts             # Runtime provider config read/write
     session.ts               # JSONL session store + format converters
     compaction.ts            # Auto-summarize long context windows
     config.ts                # Zod-validated config loader
@@ -218,12 +217,13 @@ src/
       ict-smc/               # ICT / SMC market-structure analysis tools
     trading/                 # Unified multi-account trading (CCXT + Alpaca), guard pipeline, git-like commit history
   openbb/
-    equity/                  # OpenBB equity data layer (price, fundamentals, estimates, etc.)
-    crypto/                  # OpenBB crypto data layer
-    currency/                # OpenBB currency data layer
-    commodity/               # OpenBB commodity data layer (EIA, spot prices)
-    economy/                 # OpenBB macro economy data layer
-    news/                    # OpenBB news data layer
+    sdk/                     # In-process OpenTypeBB executor + SDK client adapters
+    equity/                  # OpenTypeBB-backed equity data layer (price, fundamentals, estimates, etc.)
+    crypto/                  # OpenTypeBB-backed crypto data layer
+    currency/                # OpenTypeBB-backed currency data layer
+    commodity/               # OpenTypeBB-backed commodity data layer (EIA, spot prices)
+    economy/                 # OpenTypeBB-backed macro economy data layer
+    news/                    # OpenTypeBB-backed news data layer
   connectors/
     web/                     # Web UI chat (Hono, SSE push)
     telegram/                # Telegram bot (grammY, polling, commands)

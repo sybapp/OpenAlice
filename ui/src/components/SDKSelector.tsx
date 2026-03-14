@@ -210,7 +210,7 @@ export const DATASOURCE_OPTIONS: SDKOption[] = [
   {
     id: 'openbb',
     name: 'OpenBB',
-    description: 'Market data, financials, and macro indicators via OpenTypeBB SDK or an external OpenBB API.',
+    description: 'Market data, financials, and macro indicators via the built-in OpenTypeBB SDK.',
     badge: 'OB',
     badgeColor: 'text-green',
   },

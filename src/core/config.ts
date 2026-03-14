@@ -107,7 +107,6 @@ const securitiesSchema = z.object({
 
 const openbbSchema = z.object({
   enabled: z.boolean().default(true),
-  apiUrl: z.string().default('http://localhost:6900'),
   providers: z.object({
     equity: z.string().default('yfinance'),
     crypto: z.string().default('yfinance'),
@@ -134,11 +133,6 @@ const openbbSchema = z.object({
     tiingo: z.string().optional(),
     biztoc: z.string().optional(),
   }).default({}),
-  dataBackend: z.enum(['sdk', 'openbb']).default('sdk'),
-  apiServer: z.object({
-    enabled: z.boolean().default(false),
-    port: z.number().int().min(1024).max(65535).default(6901),
-  }).default({ enabled: false, port: 6901 }),
 })
 
 const compactionSchema = z.object({
