@@ -28,7 +28,7 @@ const { eventsApi } = vi.hoisted(() => ({
 
 vi.mock('../api', () => ({
   api: {
-    trader: strategiesApi,
+    strategies: strategiesApi,
     events: eventsApi,
   },
 }))

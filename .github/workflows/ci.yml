@@ -33,7 +33,7 @@ jobs:
         run: pnpm build:backend
 
       - name: Run UI tests
-        run: pnpm test:ui
+        run: pnpm test:web
 
       - name: Run UI build
-        run: pnpm build:ui
+        run: pnpm build:web
