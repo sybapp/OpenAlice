@@ -112,6 +112,34 @@ function parseLoopResponse(text: string): unknown {
   return JSON.parse(candidate)
 }
 
+function normalizeLoopResponse(parsed: unknown): Record<string, unknown> {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Unsupported skill loop response: ${JSON.stringify(parsed)}`)
+  }
+
+  const record = parsed as Record<string, unknown>
+  if (typeof record.type === 'string') {
+    return record
+  }
+
+  const wrappedKeys = [
+    'requestScripts',
+    'request_scripts',
+    'requestResources',
+    'request_resources',
+    'complete',
+  ] as const
+
+  for (const key of wrappedKeys) {
+    const value = record[key]
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  }
+
+  throw new Error(`Unsupported skill loop response: ${JSON.stringify(parsed)}`)
+}
+
 function buildSkillLoopPrompt(params: {
   skill: SkillPack
   task: string
@@ -205,7 +233,7 @@ export class SkillLoopRunner {
         },
       )
 
-      const parsed = parseLoopResponse(result.text) as Record<string, unknown>
+      const parsed = normalizeLoopResponse(parseLoopResponse(result.text))
       if (parsed.type === 'request_resources') {
         const ids = Array.isArray(parsed.ids) ? parsed.ids.map(String) : []
         for (const id of ids) {
