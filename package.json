@@ -9,11 +9,11 @@
     "dev:ui": "cd ui && pnpm dev",
     "build": "pnpm build:ui && pnpm build:backend",
     "install:ui": "cd ui && pnpm install --frozen-lockfile",
-    "build:ui": "cd ui && pnpm build",
+    "build:ui": "cd ui && pnpm install --frozen-lockfile && pnpm build",
     "build:backend": "pnpm build:opentypebb && tsup src/main.ts --format esm --dts",
     "test": "pnpm build:opentypebb && vitest run",
     "test:coverage": "pnpm build:opentypebb && vitest run --coverage",
-    "test:ui": "cd ui && pnpm test",
+    "test:ui": "cd ui && pnpm install --frozen-lockfile && pnpm test",
     "test:watch": "vitest"
   },
   "keywords": [
