@@ -21,6 +21,7 @@ import { createBacktestRoutes } from './routes/backtest.js'
 import { createTraderRoutes } from './routes/trader.js'
 
 export interface WebConfig {
+  host: string
   port: number
   authToken?: string
 }
@@ -115,8 +116,8 @@ export class WebPlugin implements Plugin {
     )
 
     // ==================== Start server ====================
-    this.server = serve({ fetch: app.fetch, port: this.config.port }, (info: { port: number }) => {
-      console.log(`web plugin listening on http://localhost:${info.port}`)
+    this.server = serve({ fetch: app.fetch, hostname: this.config.host, port: this.config.port }, (info: { port: number }) => {
+      console.log(`web plugin listening on http://${this.config.host}:${info.port}`)
     })
   }
 
@@ -131,7 +132,7 @@ export class WebPlugin implements Plugin {
     const prev = this.config
     this.config = nextConfig
 
-    if (prev.port === nextConfig.port) {
+    if (prev.port === nextConfig.port && prev.host === nextConfig.host) {
       return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
     }
 

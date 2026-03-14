@@ -20,8 +20,8 @@ const config: AppConfig = {
   compaction: { maxContextTokens: 1, maxOutputTokens: 1 },
   heartbeat: { enabled: false, every: '1h', prompt: '', activeHours: null },
   connectors: {
-    web: { port: 3002, hasAuthToken: true },
-    mcp: { port: 3001 },
+    web: { host: '127.0.0.1', port: 3002, hasAuthToken: true },
+    mcp: { host: '127.0.0.1', port: 3001 },
     mcpAsk: { enabled: false, hasAuthToken: false },
     telegram: { enabled: false, hasBotToken: false, chatIds: [] },
   },

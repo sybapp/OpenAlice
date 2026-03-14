@@ -131,11 +131,11 @@ describe('WebPlugin', () => {
       engine: {},
     } as never
 
-    const plugin = new WebPlugin({ port: 3200, authToken: 'secret' })
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3200, authToken: 'secret' })
     await plugin.start(ctx)
 
     expect(mocks.serve).toHaveBeenCalledWith(
-      expect.objectContaining({ port: 3200, fetch: expect.any(Function) }),
+      expect.objectContaining({ hostname: '127.0.0.1', port: 3200, fetch: expect.any(Function) }),
       expect.any(Function),
     )
     expect(register).toHaveBeenCalledTimes(1)
@@ -168,7 +168,7 @@ describe('WebPlugin', () => {
       engine: {},
     } as never
 
-    const plugin = new WebPlugin({ port: 3201 })
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3201 })
     await plugin.start(ctx)
 
     const connector = register.mock.calls[0]?.[0]
@@ -228,17 +228,17 @@ describe('WebPlugin', () => {
     register.mockReturnValue(unregister)
     mocks.serve.mockReturnValue({ close })
 
-    const plugin = new WebPlugin({ port: 3202, authToken: 'old' })
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3202, authToken: 'old' })
     await plugin.start(ctx)
 
-    await expect(plugin.reconfigure({ port: 3202, authToken: 'new' })).resolves.toBe('updated')
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3202, authToken: 'new' })).resolves.toBe('updated')
     expect(close).not.toHaveBeenCalled()
 
-    await expect(plugin.reconfigure({ port: 3300, authToken: 'new' })).resolves.toBe('restarted')
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3300, authToken: 'new' })).resolves.toBe('restarted')
     expect(unregister).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
     expect(mocks.serve).toHaveBeenLastCalledWith(
-      expect.objectContaining({ port: 3300, fetch: expect.any(Function) }),
+      expect.objectContaining({ hostname: '127.0.0.1', port: 3300, fetch: expect.any(Function) }),
       expect.any(Function),
     )
   })
@@ -249,7 +249,7 @@ describe('WebPlugin', () => {
     const register = vi.fn(() => unregister)
     mocks.serve.mockReturnValue({ close })
 
-    const plugin = new WebPlugin({ port: 3205, authToken: 'same-token' })
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3205, authToken: 'same-token' })
     await plugin.start({
       connectorCenter: { register },
       reconnectConnectors: vi.fn(),
@@ -273,7 +273,7 @@ describe('WebPlugin', () => {
     const sseClients = (plugin as unknown as { sseClients: Map<string, { send: () => void }> }).sseClients
     sseClients.set('client-1', { send: vi.fn() })
 
-    await expect(plugin.reconfigure({ port: 3205, authToken: 'same-token' })).resolves.toBe('unchanged')
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3205, authToken: 'same-token' })).resolves.toBe('unchanged')
     await plugin.stop()
 
     expect(unregister).toHaveBeenCalled()

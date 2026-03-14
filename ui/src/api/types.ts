@@ -125,8 +125,8 @@ export interface ConfigUpdateResponse<T> {
 }
 
 export interface ConnectorsConfig {
-  web: { port: number; hasAuthToken: boolean }
-  mcp: { port: number }
+  web: { host: string; port: number; hasAuthToken: boolean }
+  mcp: { host: string; port: number }
   mcpAsk: { enabled: boolean; port?: number; hasAuthToken: boolean }
   telegram: {
     enabled: boolean
@@ -150,11 +150,15 @@ export interface OpenbbConfig {
 
 export interface UpdateConnectorsRequest {
   web?: {
+    host?: string
     port?: number
     authToken?: string
     clearAuthToken?: boolean
   }
-  mcp?: { port?: number }
+  mcp?: {
+    host?: string
+    port?: number
+  }
   mcpAsk?: {
     enabled?: boolean
     port?: number

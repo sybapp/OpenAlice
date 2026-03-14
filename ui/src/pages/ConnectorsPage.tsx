@@ -23,6 +23,7 @@ function combineStatus(...statuses: SaveStatus[]): SaveStatus {
 function toConnectorsPayload(config: ConnectorsConfig): UpdateConnectorsRequest {
   return {
     web: {
+      host: config.web.host,
       port: config.web.port,
     },
     mcp: { ...config.mcp },
@@ -347,6 +348,14 @@ export function ConnectorsPage() {
               title="Web UI"
               description="Browser-based chat and configuration interface."
             >
+              <Field label="Host">
+                <input
+                  className={inputClass}
+                  value={config.web.host}
+                  onChange={(e) => updateConfig({ web: { ...config.web, host: e.target.value } })}
+                  placeholder="127.0.0.1"
+                />
+              </Field>
               <Field label="Port">
                 <input
                   className={inputClass}
@@ -372,12 +381,20 @@ export function ConnectorsPage() {
               title="MCP Server"
               description="Tool bridge for Claude Code provider and external AI agents."
             >
+              <Field label="Host">
+                <input
+                  className={inputClass}
+                  value={config.mcp.host}
+                  onChange={(e) => updateConfig({ mcp: { ...config.mcp, host: e.target.value } })}
+                  placeholder="127.0.0.1"
+                />
+              </Field>
               <Field label="Port">
                 <input
                   className={inputClass}
                   type="number"
                   value={config.mcp.port}
-                  onChange={(e) => updateConfig({ mcp: { port: Number(e.target.value) } })}
+                  onChange={(e) => updateConfig({ mcp: { ...config.mcp, port: Number(e.target.value) } })}
                 />
               </Field>
             </Section>

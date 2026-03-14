@@ -15,8 +15,8 @@ const baseConfig: AppConfig = {
   compaction: { maxContextTokens: 1, maxOutputTokens: 1 },
   heartbeat: { enabled: false, every: '1h', prompt: '', activeHours: null },
   connectors: {
-    web: { port: 3002, hasAuthToken: true },
-    mcp: { port: 3001 },
+    web: { host: '127.0.0.1', port: 3002, hasAuthToken: true },
+    mcp: { host: '127.0.0.1', port: 3001 },
     mcpAsk: { enabled: false, hasAuthToken: false },
     telegram: { enabled: false, hasBotToken: false, chatIds: [] },
   },
@@ -31,8 +31,8 @@ describe('useConfigPage', () => {
     vi.spyOn(api.config, 'load').mockResolvedValue(baseConfig)
     const updateSpy = vi.spyOn(api.config, 'updateSection').mockResolvedValue({
       data: {
-        web: { port: 4010, hasAuthToken: true },
-        mcp: { port: 3001 },
+        web: { host: '127.0.0.1', port: 4010, hasAuthToken: true },
+        mcp: { host: '127.0.0.1', port: 3001 },
         mcpAsk: { enabled: false, hasAuthToken: false },
         telegram: { enabled: false, hasBotToken: false, chatIds: [] },
       } satisfies ConnectorsConfig,
@@ -48,7 +48,7 @@ describe('useConfigPage', () => {
     await waitFor(() => expect(result.current.config?.web.port).toBe(3002))
 
     act(() => {
-      result.current.updateConfigImmediate({ web: { port: 3999, hasAuthToken: true } })
+      result.current.updateConfigImmediate({ web: { host: '127.0.0.1', port: 3999, hasAuthToken: true } })
     })
 
     await waitFor(() => expect(updateSpy).toHaveBeenCalled())

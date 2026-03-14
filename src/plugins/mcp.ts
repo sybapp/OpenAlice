@@ -51,13 +51,15 @@ export class McpPlugin implements Plugin {
   name = 'mcp'
   private server: ReturnType<typeof serve> | null = null
   private transports = new Map<string, WebStandardStreamableHTTPServerTransport>()
+  private ctx: EngineContext | null = null
 
   constructor(
     private toolCenter: ToolCenter,
-    private port: number,
+    private config: { host: string; port: number },
   ) {}
 
   async start(ctx: EngineContext) {
+    this.ctx = ctx
     const resolveTools = async () => ({
       ...(await this.toolCenter.getMcpTools()),
       ...(await createMcpCapabilityTools(ctx)),
@@ -135,13 +137,32 @@ export class McpPlugin implements Plugin {
       return transport.handleRequest(c.req.raw)
     })
 
-    this.server = serve({ fetch: app.fetch, port: this.port }, (info) => {
-      console.log(`mcp plugin listening on http://localhost:${info.port}/mcp`)
+    this.server = serve({ fetch: app.fetch, hostname: this.config.host, port: this.config.port }, (info) => {
+      console.log(`mcp plugin listening on http://${this.config.host}:${info.port}/mcp`)
     })
   }
 
   async stop() {
     this.transports.clear()
     this.server?.close()
+    this.server = null
+  }
+
+  getConfig() {
+    return this.config
+  }
+
+  async reconfigure(nextConfig: { host: string; port: number }): Promise<'restarted' | 'unchanged'> {
+    if (this.config.host === nextConfig.host && this.config.port === nextConfig.port) {
+      return 'unchanged'
+    }
+
+    this.config = nextConfig
+    const ctx = this.ctx
+    await this.stop()
+    if (ctx) {
+      await this.start(ctx)
+    }
+    return 'restarted'
   }
 }

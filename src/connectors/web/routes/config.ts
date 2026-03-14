@@ -75,6 +75,7 @@ function toClientConnectorsConfig(connectors: Config['connectors']) {
   return {
     ...connectors,
     web: withSecretPresence({
+      host: connectors.web.host,
       port: connectors.web.port,
       authToken: connectors.web.authToken,
     }, { authToken: 'hasAuthToken' }),
@@ -158,10 +159,12 @@ async function writeConnectorsSection(body: unknown): Promise<Config['connectors
 
   const merged: Config['connectors'] = {
     web: {
+      host: resolveString(webInput, 'host', current.web.host),
       port: resolveNumber(webInput, 'port', current.web.port),
       ...(webAuthToken ? { authToken: webAuthToken } : {}),
     },
     mcp: {
+      host: resolveString(mcpInput, 'host', current.mcp.host),
       port: resolveNumber(mcpInput, 'port', current.mcp.port),
     },
     mcpAsk: {

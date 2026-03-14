@@ -87,11 +87,18 @@ export function initPlugins(config: Config, toolCenter: ToolCenter): PluginsResu
   const corePlugins: Plugin[] = []
 
   if (config.connectors.mcp.port) {
-    corePlugins.push(new McpPlugin(toolCenter, config.connectors.mcp.port))
+    corePlugins.push(new McpPlugin(toolCenter, {
+      host: config.connectors.mcp.host,
+      port: config.connectors.mcp.port,
+    }))
   }
 
   if (config.connectors.web.port) {
-    corePlugins.push(new WebPlugin({ port: config.connectors.web.port, authToken: config.connectors.web.authToken }))
+    corePlugins.push(new WebPlugin({
+      host: config.connectors.web.host,
+      port: config.connectors.web.port,
+      authToken: config.connectors.web.authToken,
+    }))
   }
 
   const optionalPlugins = new Map<string, Plugin>()
@@ -133,11 +140,22 @@ export function createConnectorReconnector(args: {
       const webPlugin = corePlugins.find((plugin) => plugin instanceof WebPlugin)
       if (webPlugin instanceof WebPlugin) {
         const result = await webPlugin.reconfigure({
+          host: fresh.connectors.web.host,
           port: fresh.connectors.web.port,
           authToken: fresh.connectors.web.authToken,
         })
         if (result === 'updated') changes.push('web updated')
-        if (result === 'restarted') changes.push(`web restarted on port ${fresh.connectors.web.port}`)
+        if (result === 'restarted') changes.push(`web restarted on ${fresh.connectors.web.host}:${fresh.connectors.web.port}`)
+      }
+
+      // --- MCP ---
+      const mcpPlugin = corePlugins.find((plugin) => plugin instanceof McpPlugin)
+      if (mcpPlugin instanceof McpPlugin) {
+        const result = await mcpPlugin.reconfigure({
+          host: fresh.connectors.mcp.host,
+          port: fresh.connectors.mcp.port,
+        })
+        if (result === 'restarted') changes.push(`mcp restarted on ${fresh.connectors.mcp.host}:${fresh.connectors.mcp.port}`)
       }
 
       // --- MCP Ask ---

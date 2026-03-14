@@ -12,8 +12,8 @@ const refreshAuthState = vi.fn().mockResolvedValue(undefined)
 let configStatus: SaveStatus = 'applying'
 
 let connectorsConfig: ConnectorsConfig = {
-  web: { port: 3002, hasAuthToken: true },
-  mcp: { port: 3001 },
+  web: { host: '127.0.0.1', port: 3002, hasAuthToken: true },
+  mcp: { host: '127.0.0.1', port: 3001 },
   mcpAsk: { enabled: false, hasAuthToken: false },
   telegram: { enabled: false, hasBotToken: false, chatIds: [] },
 }
@@ -44,8 +44,8 @@ describe('ConnectorsPage', () => {
   beforeEach(() => {
     configStatus = 'applying'
     connectorsConfig = {
-      web: { port: 3002, hasAuthToken: true },
-      mcp: { port: 3001 },
+      web: { host: '127.0.0.1', port: 3002, hasAuthToken: true },
+      mcp: { host: '127.0.0.1', port: 3001 },
       mcpAsk: { enabled: false, hasAuthToken: false },
       telegram: { enabled: false, hasBotToken: false, chatIds: [] },
     }
@@ -93,7 +93,7 @@ describe('ConnectorsPage', () => {
     vi.spyOn(api.config, 'updateSection').mockResolvedValue({
       data: {
         ...connectorsConfig,
-        web: { port: 3002, hasAuthToken: false },
+        web: { host: '127.0.0.1', port: 3002, hasAuthToken: false },
       },
       meta: { reconnectScheduled: true },
     })
@@ -107,7 +107,7 @@ describe('ConnectorsPage', () => {
     }))
     expect(replaceConfig).toHaveBeenCalledWith({
       ...connectorsConfig,
-      web: { port: 3002, hasAuthToken: false },
+      web: { host: '127.0.0.1', port: 3002, hasAuthToken: false },
     })
     expect(sessionStorage.getItem('authToken')).toBeNull()
     expect(refreshAuthState).toHaveBeenCalled()

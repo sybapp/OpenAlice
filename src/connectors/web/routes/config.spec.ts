@@ -78,8 +78,8 @@ const fullConfig = {
     activeHours: null,
   },
   connectors: {
-    web: { port: 3002, authToken: 'web-secret' },
-    mcp: { port: 3001 },
+    web: { host: '127.0.0.1', port: 3002, authToken: 'web-secret' },
+    mcp: { host: '127.0.0.1', port: 3001 },
     mcpAsk: { enabled: false },
     telegram: {
       enabled: true,
@@ -123,7 +123,8 @@ describe('createConfigRoutes', () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(body.connectors.web).toEqual({ port: 3002, hasAuthToken: true })
+    expect(body.connectors.web).toEqual({ host: '127.0.0.1', port: 3002, hasAuthToken: true })
+    expect(body.connectors.mcp).toEqual({ host: '127.0.0.1', port: 3001 })
     expect(body.connectors.mcpAsk).toEqual({ enabled: false, hasAuthToken: false })
     expect(body.connectors.telegram).toEqual({
       enabled: true,
@@ -162,7 +163,7 @@ describe('createConfigRoutes', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        web: { port: 3010 },
+        web: { host: '0.0.0.0', port: 3010 },
         telegram: {
           enabled: true,
           botToken: '****cret',
@@ -175,8 +176,8 @@ describe('createConfigRoutes', () => {
 
     expect(res.status).toBe(200)
     expect(mocks.writeConfigSection).toHaveBeenCalledWith('connectors', {
-      web: { port: 3010, authToken: 'web-secret' },
-      mcp: { port: 3001 },
+      web: { host: '0.0.0.0', port: 3010, authToken: 'web-secret' },
+      mcp: { host: '127.0.0.1', port: 3001 },
       mcpAsk: { enabled: false },
       telegram: {
         enabled: true,
@@ -187,8 +188,8 @@ describe('createConfigRoutes', () => {
     })
     expect(body).toEqual({
       data: {
-        web: { port: 3010, hasAuthToken: true },
-        mcp: { port: 3001 },
+        web: { host: '0.0.0.0', port: 3010, hasAuthToken: true },
+        mcp: { host: '127.0.0.1', port: 3001 },
         mcpAsk: { enabled: false, hasAuthToken: false },
         telegram: {
           enabled: true,
@@ -225,8 +226,8 @@ describe('createConfigRoutes', () => {
 
     expect(res.status).toBe(200)
     expect(mocks.writeConfigSection).toHaveBeenCalledWith('connectors', {
-      web: { port: 3002, authToken: 'web-secret' },
-      mcp: { port: 3001 },
+      web: { host: '127.0.0.1', port: 3002, authToken: 'web-secret' },
+      mcp: { host: '127.0.0.1', port: 3001 },
       mcpAsk: { enabled: true, port: 3003 },
       telegram: {
         enabled: true,
