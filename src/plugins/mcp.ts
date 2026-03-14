@@ -4,6 +4,8 @@ import { serve } from '@hono/node-server'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { Tool } from 'ai'
+import { createMcpCapabilityTools } from '../core/capabilities.js'
+import type { ToolCenter } from '../core/tool-center.js'
 import type { Plugin, EngineContext } from '../core/types.js'
 
 type McpContent =
@@ -51,13 +53,15 @@ export class McpPlugin implements Plugin {
   private transports = new Map<string, WebStandardStreamableHTTPServerTransport>()
 
   constructor(
-    private getTools: (() => Promise<Record<string, Tool>> | Record<string, Tool>) | Record<string, Tool>,
+    private toolCenter: ToolCenter,
     private port: number,
   ) {}
 
-  async start(_ctx: EngineContext) {
-    const resolveTools = async () =>
-      typeof this.getTools === 'function' ? await this.getTools() : this.getTools
+  async start(ctx: EngineContext) {
+    const resolveTools = async () => ({
+      ...(await this.toolCenter.getMcpTools()),
+      ...(await createMcpCapabilityTools(ctx)),
+    })
 
     const createMcpServer = async () => {
       const mcp = new McpServer({ name: 'open-alice', version: '1.0.0' })

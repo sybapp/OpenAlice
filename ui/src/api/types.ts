@@ -53,6 +53,45 @@ export type ChatHistoryItem =
   | { kind: 'text'; role: 'user' | 'assistant'; text: string; timestamp?: string; metadata?: Record<string, unknown>; media?: Array<{ type: string; url: string }> }
   | { kind: 'tool_calls'; calls: ToolCall[]; timestamp?: string }
 
+// ==================== Capabilities ====================
+
+export interface SystemToolInfo {
+  name: string
+  group: string
+  description: string
+}
+
+export interface SkillCapabilityInfo {
+  id: string
+  label: string
+  description: string
+  runtime: 'tool-loop' | 'script-loop'
+  userInvocable: boolean
+  stage?: string
+  resources: string[]
+  allowedScripts: string[]
+}
+
+export interface ScriptCapabilityInfo {
+  id: string
+  description: string
+  usedBy: string[]
+}
+
+export interface McpCapabilityInfo {
+  id: string
+  kind: 'system-tool' | 'skill'
+  description: string
+}
+
+export interface CapabilityResponse {
+  systemTools: SystemToolInfo[]
+  skills: SkillCapabilityInfo[]
+  scripts: ScriptCapabilityInfo[]
+  mcpExposed: McpCapabilityInfo[]
+  disabledSystemTools: string[]
+}
+
 // ==================== Config ====================
 
 export interface AIProviderConfig {

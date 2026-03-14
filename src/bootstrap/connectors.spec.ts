@@ -89,7 +89,7 @@ describe('bootstrap connectors', () => {
         mcpAsk: { enabled: true, port: 3003, authToken: 'ask-secret' },
         telegram: { enabled: true, botToken: 'tg-secret', chatIds: [123] },
       },
-    } as never, { getMcpTools: () => ['tool-a'] } as never)
+    } as never, {} as never)
 
     expect(result.corePlugins).toHaveLength(2)
     expect(result.optionalPlugins.has('mcp-ask')).toBe(true)

@@ -21,6 +21,15 @@ import type { Brain } from '../extension/cognition/brain/index.js'
 import type { EventLog } from '../core/event-log.js'
 import type { ITradingGit } from '../extension/trading/index.js'
 import type { MarketDataBridge } from '../core/types.js'
+import type { SymbolIndex } from '../openbb/equity/index.js'
+import type {
+  CryptoClientLike,
+  CurrencyClientLike,
+  EquityClientLike,
+  NewsClientLike,
+} from '../openbb/sdk/index.js'
+import type { INewsProvider } from '../extension/research/news-collector/index.js'
+import type { OhlcvStore } from '../extension/technical-analysis/indicator-kit/index.js'
 
 export interface AIResult {
   engine: Engine
@@ -34,6 +43,13 @@ export interface SkillRuntimeDeps {
   eventLog: EventLog
   accountManager: AccountManager
   marketData: MarketDataBridge
+  symbolIndex: SymbolIndex
+  ohlcvStore: OhlcvStore
+  equityClient: EquityClientLike
+  cryptoClient: CryptoClientLike
+  currencyClient: CurrencyClientLike
+  newsClient: NewsClientLike
+  newsStore: INewsProvider
   getAccountGit: (accountId: string) => ITradingGit | undefined
 }
 
@@ -59,11 +75,17 @@ export function initAIProviders(
     commandRouter: createLocalCommandRouter(),
     skillLoopRunner: new SkillLoopRunner(agentCenter, {
       config,
-      toolCenter,
       brain: skillRuntime.brain,
       eventLog: skillRuntime.eventLog,
       accountManager: skillRuntime.accountManager,
       marketData: skillRuntime.marketData,
+      symbolIndex: skillRuntime.symbolIndex,
+      ohlcvStore: skillRuntime.ohlcvStore,
+      equityClient: skillRuntime.equityClient,
+      cryptoClient: skillRuntime.cryptoClient,
+      currencyClient: skillRuntime.currencyClient,
+      newsClient: skillRuntime.newsClient,
+      newsStore: skillRuntime.newsStore,
       getAccountGit: skillRuntime.getAccountGit,
       invocation: {},
     }),

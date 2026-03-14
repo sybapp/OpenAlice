@@ -3,9 +3,17 @@ import type { AccountManager } from '../../extension/trading/index.js'
 import type { ITradingGit } from '../../extension/trading/index.js'
 import type { Engine } from '../../core/engine.js'
 import type { EventLog } from '../../core/event-log.js'
-import type { ToolCenter } from '../../core/tool-center.js'
 import type { Config, MarketDataBridge } from '../../core/types.js'
 import type { CronSchedule } from '../cron/engine.js'
+import type { SymbolIndex } from '../../openbb/equity/index.js'
+import type {
+  CryptoClientLike,
+  CurrencyClientLike,
+  EquityClientLike,
+  NewsClientLike,
+} from '../../openbb/sdk/index.js'
+import type { INewsProvider } from '../../extension/research/news-collector/index.js'
+import type { OhlcvStore } from '../../extension/technical-analysis/indicator-kit/index.js'
 
 export type TraderAssetClass = 'crypto' | 'equity'
 export type TraderAllowedOrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'
@@ -207,8 +215,14 @@ export interface TraderRunnerDeps {
   eventLog: EventLog
   brain: Brain
   accountManager: AccountManager
-  toolCenter: ToolCenter
   marketData: MarketDataBridge
+  symbolIndex: SymbolIndex
+  ohlcvStore: OhlcvStore
+  equityClient: EquityClientLike
+  cryptoClient: CryptoClientLike
+  currencyClient: CurrencyClientLike
+  newsClient: NewsClientLike
+  newsStore: INewsProvider
   getAccountGit: (accountId: string) => ITradingGit | undefined
 }
 

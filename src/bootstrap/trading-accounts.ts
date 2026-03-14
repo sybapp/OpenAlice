@@ -8,14 +8,12 @@ import { loadTradingConfig, type PlatformConfig } from '../core/config.js'
 import type { ReconnectResult } from '../core/types.js'
 import {
   AccountManager,
-  createCcxtProviderTools,
   wireAccountTrading,
   createPlatformFromConfig,
   createAccountFromConfig,
   validatePlatformRefs,
 } from '../extension/trading/index.js'
 import type { AccountSetup, IPlatform } from '../extension/trading/index.js'
-import type { ToolCenter } from '../core/tool-center.js'
 import { gitFilePath, gitArchivePath, loadGitState, createGitPersister } from './trading.js'
 
 type TradingAccountConfig = {
@@ -37,22 +35,6 @@ function buildPlatformRegistry(platforms: PlatformConfig[]): Map<string, IPlatfo
     registry.set(platform.id, createPlatformFromConfig(platform))
   }
   return registry
-}
-
-function registerCcxtTools(args: {
-  toolCenter: ToolCenter
-  accountManager: AccountManager
-  accountSetups: Map<string, AccountSetup>
-}) {
-  const { toolCenter, accountManager, accountSetups } = args
-  toolCenter.register(
-    createCcxtProviderTools({
-      accountManager,
-      getGit: (id) => accountSetups.get(id)?.git,
-      getGitState: (id) => accountSetups.get(id)?.getGitState(),
-    }),
-    'trading-ccxt',
-  )
 }
 
 export async function initTradingAccounts(): Promise<TradingAccountsResult> {
@@ -132,9 +114,8 @@ export function createAccountReconnector(deps: {
   accountManager: AccountManager
   accountSetups: Map<string, AccountSetup>
   initAccount: TradingAccountsResult['initAccount']
-  toolCenter: ToolCenter
 }): (accountId: string) => Promise<ReconnectResult> {
-  const { accountManager, accountSetups, initAccount, toolCenter } = deps
+  const { accountManager, accountSetups, initAccount } = deps
   const reconnecting = new Set<string>()
 
   return async (accountId: string): Promise<ReconnectResult> => {
@@ -162,10 +143,6 @@ export function createAccountReconnector(deps: {
       const ok = await initAccount(accCfg, platform)
       if (!ok) {
         return { success: false, error: `Account "${accountId}" init failed` }
-      }
-
-      if (platform.providerType !== 'alpaca') {
-        registerCcxtTools({ toolCenter, accountManager, accountSetups })
       }
 
       const label = accountManager.getAccount(accountId)?.label ?? accountId

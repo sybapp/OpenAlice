@@ -77,5 +77,10 @@ export type {
   UpdateTradingAccountRequest,
   NewsCollectorConfig,
   NewsCollectorFeed,
+  CapabilityResponse,
+  SystemToolInfo,
+  SkillCapabilityInfo,
+  ScriptCapabilityInfo,
+  McpCapabilityInfo,
 } from './types'
 export type { EventQueryResult } from './events'

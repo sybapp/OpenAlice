@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   loadTradingConfig: vi.fn(),
   createPlatformFromConfig: vi.fn(),
-  createCcxtProviderTools: vi.fn(() => ['ccxt-tool']),
 }))
 
 vi.mock('../core/config.js', () => ({
@@ -15,7 +14,6 @@ vi.mock('../extension/trading/index.js', async () => {
   return {
     ...actual,
     createPlatformFromConfig: mocks.createPlatformFromConfig,
-    createCcxtProviderTools: mocks.createCcxtProviderTools,
   }
 })
 
@@ -89,7 +87,6 @@ describe('createAccountReconnector', () => {
       } as never,
       accountSetups: new Map(),
       initAccount: vi.fn(),
-      toolCenter: { register: vi.fn() } as never,
     })
 
     const pending = reconnect('paper-1')
@@ -118,7 +115,6 @@ describe('createAccountReconnector', () => {
       } as never,
       accountSetups: new Map(),
       initAccount: vi.fn(),
-      toolCenter: { register: vi.fn() } as never,
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
@@ -127,9 +123,8 @@ describe('createAccountReconnector', () => {
     })
   })
 
-  it('re-registers CCXT tools after a successful non-alpaca reconnect', async () => {
+  it('reconnects a non-alpaca account without re-registering legacy provider tools', async () => {
     const initAccount = vi.fn(async () => true)
-    const register = vi.fn()
     const getAccount = vi.fn()
       .mockReturnValueOnce({ close: vi.fn(async () => undefined) })
       .mockReturnValue({ label: 'Main Binance' })
@@ -149,7 +144,6 @@ describe('createAccountReconnector', () => {
       } as never,
       accountSetups: new Map(),
       initAccount,
-      toolCenter: { register } as never,
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
@@ -160,8 +154,6 @@ describe('createAccountReconnector', () => {
       { id: 'paper-1', platformId: 'binance', guards: [] },
       { id: 'binance', providerType: 'ccxt' },
     )
-    expect(mocks.createCcxtProviderTools).toHaveBeenCalled()
-    expect(register).toHaveBeenCalledWith(['ccxt-tool'], 'trading-ccxt')
   })
 
   it('returns an init-failed error when the recreated account cannot initialize', async () => {
@@ -181,7 +173,6 @@ describe('createAccountReconnector', () => {
       } as never,
       accountSetups: new Map(),
       initAccount: vi.fn(async () => false),
-      toolCenter: { register: vi.fn() } as never,
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
@@ -200,7 +191,6 @@ describe('createAccountReconnector', () => {
       } as never,
       accountSetups: new Map(),
       initAccount: vi.fn(),
-      toolCenter: { register: vi.fn() } as never,
     })
 
     await expect(reconnect('paper-9')).resolves.toEqual({

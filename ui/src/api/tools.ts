@@ -1,22 +1,25 @@
 import { fetchJson, headers } from './client'
+import type {
+  CapabilityResponse,
+  McpCapabilityInfo,
+  ScriptCapabilityInfo,
+  SkillCapabilityInfo,
+  SystemToolInfo,
+} from './types'
 
-export interface ToolInfo {
-  name: string
-  group: string
-  description: string
-}
-
-export interface ToolsResponse {
-  inventory: ToolInfo[]
-  disabled: string[]
-}
+export type ToolInfo = SystemToolInfo
+export type ToolsResponse = CapabilityResponse
+export type CapabilityToolInfo = SystemToolInfo
+export type CapabilitySkillInfo = SkillCapabilityInfo
+export type CapabilityScriptInfo = ScriptCapabilityInfo
+export type CapabilityMcpInfo = McpCapabilityInfo
 
 export const toolsApi = {
   async load(): Promise<ToolsResponse> {
     return fetchJson('/api/tools')
   },
 
-  async update(disabled: string[]): Promise<{ disabled: string[] }> {
+  async update(disabled: string[]): Promise<{ disabledSystemTools: string[] }> {
     return fetchJson('/api/tools', {
       method: 'PUT',
       headers,

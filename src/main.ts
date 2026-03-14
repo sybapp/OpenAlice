@@ -8,8 +8,6 @@ import { loadConfig } from './core/config.js'
 import type { EngineContext, Plugin } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
-import { CcxtAccount, createCcxtProviderTools } from './extension/trading/index.js'
-import type { AccountResolver } from './extension/trading/adapter.js'
 import { createCronListener } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
 import {
@@ -29,10 +27,6 @@ import { initAIProviders } from './bootstrap/ai.js'
 import { initPlugins, createConnectorReconnector } from './bootstrap/connectors.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-function registerCcxtTools(toolCenter: EngineContext['toolCenter'], resolver: AccountResolver) {
-  toolCenter.register(createCcxtProviderTools(resolver), 'trading-ccxt')
-}
 
 async function startPlugins(plugins: Iterable<Plugin>, ctx: EngineContext) {
   for (const plugin of plugins) {
@@ -56,7 +50,20 @@ async function main() {
 
   // ---- Services (Brain, EventLog, Cron, OpenBB, SymbolIndex) ----
   const services = await initServices(config)
-  const { brain, instructions, eventLog, cronEngine, newsStore, marketData } = services
+  const {
+    brain,
+    instructions,
+    eventLog,
+    cronEngine,
+    newsStore,
+    marketData,
+    symbolIndex,
+    ohlcvStore,
+    equityClient,
+    cryptoClient,
+    currencyClient,
+    newsClient,
+  } = services
 
   // ---- Tool Center ----
   const toolCenter = await registerAllTools({ config, accountManager, accountSetups, services, brain })
@@ -72,6 +79,13 @@ async function main() {
     eventLog,
     accountManager,
     marketData,
+    symbolIndex,
+    ohlcvStore,
+    equityClient,
+    cryptoClient,
+    currencyClient,
+    newsClient,
+    newsStore,
     getAccountGit,
   })
 
@@ -91,8 +105,14 @@ async function main() {
     eventLog,
     brain,
     accountManager,
-    toolCenter,
     marketData,
+    symbolIndex,
+    ohlcvStore,
+    equityClient,
+    cryptoClient,
+    currencyClient,
+    newsClient,
+    newsStore,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
   traderListener.start()
@@ -102,8 +122,14 @@ async function main() {
     eventLog,
     brain,
     accountManager,
-    toolCenter,
     marketData,
+    symbolIndex,
+    ohlcvStore,
+    equityClient,
+    cryptoClient,
+    currencyClient,
+    newsClient,
+    newsStore,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
   traderReviewListener.start()
@@ -134,15 +160,9 @@ async function main() {
   const { corePlugins, optionalPlugins } = initPlugins(config, toolCenter)
 
   // ---- Reconnect handlers ----
-  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount, toolCenter })
+  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount })
   let ctx: EngineContext
   const reconnectConnectors = createConnectorReconnector({ corePlugins, optionalPlugins, getCtx: () => ctx })
-  const getAccountGitState = (id: string) => accountSetups.get(id)?.getGitState()
-  const ccxtResolver: AccountResolver = {
-    accountManager,
-    getGit: getAccountGit,
-    getGitState: getAccountGitState,
-  }
   const getPlugins = () => [...corePlugins, ...optionalPlugins.values()]
 
   // ---- Engine Context ----
@@ -159,8 +179,14 @@ async function main() {
       eventLog,
       brain,
       accountManager,
-      toolCenter,
       marketData,
+      symbolIndex,
+      ohlcvStore,
+      equityClient,
+      cryptoClient,
+      currencyClient,
+      newsClient,
+      newsStore,
       getAccountGit,
     }),
   }
@@ -168,16 +194,7 @@ async function main() {
   await startPlugins(getPlugins(), ctx)
 
   console.log('engine: started')
-
-  // ---- CCXT Background Injection ----
-  ccxtInitPromise.then(() => {
-    const hasCcxt = Array.from(accountSetups.values()).some(
-      (s) => s.account instanceof CcxtAccount,
-    )
-    if (!hasCcxt) return
-    registerCcxtTools(toolCenter, ccxtResolver)
-    console.log('ccxt: provider tools registered')
-  })
+  await ccxtInitPromise
 
   // ---- Shutdown ----
   let stopped = false

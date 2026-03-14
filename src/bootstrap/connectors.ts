@@ -87,7 +87,7 @@ export function initPlugins(config: Config, toolCenter: ToolCenter): PluginsResu
   const corePlugins: Plugin[] = []
 
   if (config.connectors.mcp.port) {
-    corePlugins.push(new McpPlugin(() => toolCenter.getMcpTools(), config.connectors.mcp.port))
+    corePlugins.push(new McpPlugin(toolCenter, config.connectors.mcp.port))
   }
 
   if (config.connectors.web.port) {

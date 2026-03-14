@@ -270,10 +270,16 @@ export async function runTraderJob(
   const executionResult = await executeScript.run({
     config: deps.config,
     eventLog: deps.eventLog,
-    toolCenter: deps.toolCenter,
     brain: deps.brain,
     accountManager: deps.accountManager,
     marketData: deps.marketData,
+    symbolIndex: deps.symbolIndex,
+    ohlcvStore: deps.ohlcvStore,
+    equityClient: deps.equityClient,
+    cryptoClient: deps.cryptoClient,
+    currencyClient: deps.currencyClient,
+    newsClient: deps.newsClient,
+    newsStore: deps.newsStore,
     getAccountGit: deps.getAccountGit,
     invocation: {
       strategy,
