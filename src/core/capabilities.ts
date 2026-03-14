@@ -2,9 +2,9 @@ import { tool, type Tool } from 'ai'
 import { z } from 'zod'
 import type { EngineContext } from './types.js'
 import type { ToolCenter, ToolInventoryItem } from './tool-center.js'
-import { listSkillPacks } from './skills/registry.js'
-import { listSkillScripts } from './skills/script-registry.js'
-import { setSessionSkill } from './skills/session-skill.js'
+import { listSkillPacks } from '../skills/registry.js'
+import { listSkillScripts } from '../skills/script-registry.js'
+import { setSessionSkill } from '../skills/session-skill.js'
 import type { SessionEntry } from './session.js'
 
 export interface CapabilityInventoryItem {

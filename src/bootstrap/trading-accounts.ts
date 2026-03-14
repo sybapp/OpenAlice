@@ -12,8 +12,8 @@ import {
   createPlatformFromConfig,
   createAccountFromConfig,
   validatePlatformRefs,
-} from '../extension/trading/index.js'
-import type { AccountSetup, IPlatform } from '../extension/trading/index.js'
+} from '../domains/trading/index.js'
+import type { AccountSetup, IPlatform } from '../domains/trading/index.js'
 import { gitFilePath, gitArchivePath, loadGitState, createGitPersister } from './trading.js'
 
 type TradingAccountConfig = {

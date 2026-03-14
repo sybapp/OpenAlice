@@ -9,7 +9,7 @@ import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.
 import { createModelFromConfig } from './model-factory.js'
 import type { SessionStore, SessionEntry } from './session.js'
 import type { EngineContext } from './types.js'
-import { getSessionSkillIdFromEntries } from './skills/session-skill.js'
+import { getSessionSkillIdFromEntries } from '../skills/session-skill.js'
 import { toChatHistory, toModelMessages, toTextHistory } from './session.js'
 
 // ==================== Helpers ====================
@@ -132,7 +132,7 @@ vi.mock('./model-factory.js', () => ({
   createModelFromConfig: vi.fn(),
 }))
 
-vi.mock('./skills/registry.js', () => ({
+vi.mock('../skills/registry.js', () => ({
   listSkillPacks: vi.fn(async () => [
     { id: 'ta-brooks', label: 'Brooks Price Action' },
     { id: 'ta-ict-smc', label: 'ICT / SMC' },

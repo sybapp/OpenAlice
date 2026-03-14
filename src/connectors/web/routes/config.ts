@@ -4,15 +4,15 @@ import {
   writeConfigSection,
   readAIProviderConfig,
   readAIConfig,
-  readOpenbbConfig,
+  readOpentypebbConfig,
   validSections,
   type ConfigSection,
   type Config,
   writeAIConfig,
   type AIBackend,
 } from '../../../core/config.js'
-import { buildSDKCredentials } from '../../../openbb/credential-map.js'
-import { buildRouteMap, getSDKExecutor } from '../../../openbb/sdk/index.js'
+import { buildSDKCredentials } from '../../../integrations/opentypebb/credential-map.js'
+import { buildRouteMap, getSDKExecutor } from '../../../integrations/opentypebb/sdk/index.js'
 import {
   hasOwn,
   isRecord,
@@ -26,7 +26,7 @@ interface ConfigRouteOpts {
   onConnectorsChange?: () => Promise<void>
 }
 
-interface OpenbbTestEndpoint {
+interface OpentypebbTestEndpoint {
   credField: string
   path: string
 }
@@ -64,10 +64,10 @@ function toClientAiProviderConfig(aiProvider: Config['aiProvider']) {
   }
 }
 
-function toClientOpenbbConfig(openbb: Config['openbb']) {
+function toClientOpentypebbConfig(opentypebb: Config['opentypebb']) {
   return {
-    ...openbb,
-    providerKeys: toSecretPresenceMap(openbb.providerKeys),
+    ...opentypebb,
+    providerKeys: toSecretPresenceMap(opentypebb.providerKeys),
   }
 }
 
@@ -96,7 +96,7 @@ function toClientConfig(config: Config) {
   return {
     ...config,
     aiProvider: toClientAiProviderConfig(config.aiProvider),
-    openbb: toClientOpenbbConfig(config.openbb),
+    opentypebb: toClientOpentypebbConfig(config.opentypebb),
     connectors: toClientConnectorsConfig(config.connectors),
   }
 }
@@ -118,13 +118,13 @@ async function writeAiProviderSection(body: unknown): Promise<Config['aiProvider
   return writeConfigSection('aiProvider', merged) as Promise<Config['aiProvider']>
 }
 
-async function writeOpenbbSection(body: unknown): Promise<Config['openbb']> {
-  const current = (await loadConfig()).openbb
+async function writeOpentypebbSection(body: unknown): Promise<Config['opentypebb']> {
+  const current = (await loadConfig()).opentypebb
   const input = isRecord(body) ? body : {}
   const providersInput = isRecord(input.providers) ? input.providers : {}
   const mergedProviderKeys = mergeSecretRecord(current.providerKeys, input.providerKeys)
 
-  const merged: Config['openbb'] = {
+  const merged: Config['opentypebb'] = {
     enabled: resolveBoolean(input, 'enabled', current.enabled),
     providers: {
       equity: resolveString(providersInput, 'equity', current.providers.equity),
@@ -136,7 +136,7 @@ async function writeOpenbbSection(body: unknown): Promise<Config['openbb']> {
     providerKeys: mergedProviderKeys,
   }
 
-  return writeConfigSection('openbb', merged) as Promise<Config['openbb']>
+  return writeConfigSection('opentypebb', merged) as Promise<Config['opentypebb']>
 }
 
 async function writeConnectorsSection(body: unknown): Promise<Config['connectors']> {
@@ -232,9 +232,9 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
           const validated = await writeAiProviderSection(body)
           return c.json(toClientAiProviderConfig(validated))
         }
-        case 'openbb': {
-          const validated = await writeOpenbbSection(body)
-          return c.json(toClientOpenbbConfig(validated))
+        case 'opentypebb': {
+          const validated = await writeOpentypebbSection(body)
+          return c.json(toClientOpentypebbConfig(validated))
         }
         default: {
           const validated = await writeConfigSection(section, body)
@@ -265,9 +265,9 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   return app
 }
 
-/** OpenBB routes: POST /test-provider */
-export function createOpenbbRoutes() {
-  const TEST_ENDPOINTS: Record<string, OpenbbTestEndpoint> = {
+/** OpenTypeBB routes: POST /test-provider */
+export function createOpentypebbRoutes() {
+  const TEST_ENDPOINTS: Record<string, OpentypebbTestEndpoint> = {
     fred:             { credField: 'fred_api_key',             path: '/api/v1/economy/fred_search?query=GDP&provider=fred' },
     bls:              { credField: 'bls_api_key',              path: '/api/v1/economy/survey/bls_search?query=unemployment&provider=bls' },
     eia:              { credField: 'eia_api_key',              path: '/api/v1/commodity/short_term_energy_outlook?provider=eia' },
@@ -281,7 +281,7 @@ export function createOpenbbRoutes() {
   const app = new Hono()
   const routeMap = buildRouteMap()
 
-  function parseSdkParams(endpoint: OpenbbTestEndpoint): { model: string; provider: string; params: Record<string, unknown> } {
+  function parseSdkParams(endpoint: OpentypebbTestEndpoint): { model: string; provider: string; params: Record<string, unknown> } {
     const url = new URL(endpoint.path, 'http://localhost')
     const routePath = url.pathname.replace(/^\/api\/v1/, '')
     const model = routeMap.get(routePath)
@@ -315,7 +315,7 @@ export function createOpenbbRoutes() {
 
   async function testProviderViaSdk(provider: string, key: string) {
     const endpoint = TEST_ENDPOINTS[provider]
-    const openbbConfig = await readOpenbbConfig()
+    const openbbConfig = await readOpentypebbConfig()
     const { model, provider: providerName, params } = parseSdkParams(endpoint)
     const executor = getSDKExecutor()
     const credentials = buildSDKCredentials({

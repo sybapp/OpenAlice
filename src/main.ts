@@ -8,23 +8,24 @@ import { loadConfig } from './core/config.js'
 import type { EngineContext, Plugin } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
-import { createCronListener } from './task/cron/index.js'
-import { createHeartbeat } from './task/heartbeat/index.js'
+import { createCronListener } from './jobs/cron/index.js'
+import { createHeartbeat } from './jobs/heartbeat/index.js'
 import {
   createTraderJobEngine,
   createTraderListener,
   createTraderReviewJobEngine,
   createTraderReviewListener,
   runTraderReview,
-} from './task/trader/index.js'
-import { NewsCollector } from './extension/research/news-collector/index.js'
-import { ensureDefaultSkillPacks } from './core/skills/registry.js'
+} from './jobs/strategies/index.js'
+import { NewsCollector } from './domains/research/news-collector/index.js'
+import { ensureDefaultSkillPacks } from './skills/registry.js'
 
+import { migrateFilesystemLayout } from './bootstrap/migrate-filesystem.js'
 import { initTradingAccounts, createAccountReconnector, teardownAccountRuntime } from './bootstrap/trading-accounts.js'
 import { initServices } from './bootstrap/services.js'
 import { registerAllTools } from './bootstrap/tools.js'
 import { initAIProviders } from './bootstrap/ai.js'
-import { initPlugins, createConnectorReconnector } from './bootstrap/connectors.js'
+import { initConnectors, createConnectorReconnector } from './bootstrap/connectors.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -42,13 +43,14 @@ async function stopPlugins(plugins: Iterable<Plugin>) {
 }
 
 async function main() {
+  await migrateFilesystemLayout()
   const config = await loadConfig()
   await ensureDefaultSkillPacks()
 
   // ---- Trading Accounts ----
   const { accountManager, accountSetups, ccxtInitPromise, initAccount } = await initTradingAccounts()
 
-  // ---- Services (Brain, EventLog, Cron, OpenBB, SymbolIndex) ----
+  // ---- Services (Brain, EventLog, Cron, OpenTypeBB, SymbolIndex) ----
   const services = await initServices(config)
   const {
     brain,
@@ -157,13 +159,13 @@ async function main() {
   }
 
   // ---- Plugins ----
-  const { corePlugins, optionalPlugins } = initPlugins(config, toolCenter)
+  const { coreConnectors, optionalConnectors } = initConnectors(config, toolCenter)
 
   // ---- Reconnect handlers ----
   const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount })
   let ctx: EngineContext
-  const reconnectConnectors = createConnectorReconnector({ corePlugins, optionalPlugins, getCtx: () => ctx })
-  const getPlugins = () => [...corePlugins, ...optionalPlugins.values()]
+  const reconnectConnectors = createConnectorReconnector({ coreConnectors, optionalConnectors, getCtx: () => ctx })
+  const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
 
   // ---- Engine Context ----
   ctx = {
@@ -191,7 +193,7 @@ async function main() {
     }),
   }
 
-  await startPlugins(getPlugins(), ctx)
+  await startPlugins(getConnectors(), ctx)
 
   console.log('engine: started')
   await ccxtInitPromise
@@ -208,7 +210,7 @@ async function main() {
     trader.stop()
     traderReviewListener.stop()
     traderReview.stop()
-    await stopPlugins(getPlugins())
+    await stopPlugins(getConnectors())
     for (const setup of accountSetups.values()) {
       setup.disposeDispatcher()
     }

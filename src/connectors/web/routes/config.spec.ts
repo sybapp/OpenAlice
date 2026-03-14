@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   readAIConfig: vi.fn(),
   writeAIConfig: vi.fn(),
   readAIProviderConfig: vi.fn(),
-  readOpenbbConfig: vi.fn(),
+  readOpentypebbConfig: vi.fn(),
   buildSDKCredentials: vi.fn(),
   buildRouteMap: vi.fn(),
   getSDKExecutor: vi.fn(),
@@ -18,20 +18,20 @@ vi.mock('../../../core/config.js', () => ({
   readAIConfig: mocks.readAIConfig,
   writeAIConfig: mocks.writeAIConfig,
   readAIProviderConfig: mocks.readAIProviderConfig,
-  readOpenbbConfig: mocks.readOpenbbConfig,
-  validSections: ['connectors', 'aiProvider', 'openbb'],
+  readOpentypebbConfig: mocks.readOpentypebbConfig,
+  validSections: ['connectors', 'aiProvider', 'opentypebb'],
 }))
 
-vi.mock('../../../openbb/credential-map.js', () => ({
+vi.mock('../../../integrations/opentypebb/credential-map.js', () => ({
   buildSDKCredentials: mocks.buildSDKCredentials,
 }))
 
-vi.mock('../../../openbb/sdk/index.js', () => ({
+vi.mock('../../../integrations/opentypebb/sdk/index.js', () => ({
   buildRouteMap: mocks.buildRouteMap,
   getSDKExecutor: mocks.getSDKExecutor,
 }))
 
-const { createConfigRoutes, createOpenbbRoutes } = await import('./config.js')
+const { createConfigRoutes, createOpentypebbRoutes } = await import('./config.js')
 
 const fullConfig = {
   aiProvider: {
@@ -54,7 +54,7 @@ const fullConfig = {
   },
   crypto: { provider: { type: 'none' }, guards: [] },
   securities: { provider: { type: 'none' }, guards: [] },
-  openbb: {
+  opentypebb: {
     enabled: true,
     providers: {
       equity: 'yfinance',
@@ -93,7 +93,7 @@ const fullConfig = {
     intervalMinutes: 15,
     maxInMemory: 100,
     retentionDays: 7,
-    piggybackOpenBB: true,
+    piggybackOpenTypeBB: true,
     feeds: [],
   },
   tools: { disabled: [] },
@@ -105,7 +105,7 @@ describe('createConfigRoutes', () => {
     mocks.writeConfigSection.mockReset()
     mocks.readAIConfig.mockReset()
     mocks.writeAIConfig.mockReset()
-    mocks.readOpenbbConfig.mockReset()
+    mocks.readOpentypebbConfig.mockReset()
     mocks.buildSDKCredentials.mockReset()
     mocks.buildRouteMap.mockReset()
     mocks.getSDKExecutor.mockReset()
@@ -136,7 +136,7 @@ describe('createConfigRoutes', () => {
     expect(body.aiProvider.apiKeys).toEqual({
       anthropic: true,
     })
-    expect(body.openbb.providerKeys).toEqual({})
+    expect(body.opentypebb.providerKeys).toEqual({})
   })
 
   it('rejects invalid config sections', async () => {
@@ -149,7 +149,7 @@ describe('createConfigRoutes', () => {
 
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: 'Invalid section "unknown". Valid: connectors, aiProvider, openbb',
+      error: 'Invalid section "unknown". Valid: connectors, aiProvider, opentypebb',
     })
   })
 
@@ -288,11 +288,11 @@ describe('createConfigRoutes', () => {
     })
   })
 
-  it('merges openbb provider key updates and clears without leaking stored values', async () => {
+  it('merges opentypebb provider key updates and clears without leaking stored values', async () => {
     mocks.loadConfig.mockResolvedValue({
       ...fullConfig,
-      openbb: {
-        ...fullConfig.openbb,
+      opentypebb: {
+        ...fullConfig.opentypebb,
         providerKeys: {
           fred: 'fred-secret',
           fmp: 'fmp-secret',
@@ -302,7 +302,7 @@ describe('createConfigRoutes', () => {
     mocks.writeConfigSection.mockImplementation(async (_section, data) => data)
 
     const app = createConfigRoutes()
-    const res = await app.request('/openbb', {
+    const res = await app.request('/opentypebb', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -315,7 +315,7 @@ describe('createConfigRoutes', () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(mocks.writeConfigSection).toHaveBeenCalledWith('openbb', {
+    expect(mocks.writeConfigSection).toHaveBeenCalledWith('opentypebb', {
       enabled: true,
       providers: {
         equity: 'yfinance',
@@ -340,7 +340,7 @@ describe('createConfigRoutes', () => {
     mocks.writeConfigSection.mockImplementation(async (_section, data) => data)
 
     const app = createConfigRoutes()
-    const res = await app.request('/openbb', {
+    const res = await app.request('/opentypebb', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -353,7 +353,7 @@ describe('createConfigRoutes', () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(mocks.writeConfigSection).toHaveBeenCalledWith('openbb', {
+    expect(mocks.writeConfigSection).toHaveBeenCalledWith('opentypebb', {
       enabled: true,
       providers: {
         equity: 'fmp',
@@ -411,8 +411,8 @@ describe('createConfigRoutes', () => {
 
   it('tests provider credentials through the in-process sdk when sdk mode is enabled', async () => {
     const execute = vi.fn().mockResolvedValue([{ id: 'GDP' }])
-    mocks.readOpenbbConfig.mockResolvedValue({
-      ...fullConfig.openbb,
+    mocks.readOpentypebbConfig.mockResolvedValue({
+      ...fullConfig.opentypebb,
       providerKeys: { fmp: 'persisted-key' },
     })
     mocks.buildRouteMap.mockReturnValue(new Map([
@@ -424,7 +424,7 @@ describe('createConfigRoutes', () => {
     })
     mocks.getSDKExecutor.mockReturnValue({ execute })
 
-    const app = createOpenbbRoutes()
+    const app = createOpentypebbRoutes()
     const res = await app.request('/test-provider', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -489,8 +489,8 @@ describe('createConfigRoutes', () => {
     })
   })
 
-  it('rejects unknown OpenBB providers and missing keys during provider tests', async () => {
-    const app = createOpenbbRoutes()
+  it('rejects unknown OpenTypeBB providers and missing keys during provider tests', async () => {
+    const app = createOpentypebbRoutes()
 
     const unknown = await app.request('/test-provider', {
       method: 'POST',

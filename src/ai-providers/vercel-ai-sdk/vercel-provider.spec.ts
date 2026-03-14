@@ -12,11 +12,11 @@ vi.mock('./agent.js', () => ({
   createAgent: vi.fn(() => ({ generate: vi.fn(async () => ({ text: 'ok' })) })),
 }))
 
-vi.mock('../../core/skills/session-skill.js', () => ({
+vi.mock('../../skills/session-skill.js', () => ({
   getSessionSkillId: vi.fn(async (session: { __skillId?: string }) => session.__skillId ?? null),
 }))
 
-vi.mock('../../core/skills/registry.js', () => ({
+vi.mock('../../skills/registry.js', () => ({
   getSkillPack: vi.fn(async (id: string | null) => {
     if (id === 'ta-brooks') {
       return {

@@ -1,9 +1,8 @@
 import { z } from 'zod'
 import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
 import { resolve } from 'path'
-import { newsCollectorSchema } from '../extension/research/news-collector/config.js'
-
-const CONFIG_DIR = resolve('data/config')
+import { newsCollectorSchema } from '../domains/research/news-collector/config.js'
+import { CONFIG_DIR, HEARTBEAT_DEFAULT_FILE, HEARTBEAT_FILE } from './paths.js'
 
 // ==================== Individual Schemas ====================
 
@@ -105,7 +104,7 @@ const securitiesSchema = z.object({
   })).default([]),
 })
 
-const openbbSchema = z.object({
+const opentypebbSchema = z.object({
   enabled: z.boolean().default(true),
   providers: z.object({
     equity: z.string().default('yfinance'),
@@ -175,7 +174,7 @@ const connectorsSchema = z.object({
 const heartbeatSchema = z.object({
   enabled: z.boolean().default(false),
   every: z.string().default('30m'),
-  prompt: z.string().default('Read data/brain/heartbeat.md (or data/default/heartbeat.default.md if not found) and follow the instructions inside.'),
+  prompt: z.string().default(`Read ${HEARTBEAT_FILE} (or ${HEARTBEAT_DEFAULT_FILE} if not found) and follow the instructions inside.`),
   activeHours: activeHoursSchema,
 })
 
@@ -238,7 +237,7 @@ export type Config = {
   agent: z.infer<typeof agentSchema>
   crypto: z.infer<typeof cryptoSchema>
   securities: z.infer<typeof securitiesSchema>
-  openbb: z.infer<typeof openbbSchema>
+  opentypebb: z.infer<typeof opentypebbSchema>
   compaction: z.infer<typeof compactionSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
@@ -288,8 +287,12 @@ async function readSectionWithFallback<T>(filename: string, schema: z.ZodType<T>
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'openbb.json', 'compaction.json', 'ai-provider.json', 'heartbeat.json', 'connectors.json', 'news-collector.json', 'tools.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'opentypebb.json', 'compaction.json', 'ai-provider.json', 'heartbeat.json', 'connectors.json', 'news-collector.json', 'tools.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
+
+  if (raws[4] === undefined) {
+    raws[4] = await loadJsonFile('openbb.json')
+  }
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
   // ---------- Migration: consolidate old ai-provider + model + api-keys → ai-provider ----------
@@ -338,7 +341,7 @@ export async function loadConfig(): Promise<Config> {
     agent:         await parseAndSeed(files[1], agentSchema, raws[1]),
     crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2]),
     securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
-    openbb:        await parseAndSeed(files[4], openbbSchema, raws[4]),
+    opentypebb:    await parseAndSeed(files[4], opentypebbSchema, raws[4]),
     compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
     aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
     heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
@@ -489,9 +492,9 @@ export async function writeAIConfig(backend: AIBackend): Promise<void> {
   })
 }
 
-/** Read OpenBB config from disk (called per-request for hot-reload). */
-export async function readOpenbbConfig() {
-  return readSectionWithFallback('openbb.json', openbbSchema)
+/** Read OpenTypeBB config from disk (called per-request for hot-reload). */
+export async function readOpentypebbConfig() {
+  return readSectionWithFallback('opentypebb.json', opentypebbSchema)
 }
 
 /** Read tools config from disk (called per-request for hot-reload). */
@@ -508,7 +511,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   agent: agentSchema,
   crypto: cryptoSchema,
   securities: securitiesSchema,
-  openbb: openbbSchema,
+  opentypebb: opentypebbSchema,
   compaction: compactionSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
@@ -522,7 +525,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   agent: 'agent.json',
   crypto: 'crypto.json',
   securities: 'securities.json',
-  openbb: 'openbb.json',
+  opentypebb: 'opentypebb.json',
   compaction: 'compaction.json',
   aiProvider: 'ai-provider.json',
   heartbeat: 'heartbeat.json',

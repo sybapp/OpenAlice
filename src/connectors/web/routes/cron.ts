@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { EngineContext } from '../../../core/types.js'
-import type { CronSchedule } from '../../../task/cron/engine.js'
+import type { CronSchedule } from '../../../jobs/cron/engine.js'
 
 /** Cron routes: GET /jobs, POST /jobs, PUT /jobs/:id, DELETE /jobs/:id, POST /jobs/:id/run */
 export function createCronRoutes(ctx: EngineContext) {

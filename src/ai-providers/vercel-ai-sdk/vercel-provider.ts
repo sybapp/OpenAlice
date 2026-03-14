@@ -18,9 +18,9 @@ import { compactIfNeeded } from '../../core/compaction.js'
 import { extractMediaFromToolOutput } from '../../core/media.js'
 import { createModelFromConfig } from '../../core/model-factory.js'
 import { createAgent } from './agent.js'
-import { getSkillPack } from '../../core/skills/registry.js'
-import { buildSkillPromptText, getSkillToolPolicy } from '../../core/skills/policy.js'
-import { getSessionSkillId } from '../../core/skills/session-skill.js'
+import { getSkillPack } from '../../skills/registry.js'
+import { buildSkillPromptText, getSkillToolPolicy } from '../../skills/policy.js'
+import { getSessionSkillId } from '../../skills/session-skill.js'
 import { createChannel } from '../../core/async-channel.js'
 
 export class VercelAIProvider implements AIProvider {

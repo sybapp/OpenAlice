@@ -60,23 +60,23 @@ vi.mock('../core/config.js', () => ({
   loadConfig: mocks.loadConfig,
 }))
 
-vi.mock('../plugins/mcp.js', () => ({
-  McpPlugin: FakeMcpPlugin,
+vi.mock('../connectors/mcp-server/index.js', () => ({
+  McpServerConnector: FakeMcpPlugin,
 }))
 
 vi.mock('../connectors/web/index.js', () => ({
-  WebPlugin: FakeWebPlugin,
+  WebConnector: FakeWebPlugin,
 }))
 
 vi.mock('../connectors/mcp-ask/index.js', () => ({
-  McpAskPlugin: FakeMcpAskPlugin,
+  McpAskConnector: FakeMcpAskPlugin,
 }))
 
 vi.mock('../connectors/telegram/index.js', () => ({
-  TelegramPlugin: FakeTelegramPlugin,
+  TelegramConnector: FakeTelegramPlugin,
 }))
 
-const { initPlugins, createConnectorReconnector } = await import('./connectors.js')
+const { initConnectors, createConnectorReconnector } = await import('./connectors.js')
 
 describe('bootstrap connectors', () => {
   beforeEach(() => {
@@ -86,8 +86,8 @@ describe('bootstrap connectors', () => {
     mocks.telegramInstances.length = 0
   })
 
-  it('initializes core and optional plugins from connector config', () => {
-    const result = initPlugins({
+  it('initializes core and optional connectors from connector config', () => {
+    const result = initConnectors({
       connectors: {
         web: { host: '127.0.0.1', port: 3002, authToken: 'web-secret' },
         mcp: { host: '127.0.0.1', port: 3001 },
@@ -96,9 +96,9 @@ describe('bootstrap connectors', () => {
       },
     } as never, {} as never)
 
-    expect(result.corePlugins).toHaveLength(2)
-    expect(result.optionalPlugins.has('mcp-ask')).toBe(true)
-    expect(result.optionalPlugins.has('telegram')).toBe(true)
+    expect(result.coreConnectors).toHaveLength(2)
+    expect(result.optionalConnectors.has('mcp-ask')).toBe(true)
+    expect(result.optionalConnectors.has('telegram')).toBe(true)
     expect(mocks.webInstances[0].config).toEqual({ host: '127.0.0.1', port: 3002, authToken: 'web-secret' })
     expect(mocks.mcpAskInstances).toHaveLength(1)
     expect(mocks.telegramInstances).toHaveLength(1)
@@ -110,7 +110,7 @@ describe('bootstrap connectors', () => {
     const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'old-token' })
     web.reconfigure.mockResolvedValue('updated')
     const telegram = new FakeTelegramPlugin({ token: 'old-tg-token', allowedChatIds: [123] })
-    const optionalPlugins = new Map<string, any>([['telegram', telegram]])
+    const optionalConnectors = new Map<string, any>([['telegram', telegram]])
 
     mocks.loadConfig.mockResolvedValue({
       connectors: {
@@ -122,8 +122,8 @@ describe('bootstrap connectors', () => {
     })
 
     const reconnect = createConnectorReconnector({
-      corePlugins: [mcp as never, web as never],
-      optionalPlugins,
+      coreConnectors: [mcp as never, web as never],
+      optionalConnectors,
       getCtx: () => ({ ctx: 'engine' } as never),
     })
 
@@ -136,8 +136,8 @@ describe('bootstrap connectors', () => {
     expect(web.reconfigure).toHaveBeenCalledWith({ host: '127.0.0.1', port: 3010, authToken: 'new-token' })
     expect(mcp.reconfigure).toHaveBeenCalledWith({ host: '127.0.0.1', port: 3101 })
     expect(telegram.stop).toHaveBeenCalled()
-    expect(optionalPlugins.get('mcp-ask')).toBeInstanceOf(FakeMcpAskPlugin)
-    expect(optionalPlugins.get('telegram')).toBeInstanceOf(FakeTelegramPlugin)
+    expect(optionalConnectors.get('mcp-ask')).toBeInstanceOf(FakeMcpAskPlugin)
+    expect(optionalConnectors.get('telegram')).toBeInstanceOf(FakeTelegramPlugin)
     expect(mocks.telegramInstances.at(-1)?.getConfig()).toEqual({
       token: 'new-tg-token',
       allowedChatIds: [123, 456],

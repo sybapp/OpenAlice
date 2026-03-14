@@ -9,8 +9,8 @@ vi.mock('../core/config.js', () => ({
   loadTradingConfig: mocks.loadTradingConfig,
 }))
 
-vi.mock('../extension/trading/index.js', async () => {
-  const actual = await vi.importActual<typeof import('../extension/trading/index.js')>('../extension/trading/index.js')
+vi.mock('../domains/trading/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../domains/trading/index.js')>('../domains/trading/index.js')
   return {
     ...actual,
     createPlatformFromConfig: mocks.createPlatformFromConfig,

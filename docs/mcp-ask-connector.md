@@ -38,8 +38,8 @@ External Agent
 
 | Server | Port | Purpose | Registered in ToolCenter? |
 |--------|------|---------|---------------------------|
-| Main MCP (`McpPlugin`) | `mcpPort` | Expose internal tools (trading, analysis, brain) | Yes |
-| Ask MCP (`McpAskPlugin`) | `askMcpPort` | Expose conversation ability | No |
+| Main MCP (`McpServerConnector`) | `mcp.port` | Expose internal tools (trading, analysis, brain) | Yes |
+| Ask MCP (`McpAskConnector`) | `mcpAsk.port` | Expose conversation ability | No |
 
 Because Ask tools are not in ToolCenter, Alice's AI provider (Vercel AI SDK or Claude Code) cannot see them. This structurally prevents circular invocation.
 
@@ -68,7 +68,7 @@ Send a message to Alice and receive a response within a persistent session.
 **Behavior:**
 - Creates a new session on first use of a `sessionId`, resumes on subsequent calls
 - Routes through `engine.askWithSession()` — the same pipeline used by Telegram and Web
-- Session history is persisted as JSONL in `data/sessions/mcp-ask__{sessionId}.jsonl`
+- Session history is persisted as JSONL in `runtime/sessions/mcp-ask__{sessionId}.jsonl`
 - Automatic compaction applies when context grows large
 
 ### `listSessions`
@@ -112,7 +112,7 @@ Read conversation history for a specific session.
 
 ## Configuration
 
-Enable and set the port in `data/config/connectors.json`:
+Enable and set the port in `config/connectors.json`:
 
 ```json
 {
@@ -130,7 +130,7 @@ When `enabled` is `false` or `port` is omitted, the Ask connector is not started
 Sessions are caller-managed (identity) and Alice-managed (storage):
 
 - **Caller provides `sessionId`** — Can be any string. Use meaningful names (e.g. `"daily-review"`, `"risk-check"`) or generated UUIDs.
-- **Alice persists on disk** — Each session is a JSONL file at `data/sessions/mcp-ask__{sessionId}.jsonl`, following the same format as Telegram and Web sessions.
+- **Alice persists on disk** — Each session is a JSONL file at `runtime/sessions/mcp-ask__{sessionId}.jsonl`, following the same format as Telegram and Web sessions.
 - **Compaction applies** — Long sessions are automatically compacted (summarized) to stay within context limits.
 - **No expiration** — Sessions persist indefinitely. The caller decides when to start fresh by using a new `sessionId`.
 
@@ -140,9 +140,9 @@ Sessions are caller-managed (identity) and Alice-managed (storage):
 src/
   connectors/
     mcp-ask/
-      mcp-ask-plugin.ts    # MCP server, tool registration, session management
+      mcp-ask-connector.ts # MCP server, tool registration, session management
       index.ts              # Public export
-data/
+runtime/
   sessions/
     mcp-ask__*.jsonl        # Per-session conversation history
 ```

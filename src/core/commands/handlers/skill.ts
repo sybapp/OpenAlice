@@ -1,5 +1,5 @@
-import { getSkillPack, listSkillPacks } from '../../skills/registry.js'
-import { getSessionSkillId, setSessionSkill } from '../../skills/session-skill.js'
+import { getSkillPack, listSkillPacks } from '../../../skills/registry.js'
+import { getSessionSkillId, setSessionSkill } from '../../../skills/session-skill.js'
 import { handledLocalCommand, type LocalCommandHandler } from '../types.js'
 
 export const skillCommandHandler: LocalCommandHandler = {

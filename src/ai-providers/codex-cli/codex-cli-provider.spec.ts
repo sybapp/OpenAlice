@@ -13,11 +13,11 @@ vi.mock('./session.js', () => ({
   askCodexCliWithSession: vi.fn(() => streamFromResult({ text: 'ok', media: [] })),
 }))
 
-vi.mock('../../core/skills/session-skill.js', () => ({
+vi.mock('../../skills/session-skill.js', () => ({
   getSessionSkillId: vi.fn(async () => 'ta-brooks'),
 }))
 
-vi.mock('../../core/skills/registry.js', () => ({
+vi.mock('../../skills/registry.js', () => ({
   getSkillPack: vi.fn(async () => ({
     id: 'ta-brooks',
     label: 'Brooks',

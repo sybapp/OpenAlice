@@ -6,14 +6,14 @@
   "scripts": {
     "build:opentypebb": "cd packages/opentypebb && pnpm build",
     "dev": "pnpm build:opentypebb && tsx src/main.ts",
-    "dev:ui": "pnpm --filter open-alice-ui dev",
-    "build": "pnpm build:ui && pnpm build:backend",
-    "install:ui": "pnpm install --frozen-lockfile",
-    "build:ui": "pnpm --filter open-alice-ui build",
+    "dev:web": "pnpm --filter open-alice-web dev",
+    "build": "pnpm build:web && pnpm build:backend",
+    "install:web": "pnpm install --frozen-lockfile",
+    "build:web": "pnpm --filter open-alice-web build",
     "build:backend": "pnpm build:opentypebb && tsup src/main.ts --format esm --dts",
     "test": "pnpm build:opentypebb && vitest run",
     "test:coverage": "pnpm build:opentypebb && vitest run --coverage",
-    "test:ui": "pnpm --filter open-alice-ui test",
+    "test:web": "pnpm --filter open-alice-web test",
     "test:watch": "vitest"
   },
   "keywords": [

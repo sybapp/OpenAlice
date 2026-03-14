@@ -99,7 +99,7 @@ export async function createEventLog(opts?: {
   /** Max entries in the in-memory ring buffer. Default: 500. */
   bufferSize?: number
 }): Promise<EventLog> {
-  const logPath = opts?.logPath ?? 'data/event-log/events.jsonl'
+  const logPath = opts?.logPath ?? 'runtime/event-log/events.jsonl'
   const bufferSize = opts?.bufferSize ?? DEFAULT_BUFFER_SIZE
 
   // Ensure directory exists

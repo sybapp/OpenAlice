@@ -4,7 +4,7 @@ import { resolveMediaPath } from './media-store.js'
 describe('resolveMediaPath', () => {
   it('resolves a valid date/name path', () => {
     const result = resolveMediaPath('2026-01-15/ace-aim-air.png')
-    expect(result).toContain('data/media/2026-01-15/ace-aim-air.png')
+    expect(result).toContain('runtime/media/2026-01-15/ace-aim-air.png')
   })
 
   it('throws on path traversal with ../', () => {

@@ -16,5 +16,5 @@
     }
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "**/*.spec.ts", "src/extension/trading-archived"]
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "src/domains/trading-archived"]
 }

@@ -1,7 +1,7 @@
 /**
- * Bootstrap: Connectors & Plugins
+ * Bootstrap: Connectors
  *
- * Core plugins (MCP, Web), optional plugins (Telegram, MCP-Ask),
+ * Core connectors (MCP, Web), optional connectors (Telegram, MCP-Ask),
  * and connector reconnect logic.
  */
 
@@ -9,22 +9,22 @@ import { loadConfig } from '../core/config.js'
 import type { Config } from '../core/config.js'
 import type { Plugin, EngineContext, ReconnectResult } from '../core/types.js'
 import type { ToolCenter } from '../core/tool-center.js'
-import { McpPlugin } from '../plugins/mcp.js'
-import { TelegramPlugin } from '../connectors/telegram/index.js'
-import { WebPlugin } from '../connectors/web/index.js'
-import { McpAskPlugin } from '../connectors/mcp-ask/index.js'
+import { McpServerConnector } from '../connectors/mcp-server/index.js'
+import { TelegramConnector } from '../connectors/telegram/index.js'
+import { WebConnector } from '../connectors/web/index.js'
+import { McpAskConnector } from '../connectors/mcp-ask/index.js'
 
 function sameNumberArray(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-export interface PluginsResult {
-  corePlugins: Plugin[]
-  optionalPlugins: Map<string, Plugin>
+export interface ConnectorsResult {
+  coreConnectors: Plugin[]
+  optionalConnectors: Map<string, Plugin>
 }
 
-interface OptionalPluginReconcileArgs {
-  optionalPlugins: Map<string, Plugin>
+interface OptionalConnectorReconcileArgs {
+  optionalConnectors: Map<string, Plugin>
   ctx: EngineContext
   changes: string[]
   name: string
@@ -36,32 +36,32 @@ interface OptionalPluginReconcileArgs {
   restartedMessage: string
 }
 
-function createMcpAskPlugin(config: Config['connectors']['mcpAsk']): McpAskPlugin {
-  return new McpAskPlugin({
+function createMcpAskConnector(config: Config['connectors']['mcpAsk']): McpAskConnector {
+  return new McpAskConnector({
     port: config.port!,
     authToken: config.authToken,
   })
 }
 
-function createTelegramPlugin(config: Config['connectors']['telegram']): TelegramPlugin {
-  return new TelegramPlugin({
+function createTelegramConnector(config: Config['connectors']['telegram']): TelegramConnector {
+  return new TelegramConnector({
     token: config.botToken!,
     allowedChatIds: config.chatIds,
   })
 }
 
-function setOptionalPlugin(optionalPlugins: Map<string, Plugin>, name: string, plugin?: Plugin): void {
+function setOptionalConnector(optionalConnectors: Map<string, Plugin>, name: string, plugin?: Plugin): void {
   if (!plugin) return
-  optionalPlugins.set(name, plugin)
+  optionalConnectors.set(name, plugin)
 }
 
-async function reconcileOptionalPlugin(args: OptionalPluginReconcileArgs): Promise<void> {
-  const { optionalPlugins, ctx, changes, name, wanted, create, changed, startedMessage, stoppedMessage, restartedMessage } = args
-  const current = optionalPlugins.get(name)
+async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs): Promise<void> {
+  const { optionalConnectors, ctx, changes, name, wanted, create, changed, startedMessage, stoppedMessage, restartedMessage } = args
+  const current = optionalConnectors.get(name)
 
   if (current && !wanted) {
     await current.stop()
-    optionalPlugins.delete(name)
+    optionalConnectors.delete(name)
     changes.push(stoppedMessage)
     return
   }
@@ -69,7 +69,7 @@ async function reconcileOptionalPlugin(args: OptionalPluginReconcileArgs): Promi
   if (!current && wanted) {
     const plugin = create()
     await plugin.start(ctx)
-    optionalPlugins.set(name, plugin)
+    optionalConnectors.set(name, plugin)
     changes.push(startedMessage)
     return
   }
@@ -79,53 +79,53 @@ async function reconcileOptionalPlugin(args: OptionalPluginReconcileArgs): Promi
   await current.stop()
   const plugin = create()
   await plugin.start(ctx)
-  optionalPlugins.set(name, plugin)
+  optionalConnectors.set(name, plugin)
   changes.push(restartedMessage)
 }
 
-export function initPlugins(config: Config, toolCenter: ToolCenter): PluginsResult {
-  const corePlugins: Plugin[] = []
+export function initConnectors(config: Config, toolCenter: ToolCenter): ConnectorsResult {
+  const coreConnectors: Plugin[] = []
 
   if (config.connectors.mcp.port) {
-    corePlugins.push(new McpPlugin(toolCenter, {
+    coreConnectors.push(new McpServerConnector(toolCenter, {
       host: config.connectors.mcp.host,
       port: config.connectors.mcp.port,
     }))
   }
 
   if (config.connectors.web.port) {
-    corePlugins.push(new WebPlugin({
+    coreConnectors.push(new WebConnector({
       host: config.connectors.web.host,
       port: config.connectors.web.port,
       authToken: config.connectors.web.authToken,
     }))
   }
 
-  const optionalPlugins = new Map<string, Plugin>()
-  setOptionalPlugin(
-    optionalPlugins,
+  const optionalConnectors = new Map<string, Plugin>()
+  setOptionalConnector(
+    optionalConnectors,
     'mcp-ask',
     config.connectors.mcpAsk.enabled && config.connectors.mcpAsk.port
-      ? createMcpAskPlugin(config.connectors.mcpAsk)
+      ? createMcpAskConnector(config.connectors.mcpAsk)
       : undefined,
   )
-  setOptionalPlugin(
-    optionalPlugins,
+  setOptionalConnector(
+    optionalConnectors,
     'telegram',
     config.connectors.telegram.enabled && config.connectors.telegram.botToken
-      ? createTelegramPlugin(config.connectors.telegram)
+      ? createTelegramConnector(config.connectors.telegram)
       : undefined,
   )
 
-  return { corePlugins, optionalPlugins }
+  return { coreConnectors, optionalConnectors }
 }
 
 export function createConnectorReconnector(args: {
-  corePlugins: Plugin[]
-  optionalPlugins: Map<string, Plugin>
+  coreConnectors: Plugin[]
+  optionalConnectors: Map<string, Plugin>
   getCtx: () => EngineContext
 }): () => Promise<ReconnectResult> {
-  const { corePlugins, optionalPlugins, getCtx } = args
+  const { coreConnectors, optionalConnectors, getCtx } = args
   let reconnecting = false
 
   return async (): Promise<ReconnectResult> => {
@@ -137,9 +137,9 @@ export function createConnectorReconnector(args: {
       const changes: string[] = []
 
       // --- Web ---
-      const webPlugin = corePlugins.find((plugin) => plugin instanceof WebPlugin)
-      if (webPlugin instanceof WebPlugin) {
-        const result = await webPlugin.reconfigure({
+      const webConnector = coreConnectors.find((plugin) => plugin instanceof WebConnector)
+      if (webConnector instanceof WebConnector) {
+        const result = await webConnector.reconfigure({
           host: fresh.connectors.web.host,
           port: fresh.connectors.web.port,
           authToken: fresh.connectors.web.authToken,
@@ -149,9 +149,9 @@ export function createConnectorReconnector(args: {
       }
 
       // --- MCP ---
-      const mcpPlugin = corePlugins.find((plugin) => plugin instanceof McpPlugin)
-      if (mcpPlugin instanceof McpPlugin) {
-        const result = await mcpPlugin.reconfigure({
+      const mcpConnector = coreConnectors.find((plugin) => plugin instanceof McpServerConnector)
+      if (mcpConnector instanceof McpServerConnector) {
+        const result = await mcpConnector.reconfigure({
           host: fresh.connectors.mcp.host,
           port: fresh.connectors.mcp.port,
         })
@@ -160,15 +160,15 @@ export function createConnectorReconnector(args: {
 
       // --- MCP Ask ---
       const mcpAskWanted = fresh.connectors.mcpAsk.enabled && !!fresh.connectors.mcpAsk.port
-      await reconcileOptionalPlugin({
-        optionalPlugins,
+      await reconcileOptionalConnector({
+        optionalConnectors,
         ctx,
         changes,
         name: 'mcp-ask',
         wanted: mcpAskWanted,
-        create: () => createMcpAskPlugin(fresh.connectors.mcpAsk),
+        create: () => createMcpAskConnector(fresh.connectors.mcpAsk),
         changed: (plugin) => {
-          const currentConfig = plugin instanceof McpAskPlugin
+          const currentConfig = plugin instanceof McpAskConnector
             ? plugin.getConfig()
             : undefined
           return (
@@ -184,15 +184,15 @@ export function createConnectorReconnector(args: {
 
       // --- Telegram ---
       const telegramWanted = fresh.connectors.telegram.enabled && !!fresh.connectors.telegram.botToken
-      await reconcileOptionalPlugin({
-        optionalPlugins,
+      await reconcileOptionalConnector({
+        optionalConnectors,
         ctx,
         changes,
         name: 'telegram',
         wanted: telegramWanted,
-        create: () => createTelegramPlugin(fresh.connectors.telegram),
+        create: () => createTelegramConnector(fresh.connectors.telegram),
         changed: (plugin) => {
-          const currentConfig = plugin instanceof TelegramPlugin
+          const currentConfig = plugin instanceof TelegramConnector
             ? plugin.getConfig()
             : undefined
           return (

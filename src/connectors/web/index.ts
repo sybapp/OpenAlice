@@ -1,2 +1,2 @@
-export { WebPlugin } from './web-plugin.js'
-export type { WebConfig } from './web-plugin.js'
+export { WebPlugin as WebConnector } from './web-connector.js'
+export type { WebConfig } from './web-connector.js'

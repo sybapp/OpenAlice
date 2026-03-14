@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { normalizeBacktestRunId, type BacktestRunConfig, type BacktestRunManager } from '../../../extension/trading/index.js'
+import { normalizeBacktestRunId, type BacktestRunConfig, type BacktestRunManager } from '../../../domains/trading/index.js'
 import type { BacktestBarsQuery, MarketDataBridge } from '../../../core/types.js'
 
 interface BacktestRoutesDeps {

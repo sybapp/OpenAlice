@@ -6,11 +6,11 @@
 
 import type { Config } from '../core/config.js'
 import { ToolCenter } from '../core/tool-center.js'
-import { createThinkingTools } from '../extension/cognition/thinking-kit/index.js'
-import { createBrainTools } from '../extension/cognition/brain/index.js'
-import type { AccountManager, AccountSetup } from '../extension/trading/index.js'
-import { createCronTools } from '../task/cron/index.js'
-import type { Brain } from '../extension/cognition/brain/index.js'
+import { createThinkingTools } from '../domains/cognition/thinking-kit/index.js'
+import { createBrainTools } from '../domains/cognition/brain/index.js'
+import type { AccountManager, AccountSetup } from '../domains/trading/index.js'
+import { createCronTools } from '../jobs/cron/index.js'
+import type { Brain } from '../domains/cognition/brain/index.js'
 import type { initServices } from './services.js'
 
 type Services = Awaited<ReturnType<typeof initServices>>

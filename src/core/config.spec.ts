@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 async function writeJson(root: string, filename: string, value: unknown) {
-  const configDir = join(root, 'data', 'config')
+  const configDir = join(root, 'config')
   await mkdir(configDir, { recursive: true })
   await writeFile(join(configDir, filename), JSON.stringify(value, null, 2) + '\n')
 }
@@ -73,8 +73,8 @@ describe('core config', () => {
       },
     })
 
-    const aiProviderFile = JSON.parse(await readFile(join(tempRoot, 'data/config/ai-provider.json'), 'utf-8'))
-    const engineFile = JSON.parse(await readFile(join(tempRoot, 'data/config/engine.json'), 'utf-8'))
+    const aiProviderFile = JSON.parse(await readFile(join(tempRoot, 'config/ai-provider.json'), 'utf-8'))
+    const engineFile = JSON.parse(await readFile(join(tempRoot, 'config/engine.json'), 'utf-8'))
 
     expect(aiProviderFile.backend).toBe('codex-cli')
     expect(engineFile.webPort).toBeUndefined()
@@ -97,7 +97,7 @@ describe('core config', () => {
 
     await config.writeAIConfig('codex-cli')
 
-    const persisted = JSON.parse(await readFile(join(tempRoot, 'data/config/ai-provider.json'), 'utf-8'))
+    const persisted = JSON.parse(await readFile(join(tempRoot, 'config/ai-provider.json'), 'utf-8'))
     expect(persisted).toEqual({
       backend: 'codex-cli',
       provider: 'anthropic',

@@ -11,25 +11,25 @@ import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
-import { SkillLoopRunner } from '../core/skills/skill-loop.js'
+import { SkillLoopRunner } from '../skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
 import { CodexCliProvider } from '../ai-providers/codex-cli/index.js'
-import { createBacktestStorage, createBacktestRunManager } from '../extension/trading/index.js'
-import type { AccountManager, BacktestRunManager } from '../extension/trading/index.js'
-import type { Brain } from '../extension/cognition/brain/index.js'
+import { createBacktestStorage, createBacktestRunManager } from '../domains/trading/index.js'
+import type { AccountManager, BacktestRunManager } from '../domains/trading/index.js'
+import type { Brain } from '../domains/cognition/brain/index.js'
 import type { EventLog } from '../core/event-log.js'
-import type { ITradingGit } from '../extension/trading/index.js'
+import type { ITradingGit } from '../domains/trading/index.js'
 import type { MarketDataBridge } from '../core/types.js'
-import type { SymbolIndex } from '../openbb/equity/index.js'
+import type { SymbolIndex } from '../integrations/opentypebb/equity/index.js'
 import type {
   CryptoClientLike,
   CurrencyClientLike,
   EquityClientLike,
   NewsClientLike,
-} from '../openbb/sdk/index.js'
-import type { INewsProvider } from '../extension/research/news-collector/index.js'
-import type { OhlcvStore } from '../extension/technical-analysis/indicator-kit/index.js'
+} from '../integrations/opentypebb/sdk/index.js'
+import type { INewsProvider } from '../domains/research/news-collector/index.js'
+import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
 export interface AIResult {
   engine: Engine

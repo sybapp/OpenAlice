@@ -12,13 +12,14 @@ import { resolve } from 'node:path'
 import { StreamableResult, type AIProvider, type AskOptions, type ProviderEvent, type ProviderResult } from '../../core/ai-provider.js'
 import type { SessionStore } from '../../core/session.js'
 import type { CompactionConfig } from '../../core/compaction.js'
+import { RUNTIME_BRAIN_DIR } from '../../core/paths.js'
 import type { ClaudeCodeConfig } from './types.js'
 import { readAgentConfig } from '../../core/config.js'
 import { askClaudeCode } from './provider.js'
 import { askClaudeCodeWithSession } from './session.js'
-import { getSkillPack } from '../../core/skills/registry.js'
-import { buildSkillPromptText, mapSkillDenyToClaudeTools } from '../../core/skills/policy.js'
-import { getSessionSkillId } from '../../core/skills/session-skill.js'
+import { getSkillPack } from '../../skills/registry.js'
+import { buildSkillPromptText, mapSkillDenyToClaudeTools } from '../../skills/policy.js'
+import { getSessionSkillId } from '../../skills/session-skill.js'
 
 export class ClaudeCodeProvider implements AIProvider {
   constructor(
@@ -32,7 +33,7 @@ export class ClaudeCodeProvider implements AIProvider {
     return {
       ...agent.claudeCode,
       evolutionMode: agent.evolutionMode,
-      cwd: agent.evolutionMode ? process.cwd() : resolve('data/brain'),
+      cwd: agent.evolutionMode ? process.cwd() : RUNTIME_BRAIN_DIR,
     }
   }
 

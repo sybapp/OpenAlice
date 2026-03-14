@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import type { EngineContext } from '../../../core/types.js'
-import type { ITradingAccount } from '../../../extension/trading/interfaces.js'
-import type { ITradingGit } from '../../../extension/trading/git/interfaces.js'
+import type { ITradingAccount } from '../../../domains/trading/interfaces.js'
+import type { ITradingGit } from '../../../domains/trading/git/interfaces.js'
 
 /** Unified trading routes — works with all account types via AccountManager */
 export function createTradingRoutes(ctx: EngineContext) {

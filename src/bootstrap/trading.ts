@@ -7,6 +7,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { resolve, dirname } from 'path'
 import { loadTradingConfig } from '../core/config.js'
+import { RUNTIME_TRADING_DIR } from '../core/paths.js'
 import type { ReconnectResult } from '../core/types.js'
 import {
   AccountManager,
@@ -16,18 +17,18 @@ import {
   createPlatformFromConfig,
   createAccountFromConfig,
   validatePlatformRefs,
-} from '../extension/trading/index.js'
-import type { AccountSetup, GitExportState, IPlatform } from '../extension/trading/index.js'
+} from '../domains/trading/index.js'
+import type { AccountSetup, GitExportState, IPlatform } from '../domains/trading/index.js'
 import type { ToolCenter } from '../core/tool-center.js'
 
 // ==================== Persistence paths ====================
 
 export function gitFilePath(accountId: string): string {
-  return resolve(`data/trading/${accountId}/commit.json`)
+  return resolve(RUNTIME_TRADING_DIR, accountId, 'commit.json')
 }
 
 export function gitArchivePath(accountId: string): string {
-  return resolve(`data/trading/${accountId}/archive.jsonl`)
+  return resolve(RUNTIME_TRADING_DIR, accountId, 'archive.jsonl')
 }
 
 export const LEGACY_GIT_PATHS: Record<string, string> = {

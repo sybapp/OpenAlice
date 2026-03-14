@@ -1,18 +1,26 @@
 /**
  * Bootstrap: Services
  *
- * Brain, EventLog, CronEngine, NewsCollectorStore, OpenBB clients, SymbolIndex.
+ * Brain, EventLog, CronEngine, NewsCollectorStore, OpenTypeBB clients, SymbolIndex.
  */
 
 import { readFile, writeFile, appendFile, mkdir } from 'fs/promises'
-import { resolve, dirname } from 'path'
+import { dirname } from 'path'
 import type { Config } from '../core/config.js'
-import { Brain } from '../extension/cognition/brain/index.js'
-import type { BrainExportState } from '../extension/cognition/brain/index.js'
+import {
+  BRAIN_STATE_FILE,
+  EMOTION_LOG_FILE,
+  FRONTAL_LOBE_FILE,
+  PERSONA_DEFAULT_FILE,
+  PERSONA_FILE,
+  RUNTIME_BRAIN_DIR,
+} from '../core/paths.js'
+import { Brain } from '../domains/cognition/brain/index.js'
+import type { BrainExportState } from '../domains/cognition/brain/index.js'
 import { createEventLog } from '../core/event-log.js'
-import { createCronEngine } from '../task/cron/index.js'
-import { NewsCollectorStore } from '../extension/research/news-collector/index.js'
-import { SymbolIndex } from '../openbb/equity/index.js'
+import { createCronEngine } from '../jobs/cron/index.js'
+import { NewsCollectorStore } from '../domains/research/news-collector/index.js'
+import { SymbolIndex } from '../integrations/opentypebb/equity/index.js'
 import {
   buildRouteMap,
   SDKCommodityClient,
@@ -28,16 +36,10 @@ import {
   type EconomyClientLike,
   type EquityClientLike,
   type NewsClientLike,
-} from '../openbb/sdk/index.js'
-import { buildSDKCredentials } from '../openbb/credential-map.js'
-import type { BacktestBar } from '../extension/trading/index.js'
-import { createOhlcvStore } from '../extension/technical-analysis/indicator-kit/index.js'
-
-const BRAIN_FILE = resolve('data/brain/commit.json')
-const FRONTAL_LOBE_FILE = resolve('data/brain/frontal-lobe.md')
-const EMOTION_LOG_FILE = resolve('data/brain/emotion-log.md')
-const PERSONA_FILE = resolve('data/brain/persona.md')
-const PERSONA_DEFAULT = resolve('data/default/persona.default.md')
+} from '../integrations/opentypebb/sdk/index.js'
+import { buildSDKCredentials } from '../integrations/opentypebb/credential-map.js'
+import type { BacktestBar } from '../domains/trading/index.js'
+import { createOhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
 async function readWithDefault(target: string, defaultFile: string): Promise<string> {
   try { return await readFile(target, 'utf-8') } catch { /* not found */ }
@@ -91,14 +93,13 @@ function normalizeHistoricalBars(symbol: string, rows: HistoricalBarRow[]): Back
 export async function initServices(config: Config) {
   // ---- Brain ----
   const [brainExport, persona] = await Promise.all([
-    readFile(BRAIN_FILE, 'utf-8').then((r) => JSON.parse(r) as BrainExportState).catch(() => undefined),
-    readWithDefault(PERSONA_FILE, PERSONA_DEFAULT),
+    readFile(BRAIN_STATE_FILE, 'utf-8').then((r) => JSON.parse(r) as BrainExportState).catch(() => undefined),
+    readWithDefault(PERSONA_FILE, PERSONA_DEFAULT_FILE),
   ])
 
-  const brainDir = resolve('data/brain')
   const brainOnCommit = async (state: BrainExportState) => {
-    await mkdir(brainDir, { recursive: true })
-    await writeFile(BRAIN_FILE, JSON.stringify(state, null, 2))
+    await mkdir(RUNTIME_BRAIN_DIR, { recursive: true })
+    await writeFile(BRAIN_STATE_FILE, JSON.stringify(state, null, 2))
     await writeFile(FRONTAL_LOBE_FILE, state.state.frontalLobe)
     const latest = state.commits[state.commits.length - 1]
     if (latest?.type === 'emotion') {
@@ -136,7 +137,7 @@ export async function initServices(config: Config) {
   await newsStore.init()
 
   // ---- OpenTypeBB Clients ----
-  const { providers, providerKeys } = config.openbb
+  const { providers, providerKeys } = config.opentypebb
   const executor = getSDKExecutor()
   const routeMap = buildRouteMap()
   const credentials = buildSDKCredentials(providerKeys)
@@ -150,7 +151,7 @@ export async function initServices(config: Config) {
 
   const marketData = {
     async getBacktestBars(query: { assetType: 'equity' | 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
-      if (!config.openbb.enabled) throw new Error('OpenBB is disabled')
+      if (!config.opentypebb.enabled) throw new Error('OpenTypeBB is disabled')
       const symbol = query.symbol.trim().toUpperCase()
       if (query.assetType === 'equity') {
         const rows = (await equityClient.getHistorical({ symbol, start_date: query.startDate, end_date: query.endDate })) as unknown as HistoricalBarRow[]

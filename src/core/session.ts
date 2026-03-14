@@ -2,7 +2,7 @@
  * Unified session store — JSONL format compatible with Claude Code.
  *
  * Both engine.ask() (Vercel AI SDK) and Claude Code CLI read/write to
- * the same session file under data/sessions/{sessionId}.jsonl.
+ * the same session file under runtime/sessions/{sessionId}.jsonl.
  *
  * Claude Code format (per line):
  *   { type: "user",      message: { role: "user",      content: ... }, uuid, parentUuid, sessionId, timestamp, ... }
@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, appendFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getActiveEntries } from './compaction.js'
+import { RUNTIME_SESSIONS_DIR } from './paths.js'
 
 // ==================== Types ====================
 
@@ -57,7 +58,7 @@ export type ContentBlock =
 
 // ==================== Session Store ====================
 
-const SESSIONS_DIR = join(process.cwd(), 'data', 'sessions')
+const SESSIONS_DIR = RUNTIME_SESSIONS_DIR
 
 export class SessionStore {
   private sessionId: string

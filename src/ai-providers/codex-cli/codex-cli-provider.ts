@@ -12,9 +12,9 @@ import type { CodexCliConfig } from './types.js'
 import { readAgentConfig, readAIProviderConfig } from '../../core/config.js'
 import { askCodexCli } from './provider.js'
 import { askCodexCliWithSession } from './session.js'
-import { getSkillPack } from '../../core/skills/registry.js'
-import { buildSkillPromptText } from '../../core/skills/policy.js'
-import { getSessionSkillId } from '../../core/skills/session-skill.js'
+import { getSkillPack } from '../../skills/registry.js'
+import { buildSkillPromptText } from '../../skills/policy.js'
+import { getSessionSkillId } from '../../skills/session-skill.js'
 
 export class CodexCliProvider implements AIProvider {
   constructor(
