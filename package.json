@@ -45,7 +45,7 @@
     "express": "^5.2.1",
     "grammy": "^1.40.0",
     "hono": "^4.12.5",
-    "opentypebb": "link:./packages/opentypebb",
+    "opentypebb": "workspace:*",
     "pino": "^10.3.1",
     "undici": "^7.22.0",
     "yaml": "^2.8.1",
