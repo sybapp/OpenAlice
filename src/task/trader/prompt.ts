@@ -1,4 +1,11 @@
-import type { TraderDecision, TraderStrategy } from './types.js'
+import type {
+  TraderMarketScanResult,
+  TraderRiskCheckResult,
+  TraderStrategy,
+  TraderTradePlanResult,
+  TraderTradeReviewSummary,
+  TraderTradeThesisResult,
+} from './types.js'
 
 interface TraderPreflightSnapshot {
   frontalLobe: string
@@ -14,56 +21,217 @@ interface TraderPreflightSnapshot {
   }>
 }
 
+type TraderStage = 'market-scan' | 'trade-thesis' | 'risk-check' | 'trade-plan' | 'trade-execute' | 'trade-review'
+
+export function buildStrategyCard(strategy: TraderStrategy, stage: TraderStage): string {
+  switch (stage) {
+    case 'market-scan':
+      return [
+        `Strategy: ${strategy.id} (${strategy.label})`,
+        `Sources: ${strategy.sources.join(', ')}`,
+        `Universe: ${strategy.universe.asset} — ${strategy.universe.symbols.join(', ')}`,
+        `Timeframes: context=${strategy.timeframes.context}, structure=${strategy.timeframes.structure}, execution=${strategy.timeframes.execution}`,
+        `Preferences: ${strategy.behaviorRules.preferences.join('; ') || '(none)'}`,
+        `Avoid: ${strategy.behaviorRules.prohibitions.join('; ') || '(none)'}`,
+      ].join('\n')
+    case 'trade-thesis':
+      return [
+        `Strategy: ${strategy.id} (${strategy.label})`,
+        `Focus symbol must come from configured universe: ${strategy.universe.symbols.join(', ')}`,
+        `Timeframes: context=${strategy.timeframes.context}, structure=${strategy.timeframes.structure}, execution=${strategy.timeframes.execution}`,
+        `Preferences: ${strategy.behaviorRules.preferences.join('; ') || '(none)'}`,
+        `No-trade / avoid: ${strategy.behaviorRules.prohibitions.join('; ') || '(none)'}`,
+      ].join('\n')
+    case 'risk-check':
+      return [
+        `Strategy: ${strategy.id} (${strategy.label})`,
+        `Per-trade risk: ${strategy.riskBudget.perTradeRiskPercent}%`,
+        `Max gross exposure: ${strategy.riskBudget.maxGrossExposurePercent}%`,
+        `Max positions: ${strategy.riskBudget.maxPositions}`,
+        `Max daily loss: ${strategy.riskBudget.maxDailyLossPercent ?? 'n/a'}%`,
+      ].join('\n')
+    case 'trade-plan':
+    case 'trade-execute':
+      return [
+        `Strategy: ${strategy.id} (${strategy.label})`,
+        `Allowed order types: ${strategy.executionPolicy.allowedOrderTypes.join(', ')}`,
+        `Require protection: ${strategy.executionPolicy.requireProtection ? 'yes' : 'no'}`,
+        `Allow market orders: ${strategy.executionPolicy.allowMarketOrders ? 'yes' : 'no'}`,
+        `Allow overnight: ${strategy.executionPolicy.allowOvernight ? 'yes' : 'no'}`,
+      ].join('\n')
+    case 'trade-review':
+      return [
+        `Strategy: ${strategy.id} (${strategy.label})`,
+        `Universe: ${strategy.universe.symbols.join(', ')}`,
+        `Review focus: ${strategy.behaviorRules.preferences.join('; ') || '(none)'}`,
+        `Discipline watchlist: ${strategy.behaviorRules.prohibitions.join('; ') || '(none)'}`,
+      ].join('\n')
+  }
+}
+
 export function buildTraderSystemPrompt(strategy: TraderStrategy): string {
   return [
-    `You are running the trader-auto execution skill for strategy "${strategy.id}" (${strategy.label}).`,
-    'Your job is to read structured market-analysis tools, decide whether to trade, and if justified execute the full trading git workflow in the same round.',
-    '',
-    'Execution contract:',
-    '- Always use exact account ids from the strategy sources.',
-    '- Always call getAccount, getPortfolio, getOrders, tradingStatus, and tradingLog before any new trade.',
-    '- Use brooksPaAnalyze and ictSmcAnalyze with detailLevel="core" and dropUnclosed=true.',
-    '- Respect the strategy risk budget and execution policy exactly.',
-    '- If you trade, complete stage -> tradingCommit -> tradingPush in the same round.',
-    '- tradingCommit message must include strategy id, chosen scenario, symbol, and invalidation.',
-    '- End with JSON only using the TraderDecision schema provided in the user prompt.',
+    `You are operating trader strategy "${strategy.id}" (${strategy.label}).`,
+    'Follow the currently active stage skill, respect the provided strategy card, and respond with JSON only when the stage asks for structured output.',
   ].join('\n')
 }
 
-export function buildTraderPrompt(strategy: TraderStrategy, snapshot: TraderPreflightSnapshot): string {
+export function buildMarketScanPrompt(strategy: TraderStrategy, snapshot: TraderPreflightSnapshot): string {
   return [
-    `Run the automated trader loop for strategy "${strategy.id}".`,
+    `Run the market-scan stage for strategy "${strategy.id}".`,
     '',
-    'Strategy:',
-    JSON.stringify(strategy, null, 2),
+    'Strategy card:',
+    buildStrategyCard(strategy, 'market-scan'),
     '',
     'Preflight snapshot:',
     JSON.stringify(snapshot, null, 2),
     '',
-    'Process:',
-    `1. Read account state using the exact sources: ${strategy.sources.join(', ')}.`,
-    `2. Analyze the universe symbols: ${strategy.universe.symbols.join(', ')}.`,
-    `3. Use Brooks timeframes ${strategy.timeframes.context}/${strategy.timeframes.structure}/${strategy.timeframes.execution}.`,
-    `4. Use ICT/SMC on timeframe ${strategy.timeframes.structure}.`,
-    '5. If no clean setup exists or risk budget is exhausted, do not trade.',
-    '6. If a trade is justified, execute it and write a commit message that includes scenario + invalidation.',
-    '7. Finish with JSON only matching this shape:',
-    JSON.stringify(exampleDecision(strategy.id), null, 2),
+    'Goal: identify the best candidate symbols to study next. Use scripts, not OpenAlice tools.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        candidates: [{ source: strategy.sources[0] ?? 'source-id', symbol: strategy.universe.symbols[0] ?? 'BTC/USDT', reason: 'short reason' }],
+        summary: 'short overview',
+      } satisfies TraderMarketScanResult,
+    }, null, 2),
   ].join('\n')
 }
 
-function exampleDecision(strategyId: string): TraderDecision {
-  return {
-    status: 'skip',
-    strategyId,
-    source: 'ccxt-main',
-    symbol: 'BTC/USDT:USDT',
-    chosenScenario: 'primary',
-    rationale: 'Structure is mixed and no clean trigger is present.',
-    invalidation: ['Break and hold above the latest execution resistance.'],
-    actionsTaken: ['No trade executed.'],
-    brainUpdate: 'Stayed flat. Bias is mixed; wait for clearer structure and a stronger trigger.',
-  }
+export function buildTradeThesisPrompt(strategy: TraderStrategy, candidate: { source: string; symbol: string }, snapshot: TraderPreflightSnapshot): string {
+  return [
+    `Run the trade-thesis stage for ${candidate.symbol} on source ${candidate.source}.`,
+    '',
+    'Strategy card:',
+    buildStrategyCard(strategy, 'trade-thesis'),
+    '',
+    'Preflight snapshot:',
+    JSON.stringify(snapshot, null, 2),
+    '',
+    'Goal: request whatever scripts you need, then produce a thesis for exactly one symbol.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        status: 'thesis_ready',
+        source: candidate.source,
+        symbol: candidate.symbol,
+        bias: 'long',
+        chosenScenario: 'primary',
+        alternateScenario: 'alternate',
+        rationale: 'short rationale',
+        invalidation: ['one invalidation'],
+        confidence: 0.5,
+        contextNotes: ['optional note'],
+      } satisfies TraderTradeThesisResult,
+    }, null, 2),
+  ].join('\n')
+}
+
+export function buildRiskCheckPrompt(strategy: TraderStrategy, thesis: TraderTradeThesisResult, snapshot: TraderPreflightSnapshot): string {
+  return [
+    `Run the risk-check stage for ${thesis.symbol} on source ${thesis.source}.`,
+    '',
+    'Strategy card:',
+    buildStrategyCard(strategy, 'risk-check'),
+    '',
+    'Trade thesis:',
+    JSON.stringify(thesis, null, 2),
+    '',
+    'Fresh account snapshot:',
+    JSON.stringify(snapshot.sourceSnapshots.filter((entry) => entry.source === thesis.source), null, 2),
+    '',
+    'Goal: decide whether the thesis can proceed under current strategy limits.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        verdict: 'pass',
+        source: thesis.source,
+        symbol: thesis.symbol,
+        rationale: 'risk budget is available',
+        maxRiskPercent: strategy.riskBudget.perTradeRiskPercent,
+      } satisfies TraderRiskCheckResult,
+    }, null, 2),
+  ].join('\n')
+}
+
+export function buildTradePlanPrompt(strategy: TraderStrategy, thesis: TraderTradeThesisResult, risk: TraderRiskCheckResult): string {
+  return [
+    `Run the trade-plan stage for ${thesis.symbol}.`,
+    '',
+    'Strategy card:',
+    buildStrategyCard(strategy, 'trade-plan'),
+    '',
+    'Trade thesis:',
+    JSON.stringify(thesis, null, 2),
+    '',
+    'Risk verdict:',
+    JSON.stringify(risk, null, 2),
+    '',
+    'Goal: either skip or produce a deterministic execution plan. If status is plan_ready, include at least one staged order and a commit message.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        status: 'plan_ready',
+        source: thesis.source,
+        symbol: thesis.symbol,
+        chosenScenario: thesis.chosenScenario,
+        rationale: thesis.rationale,
+        invalidation: thesis.invalidation,
+        commitMessage: `${strategy.id}: ${thesis.chosenScenario} ${thesis.symbol}`,
+        brainUpdate: 'short frontal-lobe update',
+        orders: [],
+      } satisfies TraderTradePlanResult,
+    }, null, 2),
+  ].join('\n')
+}
+
+export function buildTradeExecutePrompt(strategy: TraderStrategy, plan: TraderTradePlanResult): string {
+  return [
+    `Run the trade-execute confirmation stage for ${plan.symbol}.`,
+    '',
+    'Strategy card:',
+    buildStrategyCard(strategy, 'trade-execute'),
+    '',
+    'Planned trade:',
+    JSON.stringify(plan, null, 2),
+    '',
+    'Goal: confirm whether the deterministic execution plan should run exactly as written.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        status: 'execute',
+        source: plan.source,
+        symbol: plan.symbol,
+        rationale: 'confirm execution',
+        brainUpdate: plan.brainUpdate || 'executing approved trade plan',
+      },
+    }, null, 2),
+  ].join('\n')
+}
+
+export function buildTraderReviewPrompt(strategy: TraderStrategy | null, sources: string[]): string {
+  return [
+    strategy
+      ? `Run the trade-review stage for strategy "${strategy.id}".`
+      : 'Run the trade-review stage across all configured trader sources.',
+    '',
+    strategy ? `Strategy card:\n${buildStrategyCard(strategy, 'trade-review')}` : '',
+    `Sources: ${sources.join(', ')}`,
+    '',
+    'Goal: summarize recent trading outcomes, highlight discipline wins/failures, and return a Brain update.',
+    'Respond with JSON only using this shape:',
+    JSON.stringify({
+      type: 'complete',
+      output: {
+        summary: 'short review summary',
+        brainUpdate: 'frontal lobe update text',
+      } satisfies TraderTradeReviewSummary,
+    }, null, 2),
+  ].join('\n')
 }
 
 export function buildTraderReviewSummary(input: {

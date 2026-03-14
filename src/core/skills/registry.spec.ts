@@ -37,28 +37,34 @@ describe('skill registry', () => {
       'ta-brooks',
       'ta-brooks-ict-smc',
       'ta-ict-smc',
+      'trader-market-scan',
+      'trader-risk-check',
+      'trader-trade-execute',
+      'trader-trade-plan',
+      'trader-trade-review',
+      'trader-trade-thesis',
     ])
     expect(skills.every((skill) => skill.sourcePath.endsWith('/SKILL.md'))).toBe(true)
     expect(skills.find((skill) => skill.id === 'ta-brooks')).toMatchObject({
       label: 'Brooks Price Action',
-      preferredTools: expect.arrayContaining(['brooksPaAnalyze']),
-      toolAllow: expect.arrayContaining(['brooksPaAnalyze', 'market-search*', 'equity*']),
-      outputSchema: 'AnalysisReport',
+      runtime: 'script-loop',
+      allowedScripts: expect.arrayContaining(['analysis-brooks', 'analysis-indicator', 'research-market-search']),
+      outputSchema: 'ChatResponse',
       analysisMode: 'tool-first',
       decisionWindowBars: 10,
-      instructions: expect.stringContaining('Start with deterministic analysis tools'),
+      instructions: expect.stringContaining('Request scripts'),
       safetyNotes: expect.stringContaining('Do not place trades'),
     })
     expect(skills.find((skill) => skill.id === 'ta-ict-smc')).toMatchObject({
-      preferredTools: expect.arrayContaining(['ictSmcAnalyze']),
-      toolAllow: expect.arrayContaining(['ictSmcAnalyze', 'market-search*']),
-      instructions: expect.stringContaining('Run deterministic ICT/SMC tools first'),
+      runtime: 'script-loop',
+      allowedScripts: expect.arrayContaining(['analysis-ict-smc', 'analysis-indicator', 'research-market-search']),
+      instructions: expect.stringContaining('Request analysis-ict-smc first'),
     })
     expect(skills.find((skill) => skill.id === 'ta-brooks-ict-smc')).toMatchObject({
       label: 'Brooks + ICT / SMC Confluence',
-      preferredTools: expect.arrayContaining(['brooksPaAnalyze', 'ictSmcAnalyze']),
-      toolAllow: expect.arrayContaining(['brooksPaAnalyze', 'ictSmcAnalyze']),
-      instructions: expect.stringContaining('highlights agreement and disagreement between the two frameworks'),
+      runtime: 'script-loop',
+      allowedScripts: expect.arrayContaining(['analysis-brooks', 'analysis-ict-smc']),
+      instructions: expect.stringContaining('highlights agreement, disagreement'),
     })
   })
 
@@ -198,7 +204,8 @@ plugin safe
 
     const content = await readFile(join(tempDir, 'data/default/skills/ta-brooks/SKILL.md'), 'utf-8')
     expect(content).toContain('name: ta-brooks')
-    expect(content).toContain('compatibility:')
+    expect(content).toContain('runtime: script-loop')
+    expect(content).toContain('scripts:')
     expect(content).toContain('# Brooks Price Action')
     expect(content).not.toContain('id: ta-brooks')
   })

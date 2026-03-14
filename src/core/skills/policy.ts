@@ -56,6 +56,22 @@ function buildToolPolicyText(skill: SkillPack): string {
   return lines.join(' ')
 }
 
+function buildScriptPolicyText(skill: SkillPack): string {
+  if (skill.runtime !== 'script-loop') return ''
+  const parts: string[] = [
+    'Runtime: script-loop.',
+    'Do not call OpenAlice business tools directly.',
+    'Request supporting resources and allowed scripts through the structured loop envelopes supplied by the caller.',
+  ]
+  if (skill.allowedScripts.length > 0) {
+    parts.push(`Allowed scripts: ${skill.allowedScripts.join(', ')}.`)
+  }
+  if (skill.resources.length > 0) {
+    parts.push(`Supporting resources available on request: ${skill.resources.map((resource) => resource.id).join(', ')}.`)
+  }
+  return parts.join(' ')
+}
+
 function buildOutputSchemaText(skill: SkillPack): string {
   if (skill.outputSchema === 'AnalysisReport') {
     return `Output schema: ${skill.outputSchema}. ${ANALYSIS_REPORT_INSTRUCTIONS}`
@@ -73,6 +89,7 @@ export function buildSkillPromptText(skill: SkillPack | null | undefined): strin
     skill.safetyNotes ? `Safety notes:\n${skill.safetyNotes}` : '',
     skill.examples ? `Examples:\n${skill.examples}` : '',
     buildPreferredToolsText(skill.preferredTools),
+    buildScriptPolicyText(skill),
     buildToolPolicyText(skill),
     buildDecisionWindowText(skill),
     buildOutputSchemaText(skill),
@@ -81,6 +98,11 @@ export function buildSkillPromptText(skill: SkillPack | null | undefined): strin
 
 export function getSkillToolPolicy(skill: SkillPack | null | undefined): ToolPolicy | undefined {
   if (!skill) return undefined
+  if (skill.runtime === 'script-loop') {
+    return {
+      deny: ['*'],
+    }
+  }
   return {
     allow: skill.toolAllow,
     deny: skill.toolDeny,
@@ -93,6 +115,7 @@ function patternMatchesInventory(pattern: string, inventory: ToolInventoryItem[]
 }
 
 export function validateSkillToolReferences(skill: SkillPack, inventory: ToolInventoryItem[]): string[] {
+  if (skill.runtime === 'script-loop') return []
   const warnings: string[] = []
   for (const [field, patterns] of [
     ['preferredTools', skill.preferredTools],

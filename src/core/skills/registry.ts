@@ -20,9 +20,13 @@ const normalizedSkillSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string().min(1),
+  runtime: z.enum(['tool-loop', 'script-loop']).default('tool-loop'),
+  userInvocable: z.boolean().default(true),
+  stage: z.string().optional(),
   preferredTools: z.array(z.string()).default([]),
   toolAllow: z.array(z.string()).optional(),
   toolDeny: z.array(z.string()).optional(),
+  allowedScripts: z.array(z.string()).default([]),
   outputSchema: z.string().default(ANALYSIS_REPORT_NAME),
   decisionWindowBars: z.number().int().positive().default(10),
   analysisMode: z.enum(['tool-first']).default('tool-first'),
@@ -30,6 +34,11 @@ const normalizedSkillSchema = z.object({
   instructions: z.string().default(''),
   safetyNotes: z.string().default(''),
   examples: z.string().default(''),
+  resources: z.array(z.object({
+    id: z.string().min(1),
+    path: z.string().min(1),
+    content: z.string(),
+  })).default([]),
   body: z.string(),
   sourcePath: z.string().min(1),
 })
@@ -201,7 +210,32 @@ function asNonEmptyString(value: FrontmatterValue | undefined): string | undefin
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, filePath: string): SkillPack {
+function asBoolean(value: FrontmatterValue | undefined, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+async function listSkillResources(filePath: string) {
+  const skillDir = dirname(filePath)
+  const entries = await readdir(skillDir, { withFileTypes: true })
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md') && entry.name !== SKILL_FILE_NAME)
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b))
+
+  const resources = await Promise.all(files.map(async (name) => {
+    const path = resolve(skillDir, name)
+    const content = await readFile(path, 'utf-8')
+    return {
+      id: basename(name, '.md'),
+      path,
+      content,
+    }
+  }))
+
+  return resources
+}
+
+async function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, filePath: string): Promise<SkillPack> {
   const name = asNonEmptyString(frontmatter.name)
   const description = asNonEmptyString(frontmatter.description)
 
@@ -215,6 +249,7 @@ function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, file
   const compatibility = asObject(frontmatter.compatibility)
   const compatibilityTools = compatibility ? compatibility.tools : undefined
   const compatibilityToolObject = asObject(compatibilityTools)
+  const runtime = asNonEmptyString(frontmatter.runtime) === 'script-loop' ? 'script-loop' : 'tool-loop'
   const whenToUse = extractSection(body, 'whenToUse') || extractSection(body, 'when to use')
   const instructions = extractSection(body, 'instructions') || extractSection(body, 'instruction') || body.trim()
   const safetyNotes = extractSection(body, 'safetyNotes') || extractSection(body, 'safety notes')
@@ -235,13 +270,18 @@ function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, file
   ]
 
   const title = extractFirstHeading(body)
+  const resources = await listSkillResources(filePath)
   return normalizedSkillSchema.parse({
     id: slugifySkillName(name),
     label: asNonEmptyString(frontmatter.label) ?? title ?? name,
     description,
+    runtime,
+    userInvocable: asBoolean(frontmatter['user-invocable'], true),
+    stage: asNonEmptyString(frontmatter.stage),
     preferredTools: [...new Set(preferredTools)],
     toolAllow: toolAllow.length ? [...new Set(toolAllow)] : undefined,
     toolDeny: toolDeny.length ? [...new Set(toolDeny)] : undefined,
+    allowedScripts: [...new Set(asStringArray(frontmatter.scripts))],
     outputSchema: asNonEmptyString(frontmatter.outputSchema) ?? ANALYSIS_REPORT_NAME,
     decisionWindowBars: typeof frontmatter.decisionWindowBars === 'number' ? frontmatter.decisionWindowBars : 10,
     analysisMode: 'tool-first',
@@ -249,22 +289,28 @@ function normalizePluginSkill(frontmatter: FrontmatterObject, body: string, file
     instructions,
     safetyNotes,
     examples,
+    resources,
     body,
     sourcePath: filePath,
   })
 }
 
-function normalizeLegacySkill(frontmatter: FrontmatterObject, body: string, filePath: string): SkillPack {
+async function normalizeLegacySkill(frontmatter: FrontmatterObject, body: string, filePath: string): Promise<SkillPack> {
   const toolAllow = asStringArray(frontmatter.toolAllow)
   const toolDeny = asStringArray(frontmatter.toolDeny)
+  const resources = await listSkillResources(filePath)
 
   return normalizedSkillSchema.parse({
     id: frontmatter.id,
     label: frontmatter.label,
     description: frontmatter.description,
+    runtime: asNonEmptyString(frontmatter.runtime) === 'script-loop' ? 'script-loop' : 'tool-loop',
+    userInvocable: asBoolean(frontmatter['user-invocable'], true),
+    stage: asNonEmptyString(frontmatter.stage),
     preferredTools: asStringArray(frontmatter.preferredTools),
     toolAllow: toolAllow.length ? toolAllow : undefined,
     toolDeny: toolDeny.length ? toolDeny : undefined,
+    allowedScripts: [...new Set(asStringArray(frontmatter.scripts))],
     outputSchema: asNonEmptyString(frontmatter.outputSchema) ?? ANALYSIS_REPORT_NAME,
     decisionWindowBars: typeof frontmatter.decisionWindowBars === 'number' ? frontmatter.decisionWindowBars : 10,
     analysisMode: 'tool-first',
@@ -272,6 +318,7 @@ function normalizeLegacySkill(frontmatter: FrontmatterObject, body: string, file
     instructions: extractSection(body, 'instructions'),
     safetyNotes: extractSection(body, 'safetyNotes'),
     examples: extractSection(body, 'examples'),
+    resources,
     body,
     sourcePath: filePath,
   })
@@ -310,9 +357,9 @@ async function readSkillFile(filePath: string): Promise<SkillPack> {
     const markdown = await readFile(filePath, 'utf-8')
     const { frontmatter, body } = parseFrontmatter(markdown)
     if ('name' in frontmatter) {
-      return normalizePluginSkill(frontmatter, body, filePath)
+      return await normalizePluginSkill(frontmatter, body, filePath)
     }
-    return normalizeLegacySkill(frontmatter, body, filePath)
+    return await normalizeLegacySkill(frontmatter, body, filePath)
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to load skill at ${filePath}: ${error.message}`)
@@ -395,92 +442,210 @@ function buildSkillTemplate(params: {
   ].join('\n')
 }
 
+function buildScriptSkillTemplate(params: {
+  id: string
+  label: string
+  description: string
+  scripts: string[]
+  stage?: string
+  userInvocable?: boolean
+  outputSchema: string
+  whenToUse: string
+  instructions: string
+  safetyNotes: string
+}): string {
+  const frontmatter = [
+    '---',
+    `name: ${params.id}`,
+    `description: ${params.description}`,
+    'runtime: script-loop',
+    ...(params.stage ? [`stage: ${params.stage}`] : []),
+    `user-invocable: ${params.userInvocable ?? true}`,
+    'scripts:',
+    ...params.scripts.map((script) => `  - ${script}`),
+    `outputSchema: ${params.outputSchema}`,
+    'decisionWindowBars: 10',
+    'analysisMode: tool-first',
+    '---',
+  ].join('\n')
+
+  return [
+    frontmatter,
+    `# ${params.label}`,
+    '',
+    '## When to use',
+    params.whenToUse,
+    '',
+    '## Instructions',
+    params.instructions,
+    '',
+    '## Safety notes',
+    params.safetyNotes,
+    '',
+  ].join('\n')
+}
+
 const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
   {
     dirName: 'ta-brooks',
-    content: buildSkillTemplate({
+    content: buildScriptSkillTemplate({
       id: 'ta-brooks',
       label: 'Brooks Price Action',
-      description: 'Use this skill whenever the user wants discretionary price action analysis, bar-by-bar structure, breakout or trading-range context, or Brooks-style market reading. Prefer this skill over generic market commentary when the request is about interpreting price action and trade location from structured market data.',
-      preferredTools: ['brooksPaAnalyze', 'market-search*', 'equity*'],
-      toolAllow: ['brooksPaAnalyze', 'market-search*', 'equity*'],
-      toolDeny: ['trading*', 'cronAdd', 'cronUpdate', 'cronRemove', 'cronRunNow'],
-      outputSchema: ANALYSIS_REPORT_NAME,
+      description: 'Use this skill for Brooks-style price action reading. It should request deterministic scripts for market structure, then explain trend, range, breakout, and invalidation in plain language.',
+      scripts: ['analysis-brooks', 'analysis-indicator', 'research-market-search'],
+      outputSchema: 'ChatResponse',
       whenToUse: 'Use for price action, candle structure, trend-versus-range judgment, breakout follow-through, and Brooks-style trade narrative. This skill is for reading the market, not for placing orders.',
       instructions: [
-        'Start with deterministic analysis tools instead of feeding long raw OHLCV sequences into the model.',
-        'Prefer brooksPaAnalyze as the single entry point. The tool returns v2 layered output: core (decision/programmatic) and detailed (UI/debug/review).',
-        'Default to detailLevel: full for human analysis. For automated/trading-mode decisions, prefer detailLevel: core.',
-        'Only reason over the tool output and the decision-window bars included in the output. Do not reason over long raw bar history.',
-        'Summarize the result in Brooks-style terminology: trend, range, breakout, follow-through, failed breakout, channel, wedge, second entry, support/resistance, and invalidation.',
+        'Treat this skill as a script-guided workflow. Request scripts when you need market structure or confirmation data, then synthesize the returned structure into a concise human answer.',
+        'Start with analysis-brooks unless the symbol is unclear. Use research-market-search first when you need to resolve the correct symbol. Use analysis-indicator only for a narrow confirmation question.',
       ].join('\n\n'),
-      safetyNotes: 'Do not place trades. Do not mutate cron state. If a request asks for execution, explain the analysis and note that trading tools are outside this skill policy.',
-      examples: '- Analyze whether BTC is in trend resumption, trading range, or breakout mode.\n- Explain whether the latest setup looks like a failed breakout, wedge, channel, or second-entry opportunity.',
+      safetyNotes: 'Analysis only. Do not place trades or mutate unrelated system state.',
     }),
   },
   {
     dirName: 'ta-ict-smc',
-    content: buildSkillTemplate({
+    content: buildScriptSkillTemplate({
       id: 'ta-ict-smc',
       label: 'ICT / SMC Structure',
-      description: 'Use this skill whenever the user wants ICT or SMC framing: liquidity sweeps, fair value gaps, BOS, CHOCH, displacement, premium/discount, mitigation, or structure-based execution narrative. Trigger this skill even if the user asks indirectly for liquidity or imbalance analysis rather than naming ICT/SMC explicitly.',
-      preferredTools: ['ictSmcAnalyze', 'market-search*'],
-      toolAllow: ['ictSmcAnalyze', 'market-search*'],
-      toolDeny: ['trading*', 'cronAdd', 'cronUpdate', 'cronRemove', 'cronRunNow'],
-      outputSchema: ANALYSIS_REPORT_NAME,
+      description: 'Use this skill for ICT/SMC framing. It should request deterministic scripts for swings, liquidity, imbalance, and invalidation context before explaining the setup.',
+      scripts: ['analysis-ict-smc', 'analysis-indicator', 'research-market-search'],
+      outputSchema: 'ChatResponse',
       whenToUse: 'Use for ICT/SMC structure analysis, liquidity targeting, imbalance reading, displacement quality, and narrative framing around swing structure.',
       instructions: [
-        'Run deterministic ICT/SMC tools first. Prefer ictSmcAnalyze as the single entry point. The tool returns v2 layered output: core (decision/programmatic) and detailed (UI/debug/review).',
-        'Default to detailLevel: full for human analysis. For automated/trading-mode decisions, prefer detailLevel: core.',
-        'Focus the narrative on liquidity pools, liquidity sweeps, fair value gaps, imbalance, BOS, CHOCH, mitigation, premium/discount, and invalidation.',
-        'Only consume structured tool output and the decision-window bars included in the output. Do not reason over long raw bar history.',
+        'Request analysis-ict-smc first once the symbol is known. Use research-market-search only to resolve the symbol and analysis-indicator only for a narrow confirmation question.',
+        'Explain the returned structure in ICT/SMC terms and keep the answer grounded in the script output.',
       ].join('\n\n'),
-      safetyNotes: 'Analysis only. Trading and cron mutation tools are denied in this mode.',
-      examples: '- Identify likely buy-side or sell-side liquidity targets.\n- Explain whether a move is displacement into imbalance or a weak sweep likely to revert.',
+      safetyNotes: 'Analysis only. Do not place trades or mutate unrelated system state.',
     }),
   },
   {
     dirName: 'ta-brooks-ict-smc',
-    content: buildSkillTemplate({
+    content: buildScriptSkillTemplate({
       id: 'ta-brooks-ict-smc',
       label: 'Brooks + ICT / SMC Confluence',
-      description: 'Use this skill whenever the user wants combined discretionary price action and ICT/SMC framing, or asks for confluence between Brooks-style market reading and liquidity-structure analysis. Trigger it for requests comparing the two frameworks, looking for overlap between breakout/range context and liquidity/FVG structure, or wanting a single narrative that synthesizes both methods.',
-      preferredTools: ['brooksPaAnalyze', 'ictSmcAnalyze', 'market-search*', 'equity*'],
-      toolAllow: ['brooksPaAnalyze', 'ictSmcAnalyze', 'market-search*', 'equity*'],
-      toolDeny: ['trading*', 'cronAdd', 'cronUpdate', 'cronRemove', 'cronRunNow'],
-      outputSchema: ANALYSIS_REPORT_NAME,
+      description: 'Use this skill when the user wants Brooks and ICT/SMC confluence. It should request the aggregate structure scripts and explain where they agree or disagree.',
+      scripts: ['analysis-brooks', 'analysis-ict-smc', 'analysis-indicator', 'research-market-search'],
+      outputSchema: 'ChatResponse',
       whenToUse: 'Use for multi-framework market reading where price action context and liquidity-structure context both matter. This skill is for confluence analysis, not execution.',
       instructions: [
-        'Start with deterministic analysis tools instead of feeding long raw OHLCV sequences into the model.',
-        'Prefer the aggregate tools only: run brooksPaAnalyze for trend/range/breakout context and ictSmcAnalyze for swings, liquidity, FVGs, BOS, CHOCH, and premium/discount state.',
-        'Both tools return v2 layered output with core (decision-friendly) and detailed (UI/debug/review). Default to detailLevel: full for human analysis; prefer detailLevel: core for automated/trading-mode decisions.',
-        'Only reason over structured tool output and the decision-window bars included in the output. Do not reason over long raw bar history.',
-        'Synthesize the result in a single narrative that explicitly highlights agreement and disagreement between the two frameworks. Call out whether the market is balanced, trending, sweeping liquidity, displacing, mitigating, or failing to follow through.',
-        'Return bias, thesis, evidence, key levels or liquidity targets, and invalidation using both Brooks and ICT/SMC terminology where it adds clarity.',
+        'Request the Brooks and ICT/SMC scripts, then synthesize one narrative that highlights agreement, disagreement, and invalidation.',
+        'Use analysis-indicator only for targeted confirmation and research-market-search only when the symbol must be resolved first.',
       ].join('\n\n'),
-      safetyNotes: 'Analysis only. Do not place trades. Do not mutate cron state. If a request asks for execution, explain the analysis and note that trading tools are outside this skill policy.',
-      examples: '- Analyze BTC with both Brooks and ICT/SMC methods and tell me where they agree or disagree.\n- Explain whether the current move is a range breakout with follow-through or just a liquidity sweep into imbalance.',
+      safetyNotes: 'Analysis only. Do not place trades or mutate unrelated system state.',
     }),
   },
   {
     dirName: 'research-news-fundamental',
-    content: buildSkillTemplate({
+    content: buildScriptSkillTemplate({
       id: 'research-news-fundamental',
       label: 'News & Fundamental Research',
-      description: 'Use this skill whenever the user asks for news analysis, catalyst research, event-driven narrative, company fundamentals, theme research, or macro-to-market synthesis. Trigger it for requests about what moved a symbol, what matters this week, or what the current investment thesis should emphasize.',
-      preferredTools: ['globNews', 'grepNews', 'readNews', 'market-search*', 'analysis*'],
-      toolAllow: ['globNews', 'grepNews', 'readNews', 'market-search*', 'analysis*', 'equity*', 'news*'],
-      toolDeny: ['trading*', 'cronAdd', 'cronUpdate', 'cronRemove', 'cronRunNow'],
-      outputSchema: ANALYSIS_REPORT_NAME,
+      description: 'Use this skill for news, catalyst, and fundamentals-driven research. It should request only the relevant research scripts, then synthesize them into a concise thesis.',
+      scripts: [
+        'research-market-search',
+        'research-news-company',
+        'research-news-world',
+        'research-equity-profile',
+        'research-equity-financials',
+        'research-equity-ratios',
+        'research-equity-estimates',
+      ],
+      outputSchema: 'ChatResponse',
       whenToUse: 'Use for event-driven, news-led, and fundamental research workflows where deterministic retrieval matters more than free-form speculation.',
       instructions: [
-        'Begin with retrieval: resolve the symbol or topic, search the news archive and/or market/news tools, then read the most relevant items.',
-        'Use the model to rank, attribute, summarize, and connect retrieved evidence into a coherent thesis.',
-        'Do not speculate beyond the retrieved evidence. Prefer explicit catalysts, revisions, valuation context, and source quality.',
-        'If market bars are included, only reason over the latest 10 decision-window bars and keep price context secondary to the evidence set.',
+        'Request only the scripts you need. Use company news for symbol-specific questions, world news for macro context, and the equity scripts for profile, financials, ratios, or estimates.',
+        'If the symbol is unclear, resolve it first. Synthesize script results into a grounded answer and do not speculate beyond the returned evidence.',
       ].join('\n\n'),
-      safetyNotes: 'Research only. Trading tools and cron mutation tools are denied.',
-      examples: '- Summarize the latest catalysts affecting NVDA and explain whether they strengthen or weaken the thesis.\n- Pull recent macro headlines and explain which ones matter most for rates-sensitive equities.',
+      safetyNotes: 'Research only. Do not place trades or mutate unrelated system state.',
+    }),
+  },
+  {
+    dirName: 'trader-market-scan',
+    content: buildScriptSkillTemplate({
+      id: 'trader-market-scan',
+      label: 'Trader Market Scan',
+      description: 'Use this stage skill to scan the configured universe, request deterministic structure or research scripts, and nominate the best candidate symbols for the current run.',
+      stage: 'market-scan',
+      scripts: ['trader-account-state', 'analysis-brooks', 'analysis-ict-smc', 'research-news-company', 'research-news-world', 'research-equity-profile'],
+      userInvocable: false,
+      outputSchema: 'TraderMarketScan',
+      whenToUse: 'Use only as the first stage of the trader pipeline.',
+      instructions: 'Scan the configured universe, request only the scripts needed to rank candidates, and return a small list of the best symbols to study next.',
+      safetyNotes: 'Do not build orders or execute trades in this stage.',
+    }),
+  },
+  {
+    dirName: 'trader-trade-thesis',
+    content: buildScriptSkillTemplate({
+      id: 'trader-trade-thesis',
+      label: 'Trader Trade Thesis',
+      description: 'Use this stage skill to request analysis or research scripts for one candidate symbol, then produce a structured trade thesis with scenario, bias, rationale, and invalidation.',
+      stage: 'trade-thesis',
+      scripts: ['trader-account-state', 'analysis-brooks', 'analysis-ict-smc', 'analysis-indicator', 'research-news-company', 'research-news-world', 'research-equity-profile', 'research-equity-financials', 'research-equity-ratios', 'research-equity-estimates'],
+      userInvocable: false,
+      outputSchema: 'TraderTradeThesis',
+      whenToUse: 'Use only after market scan has selected a candidate symbol.',
+      instructions: 'Request only the scripts required to explain the setup. Produce one thesis for one symbol and prefer no-trade when structure or catalyst context is mixed.',
+      safetyNotes: 'Do not propose orders in this stage.',
+    }),
+  },
+  {
+    dirName: 'trader-risk-check',
+    content: buildScriptSkillTemplate({
+      id: 'trader-risk-check',
+      label: 'Trader Risk Check',
+      description: 'Use this stage skill to decide whether a thesis can proceed under the strategy risk budget and current account exposure.',
+      stage: 'risk-check',
+      scripts: ['trader-account-state'],
+      userInvocable: false,
+      outputSchema: 'TraderRiskCheck',
+      whenToUse: 'Use only after a trade thesis exists.',
+      instructions: 'Use fresh account state and the strategy risk card to decide pass, fail, or reduce. Be conservative when exposure is already stretched.',
+      safetyNotes: 'Do not create or execute orders in this stage.',
+    }),
+  },
+  {
+    dirName: 'trader-trade-plan',
+    content: buildScriptSkillTemplate({
+      id: 'trader-trade-plan',
+      label: 'Trader Trade Plan',
+      description: 'Use this stage skill to convert an approved thesis into a deterministic order plan and explicit commit message.',
+      stage: 'trade-plan',
+      scripts: ['trader-account-state'],
+      userInvocable: false,
+      outputSchema: 'TraderTradePlan',
+      whenToUse: 'Use only after risk-check passes.',
+      instructions: 'Translate the thesis into a precise plan. Respect execution policy exactly. If no valid order plan fits the strategy, return skip.',
+      safetyNotes: 'Do not execute the plan in this stage.',
+    }),
+  },
+  {
+    dirName: 'trader-trade-execute',
+    content: buildScriptSkillTemplate({
+      id: 'trader-trade-execute',
+      label: 'Trader Trade Execute',
+      description: 'Use this stage skill to confirm or abort an already-built deterministic trade plan. The actual execution is performed by a separate script after confirmation.',
+      stage: 'trade-execute',
+      scripts: [],
+      userInvocable: false,
+      outputSchema: 'TraderTradeExecute',
+      whenToUse: 'Use only after a trade plan exists.',
+      instructions: 'Read the plan and decide whether to execute it exactly as written or abort it. Do not redesign the plan here.',
+      safetyNotes: 'You do not execute trades directly. You only confirm or abort.',
+    }),
+  },
+  {
+    dirName: 'trader-trade-review',
+    content: buildScriptSkillTemplate({
+      id: 'trader-trade-review',
+      label: 'Trader Trade Review',
+      description: 'Use this stage skill to summarize recent trading outcomes and produce a Brain update for the next run.',
+      stage: 'trade-review',
+      scripts: ['trader-review-summaries'],
+      userInvocable: false,
+      outputSchema: 'TraderTradeReview',
+      whenToUse: 'Use for scheduled or manual post-trade review.',
+      instructions: 'Read the structured summaries, identify what mattered, and produce a concise review plus a Brain update that will be useful next time.',
+      safetyNotes: 'Review only. Do not create or execute trades in this stage.',
     }),
   },
   {

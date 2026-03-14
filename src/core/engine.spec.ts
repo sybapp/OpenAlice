@@ -53,6 +53,27 @@ function makeEngine(overrides: MakeEngineOpts = {}): Engine {
   return new Engine({ agentCenter, commandRouter: createLocalCommandRouter() })
 }
 
+function makeEngineWithSkillLoop(skillLoopRunner: {
+  getActiveScriptSkill: (session: SessionStore) => Promise<unknown>
+  run: (prompt: string, session: SessionStore, opts?: unknown) => Promise<{ text: string; media: [] }>
+}, overrides: MakeEngineOpts = {}): Engine {
+  const model = overrides.model ?? makeMockModel()
+  const tools = overrides.tools ?? {}
+  const instructions = overrides.instructions ?? 'You are a test agent.'
+  const maxSteps = overrides.maxSteps ?? 1
+  const compaction = overrides.compaction ?? DEFAULT_COMPACTION_CONFIG
+
+  vi.mocked(createModelFromConfig).mockResolvedValue({ model, key: 'test:mock-model' })
+  const provider = new VercelAIProvider(() => tools, instructions, maxSteps, compaction)
+  const agentCenter = new AgentCenter(provider)
+
+  return new Engine({
+    agentCenter,
+    commandRouter: createLocalCommandRouter(),
+    skillLoopRunner: skillLoopRunner as any,
+  })
+}
+
 /** In-memory SessionStore mock (no filesystem). */
 function makeSessionMock(entries: SessionEntry[] = []): SessionStore {
   const store: SessionEntry[] = [...entries]
@@ -260,6 +281,23 @@ describe('Engine', () => {
       await engine.askWithSession('hello', session)
 
       expect(session.appendAssistant).toHaveBeenCalledWith('assistant reply', 'engine')
+    })
+
+    it('routes active script-loop skills through the skill loop runner', async () => {
+      const skillLoopRunner = {
+        getActiveScriptSkill: vi.fn(async () => ({ id: 'ta-brooks', runtime: 'script-loop' })),
+        run: vi.fn(async () => ({ text: 'script-loop result', media: [] as [] })),
+      }
+      const engine = makeEngineWithSkillLoop(skillLoopRunner)
+      const session = makeSessionMock()
+      const askSpy = vi.spyOn(AgentCenter.prototype, 'askWithSession')
+
+      const result = await engine.askWithSession('analyze btc', session)
+
+      expect(result.text).toBe('script-loop result')
+      expect(skillLoopRunner.getActiveScriptSkill).toHaveBeenCalledWith(session)
+      expect(skillLoopRunner.run).toHaveBeenCalledWith('analyze btc', session, undefined)
+      expect(askSpy).not.toHaveBeenCalled()
     })
 
     it('returns the generated text and empty media', async () => {

@@ -62,10 +62,18 @@ async function main() {
   const toolCenter = await registerAllTools({ config, accountManager, accountSetups, services, brain })
 
   // ---- AI Providers & Engine ----
-  const { engine, backtest } = initAIProviders(config, toolCenter, instructions)
-
   // ---- Connector Center ----
   const connectorCenter = new ConnectorCenter(eventLog)
+  const getAccountGit = (id: string) => accountSetups.get(id)?.git
+
+  // ---- AI Providers & Engine ----
+  const { engine, backtest } = initAIProviders(config, toolCenter, instructions, {
+    brain,
+    eventLog,
+    accountManager,
+    marketData,
+    getAccountGit,
+  })
 
   // ---- Cron Lifecycle ----
   await cronEngine.start()
@@ -78,17 +86,24 @@ async function main() {
   const cronListener = createCronListener({ connectorCenter, eventLog, engine, session: cronSession })
   cronListener.start()
   const traderListener = createTraderListener({
+    config,
     engine,
     eventLog,
     brain,
     accountManager,
+    toolCenter,
+    marketData,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
   traderListener.start()
   const traderReviewListener = createTraderReviewListener({
+    config,
+    engine,
     eventLog,
     brain,
     accountManager,
+    toolCenter,
+    marketData,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
   traderReviewListener.start()
@@ -122,7 +137,6 @@ async function main() {
   const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount, toolCenter })
   let ctx: EngineContext
   const reconnectConnectors = createConnectorReconnector({ corePlugins, optionalPlugins, getCtx: () => ctx })
-  const getAccountGit = (id: string) => accountSetups.get(id)?.git
   const getAccountGitState = (id: string) => accountSetups.get(id)?.getGitState()
   const ccxtResolver: AccountResolver = {
     accountManager,
@@ -139,7 +153,16 @@ async function main() {
     reconnectAccount,
     removeTradingAccountRuntime: (accountId) => teardownAccountRuntime({ accountId, accountManager, accountSetups }),
     reconnectConnectors,
-    runTraderReview: (strategyId) => runTraderReview(strategyId, { brain, accountManager, getAccountGit, eventLog }),
+    runTraderReview: (strategyId) => runTraderReview(strategyId, {
+      config,
+      engine,
+      eventLog,
+      brain,
+      accountManager,
+      toolCenter,
+      marketData,
+      getAccountGit,
+    }),
   }
 
   await startPlugins(getPlugins(), ctx)

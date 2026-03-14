@@ -17,6 +17,7 @@ import { StreamableResult, type AskOptions, type ProviderEvent } from './ai-prov
 import type { AgentCenter } from './agent-center.js'
 import type { LocalCommandContext } from './commands/types.js'
 import { type LocalCommandRouter } from './commands/router.js'
+import type { SkillLoopRunner } from './skills/skill-loop.js'
 
 // ==================== Types ====================
 
@@ -25,6 +26,8 @@ export interface EngineOpts {
   agentCenter: AgentCenter
   /** Handles slash-style local commands before provider routing. */
   commandRouter: LocalCommandRouter
+  /** Handles script-loop skills before provider routing. */
+  skillLoopRunner?: SkillLoopRunner
 }
 
 export interface EngineResult {
@@ -35,6 +38,7 @@ export interface EngineResult {
 
 export interface EngineAskOptions extends AskOptions {
   commandContext?: Omit<LocalCommandContext, 'session'>
+  skillContext?: Record<string, unknown>
 }
 
 // ==================== Engine ====================
@@ -42,10 +46,12 @@ export interface EngineAskOptions extends AskOptions {
 export class Engine {
   private agentCenter: AgentCenter
   private commandRouter: LocalCommandRouter
+  private skillLoopRunner: SkillLoopRunner | null
 
   constructor(opts: EngineOpts) {
     this.agentCenter = opts.agentCenter
     this.commandRouter = opts.commandRouter
+    this.skillLoopRunner = opts.skillLoopRunner ?? null
   }
 
   // ==================== Public API ====================
@@ -72,6 +78,18 @@ export class Engine {
             text: localCommand.text ?? '',
             media: localCommand.media,
           },
+        }
+        return
+      }
+
+      const activeSkill = self.skillLoopRunner
+        ? await self.skillLoopRunner.getActiveScriptSkill(session)
+        : null
+      if (activeSkill && self.skillLoopRunner) {
+        const result = await self.skillLoopRunner.run(prompt, session, opts)
+        yield {
+          type: 'done',
+          result,
         }
         return
       }

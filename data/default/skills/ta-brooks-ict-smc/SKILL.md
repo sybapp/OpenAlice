@@ -1,49 +1,24 @@
 ---
 name: ta-brooks-ict-smc
-description: Use this skill whenever the user wants combined discretionary price action and ICT/SMC framing, or asks for confluence between Brooks-style market reading and liquidity-structure analysis. Trigger it for requests comparing the two frameworks, looking for overlap between breakout/range context and liquidity/FVG structure, or wanting a single narrative that synthesizes both methods.
-compatibility:
-  tools:
-    preferred:
-      - brooksPaAnalyze
-      - ictSmcAnalyze
-      - market-search*
-      - equity*
-    allow:
-      - brooksPaAnalyze
-      - ictSmcAnalyze
-      - market-search*
-      - equity*
-    deny:
-      - trading*
-      - cronAdd
-      - cronUpdate
-      - cronRemove
-      - cronRunNow
-outputSchema: AnalysisReport
+description: Use this skill for confluence analysis between Brooks price action and ICT/SMC structure. It should request both structure scripts, then explain where the frameworks agree or conflict.
+runtime: script-loop
+user-invocable: true
+scripts:
+  - analysis-brooks
+  - analysis-ict-smc
+  - analysis-indicator
+  - research-market-search
+outputSchema: ChatResponse
 decisionWindowBars: 10
 analysisMode: tool-first
 ---
 # Brooks + ICT / SMC Confluence
 
 ## When to use
-Use for multi-framework market reading where price action context and liquidity-structure context both matter. This skill is for confluence analysis, not execution.
+Use when the user wants a single narrative that combines Brooks-style market reading with liquidity-structure analysis.
 
 ## Instructions
-Start with deterministic analysis tools instead of feeding long raw OHLCV sequences into the model.
-
-Prefer the aggregate tools only: run `brooksPaAnalyze` for trend/range/breakout context and `ictSmcAnalyze` for swings, liquidity, FVGs, BOS, CHOCH, and premium/discount state.
-
-Both tools return **v2 layered output** with `core` (decision-friendly) and `detailed` (UI/debug/review). Default to `detailLevel: full` for human analysis; prefer `detailLevel: core` for automated/trading-mode decisions.
-
-Only reason over structured tool output and the decision-window bars included in the output. Do not reason over long raw bar history.
-
-Synthesize the result in a single narrative that explicitly highlights agreement and disagreement between the two frameworks. Call out whether the market is balanced, trending, sweeping liquidity, displacing, mitigating, or failing to follow through.
-
-Return bias, thesis, evidence, key levels or liquidity targets, and invalidation using both Brooks and ICT/SMC terminology where it adds clarity.
+Use the script loop. Resolve the symbol if needed, then request both `analysis-brooks` and `analysis-ict-smc`. Highlight agreement, disagreement, and what would invalidate the current read. Use `analysis-indicator` only for small confirmation checks.
 
 ## Safety notes
-Analysis only. Do not place trades. Do not mutate cron state. If a request asks for execution, explain the analysis and note that trading tools are outside this skill policy.
-
-## Examples
-- Analyze BTC with both Brooks and ICT/SMC methods and tell me where they agree or disagree.
-- Explain whether the current move is a range breakout with follow-through or just a liquidity sweep into imbalance.
+Analysis only. Do not place trades or mutate unrelated system state.

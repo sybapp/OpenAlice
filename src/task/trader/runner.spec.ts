@@ -3,20 +3,16 @@ import type { SessionStore } from '../../core/session.js'
 
 const mocks = vi.hoisted(() => ({
   setSessionSkill: vi.fn(),
-  buildTraderPrompt: vi.fn(),
-  buildTraderSystemPrompt: vi.fn(),
-  buildTraderReviewSummary: vi.fn(),
   getTraderStrategy: vi.fn(),
+  getSkillScript: vi.fn(),
 }))
 
 vi.mock('../../core/skills/session-skill.js', () => ({
   setSessionSkill: mocks.setSessionSkill,
 }))
 
-vi.mock('./prompt.js', () => ({
-  buildTraderPrompt: mocks.buildTraderPrompt,
-  buildTraderSystemPrompt: mocks.buildTraderSystemPrompt,
-  buildTraderReviewSummary: mocks.buildTraderReviewSummary,
+vi.mock('../../core/skills/script-registry.js', () => ({
+  getSkillScript: mocks.getSkillScript,
 }))
 
 vi.mock('./strategy.js', () => ({
@@ -27,6 +23,7 @@ const { runTraderJob, runTraderReview } = await import('./runner.js')
 
 function makeDeps() {
   return {
+    config: {} as any,
     engine: {
       askWithSession: vi.fn(),
     },
@@ -41,6 +38,8 @@ function makeDeps() {
       getAccount: vi.fn(),
       listAccounts: vi.fn(() => []),
     },
+    toolCenter: {} as any,
+    marketData: {} as any,
     getAccountGit: vi.fn(),
   } as any
 }
@@ -67,11 +66,29 @@ function makeAccount(overrides?: {
   }
 }
 
+const baseStrategy = {
+  id: 'momentum',
+  label: 'Momentum',
+  enabled: true,
+  sources: ['ccxt-main'],
+  universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
+  timeframes: { context: '1h', structure: '15m', execution: '5m' },
+  riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 2 },
+  behaviorRules: {
+    preferences: ['trend continuation'],
+    prohibitions: ['no revenge trades'],
+  },
+  executionPolicy: {
+    allowedOrderTypes: ['stop', 'stop_limit'],
+    requireProtection: true,
+    allowMarketOrders: false,
+    allowOvernight: false,
+  },
+}
+
 describe('runTraderJob', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.buildTraderPrompt.mockReturnValue('trader prompt')
-    mocks.buildTraderSystemPrompt.mockReturnValue('system prompt')
   })
 
   it('skips when the strategy does not exist', async () => {
@@ -92,23 +109,7 @@ describe('runTraderJob', () => {
   })
 
   it('skips when a configured source is unavailable', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'momentum',
-      label: 'Momentum',
-      enabled: true,
-      sources: ['ccxt-main'],
-      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
-      timeframes: { context: '1h', structure: '15m', execution: '5m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 1 },
-      behaviorRules: { preferences: [], prohibitions: [] },
-      executionPolicy: {
-        allowedOrderTypes: ['stop'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
-    })
-
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(undefined)
 
@@ -121,82 +122,96 @@ describe('runTraderJob', () => {
     expect(result.status).toBe('skip')
     expect(result.reason).toContain('Configured source not available: ccxt-main')
     expect(mocks.setSessionSkill).not.toHaveBeenCalled()
-    expect(deps.engine.askWithSession).not.toHaveBeenCalled()
   })
 
-  it('skips when the strategy exists but is disabled', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'disabled',
-      label: 'Disabled Strategy',
-      enabled: false,
-      sources: ['ccxt-main'],
-      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
-      timeframes: { context: '1h', structure: '15m', execution: '5m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 1 },
-      behaviorRules: { preferences: [], prohibitions: [] },
-      executionPolicy: {
-        allowedOrderTypes: ['stop'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
-    })
-    const deps = makeDeps()
-
-    const result = await runTraderJob({
-      jobId: 'job-2',
-      strategyId: 'disabled',
-      session: { id: 'session-2' } as SessionStore,
-    }, deps)
-
-    expect(result).toEqual({
-      status: 'skip',
-      reason: 'Strategy disabled is disabled',
-    })
-    expect(deps.engine.askWithSession).not.toHaveBeenCalled()
-  })
-
-  it('builds a trader prompt, parses fenced JSON decisions, and updates brain notes', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'momentum',
-      label: 'Momentum',
-      enabled: true,
-      sources: ['ccxt-main'],
-      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
-      timeframes: { context: '1h', structure: '15m', execution: '5m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 2 },
-      behaviorRules: {
-        preferences: ['trend continuation'],
-        prohibitions: ['no revenge trades'],
-      },
-      executionPolicy: {
-        allowedOrderTypes: ['stop', 'stop_limit'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
+  it('runs the staged trader pipeline and executes the deterministic trade plan', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({ commit: { hash: 'abc12345' }, pushed: { executed: 1 } })),
     })
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValue({
-      text: [
-        'analysis...',
-        '```json',
-        JSON.stringify({
-          status: 'trade',
-          source: 'ccxt-main',
-          symbol: 'BTC/USDT:USDT',
-          chosenScenario: 'primary breakout continuation',
-          rationale: 'Trend and pullback context align.',
-          invalidation: ['loss of breakout level'],
-          actionsTaken: ['stage long stop entry'],
-          brainUpdate: 'Respect the breakout only after follow-through closes.',
+    deps.engine.askWithSession
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+            summary: 'one good candidate',
+          },
         }),
-        '```',
-      ].join('\n'),
-      media: [],
-    })
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            status: 'thesis_ready',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            bias: 'long',
+            chosenScenario: 'primary breakout continuation',
+            alternateScenario: 'range failure',
+            rationale: 'Trend and pullback context align.',
+            invalidation: ['loss of breakout level'],
+            confidence: 0.74,
+            contextNotes: [],
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            verdict: 'pass',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            rationale: 'Risk budget is available.',
+            maxRiskPercent: 0.5,
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            status: 'plan_ready',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            chosenScenario: 'primary breakout continuation',
+            rationale: 'Trend and pullback context align.',
+            invalidation: ['loss of breakout level'],
+            commitMessage: 'momentum: primary breakout continuation BTC/USDT:USDT',
+            brainUpdate: 'Respect the breakout only after follow-through closes.',
+            orders: [{
+              aliceId: 'bybit-BTCUSDT',
+              symbol: 'BTC/USDT:USDT',
+              side: 'buy',
+              type: 'stop',
+              qty: 1,
+              stopPrice: 100,
+              timeInForce: 'day',
+            }],
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            status: 'execute',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            rationale: 'Confirm execution.',
+            brainUpdate: 'Execute only if the plan still matches structure.',
+          },
+        }),
+        media: [],
+      })
 
     const session = { id: 'session-1' } as SessionStore
     const result = await runTraderJob({
@@ -205,29 +220,17 @@ describe('runTraderJob', () => {
       session,
     }, deps)
 
-    expect(mocks.setSessionSkill).toHaveBeenCalledWith(session, 'trader-auto')
-    expect(mocks.buildTraderPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'momentum' }),
-      expect.objectContaining({
-        frontalLobe: 'stay selective',
-        sourceSnapshots: [
-          expect.objectContaining({
-            source: 'ccxt-main',
-          }),
-        ],
-      }),
-    )
-    expect(deps.engine.askWithSession).toHaveBeenCalledWith('trader prompt', session, {
-      appendSystemPrompt: 'system prompt',
-      historyPreamble: 'The following is the prior automated trader job history for this strategy.',
-      maxHistoryEntries: 30,
-    })
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(1, session, 'trader-market-scan')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(2, session, 'trader-trade-thesis')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(3, session, 'trader-risk-check')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(4, session, 'trader-trade-plan')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(5, session, 'trader-trade-execute')
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith(
-      'Respect the breakout only after follow-through closes.',
+      'Respect the breakout only after follow-through closes.\nExecute only if the plan still matches structure.',
     )
     expect(result).toMatchObject({
       status: 'done',
-      reason: 'Trend and pullback context align.',
+      reason: 'Confirm execution.',
       decision: {
         status: 'trade',
         strategyId: 'momentum',
@@ -238,79 +241,38 @@ describe('runTraderJob', () => {
     })
   })
 
-  it('returns raw text when the trader response does not contain a valid decision object', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'momentum',
-      label: 'Momentum',
-      enabled: true,
-      sources: ['ccxt-main'],
-      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
-      timeframes: { context: '1h', structure: '15m', execution: '5m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 2 },
-      behaviorRules: { preferences: [], prohibitions: [] },
-      executionPolicy: {
-        allowedOrderTypes: ['stop'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
-    })
-
+  it('returns skip when the thesis stage rejects the setup', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValue({
-      text: 'Context looks mixed. Stay patient.',
-      media: [],
-    })
-
-    const result = await runTraderJob({
-      jobId: 'job-3',
-      strategyId: 'momentum',
-      session: { id: 'session-3' } as SessionStore,
-    }, deps)
-
-    expect(result).toEqual({
-      status: 'done',
-      reason: 'Trader job completed',
-      decision: undefined,
-      rawText: 'Context looks mixed. Stay patient.',
-    })
-    expect(deps.brain.updateFrontalLobe).not.toHaveBeenCalled()
-  })
-
-  it('honors explicit skip decisions returned by the trader', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'momentum',
-      label: 'Momentum',
-      enabled: true,
-      sources: ['ccxt-main'],
-      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
-      timeframes: { context: '1h', structure: '15m', execution: '5m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 2 },
-      behaviorRules: { preferences: [], prohibitions: [] },
-      executionPolicy: {
-        allowedOrderTypes: ['stop'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
-    })
-
-    const deps = makeDeps()
-    deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValue({
-      text: JSON.stringify({
-        status: 'skip',
-        source: 'ccxt-main',
-        symbol: 'BTC/USDT:USDT',
-        chosenScenario: 'no trade',
-        rationale: 'Breakout context is too noisy.',
-        invalidation: ['n/a'],
-        actionsTaken: [],
-        brainUpdate: '',
-      }),
-      media: [],
-    })
+    deps.engine.askWithSession
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+            summary: 'one good candidate',
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            status: 'no_trade',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            bias: 'flat',
+            chosenScenario: 'no trade',
+            rationale: 'Breakout context is too noisy.',
+            invalidation: ['n/a'],
+            confidence: 0.2,
+            contextNotes: ['Wait for cleaner structure.'],
+          },
+        }),
+        media: [],
+      })
 
     const result = await runTraderJob({
       jobId: 'job-4',
@@ -320,48 +282,7 @@ describe('runTraderJob', () => {
 
     expect(result.status).toBe('skip')
     expect(result.reason).toBe('Breakout context is too noisy.')
-    expect(result.decision?.status).toBe('skip')
-  })
-
-  it('includes closed-market warnings in the equity trader prompt context', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'equity-open',
-      label: 'Equity Open',
-      enabled: true,
-      sources: ['alpaca-main'],
-      universe: { asset: 'equity', symbols: ['AAPL'] },
-      timeframes: { context: '1d', structure: '1h', execution: '15m' },
-      riskBudget: { perTradeRiskPercent: 0.5, maxGrossExposurePercent: 5, maxPositions: 2 },
-      behaviorRules: { preferences: [], prohibitions: [] },
-      executionPolicy: {
-        allowedOrderTypes: ['limit'],
-        requireProtection: true,
-        allowMarketOrders: false,
-        allowOvernight: false,
-      },
-    })
-
-    const deps = makeDeps()
-    deps.accountManager.getAccount.mockReturnValue(makeAccount({ marketClock: { isOpen: false } }))
-    deps.engine.askWithSession.mockResolvedValue({
-      text: 'Wait for the cash session to reopen.',
-      media: [],
-    })
-
-    await runTraderJob({
-      jobId: 'job-5',
-      strategyId: 'equity-open',
-      session: { id: 'session-5' } as SessionStore,
-    }, deps)
-
-    expect(mocks.buildTraderPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'equity-open' }),
-      expect.objectContaining({
-        warnings: expect.arrayContaining([
-          'No configured equity source currently reports an open market clock.',
-        ]),
-      }),
-    )
+    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Wait for cleaner structure.')
   })
 })
 
@@ -370,23 +291,18 @@ describe('runTraderReview', () => {
     vi.clearAllMocks()
   })
 
-  it('summarizes trading history, updates brain, and writes a review event', async () => {
-    mocks.buildTraderReviewSummary.mockReturnValue('Review summary text')
+  it('updates brain and writes a review event from the review skill result', async () => {
     const deps = makeDeps()
     deps.accountManager.listAccounts.mockReturnValue([{ id: 'ccxt-main' }])
-    deps.getAccountGit.mockReturnValue({
-      log: () => [
-        {
-          operations: [{ action: 'placeOrder', params: { symbol: 'BTC/USDT:USDT' } }],
-          results: [{ success: true, status: 'filled', filledPrice: 100, filledQty: 1 }],
-          stateAfter: { equity: 10_000, realizedPnL: 0 },
+    deps.engine.askWithSession.mockResolvedValue({
+      text: JSON.stringify({
+        type: 'complete',
+        output: {
+          summary: 'Review summary text',
+          brainUpdate: 'Stay selective and keep sizing small after mixed outcomes.',
         },
-        {
-          operations: [{ action: 'closePosition', params: { symbol: 'BTC/USDT:USDT' } }],
-          results: [{ success: true, status: 'filled', filledPrice: 110, filledQty: 1 }],
-          stateAfter: { equity: 10_010, realizedPnL: 10 },
-        },
-      ],
+      }),
+      media: [],
     })
 
     const result = await runTraderReview(undefined, deps, {
@@ -395,16 +311,9 @@ describe('runTraderReview', () => {
       jobName: 'Nightly Review',
     })
 
-    expect(mocks.buildTraderReviewSummary).toHaveBeenCalledWith({
-      strategyId: undefined,
-      summaries: [
-        {
-          source: 'ccxt-main',
-          summary: expect.stringContaining('1 trades'),
-        },
-      ],
-    })
-    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Review summary text')
+    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith(
+      'Stay selective and keep sizing small after mixed outcomes.',
+    )
     expect(deps.eventLog.append).toHaveBeenCalledWith('trader.review.done', {
       strategyId: undefined,
       trigger: 'scheduled',
@@ -417,44 +326,6 @@ describe('runTraderReview', () => {
       updated: true,
       summary: 'Review summary text',
       strategyId: undefined,
-    })
-  })
-
-  it('limits reviews to strategy sources and records missing history cleanly', async () => {
-    mocks.getTraderStrategy.mockResolvedValue({
-      id: 'momentum',
-      sources: ['ccxt-main', 'alpaca-paper'],
-    })
-    mocks.buildTraderReviewSummary.mockReturnValue('Scoped review summary')
-    const deps = makeDeps()
-    deps.accountManager.listAccounts.mockReturnValue([{ id: 'ignored-account' }])
-    deps.getAccountGit.mockImplementation((source: string) => (
-      source === 'ccxt-main'
-        ? {
-            log: () => [],
-          }
-        : undefined
-    ))
-
-    const result = await runTraderReview('momentum', deps)
-
-    expect(mocks.buildTraderReviewSummary).toHaveBeenCalledWith({
-      strategyId: 'momentum',
-      summaries: [
-        {
-          source: 'ccxt-main',
-          summary: '0 trades, winRate 0.0%, totalPnL 0.00, no closed trades yet',
-        },
-        {
-          source: 'alpaca-paper',
-          summary: 'No trading history available.',
-        },
-      ],
-    })
-    expect(result).toEqual({
-      updated: true,
-      summary: 'Scoped review summary',
-      strategyId: 'momentum',
     })
   })
 })

@@ -7,7 +7,7 @@ export interface TraderReviewListener {
   stop(): void
 }
 
-interface TraderReviewListenerOpts extends Pick<TraderRunnerDeps, 'brain' | 'accountManager' | 'getAccountGit' | 'eventLog'> {}
+interface TraderReviewListenerOpts extends Pick<TraderRunnerDeps, 'config' | 'engine' | 'brain' | 'accountManager' | 'toolCenter' | 'marketData' | 'getAccountGit' | 'eventLog'> {}
 
 export function createTraderReviewListener(opts: TraderReviewListenerOpts): TraderReviewListener {
   let unsubscribe: (() => void) | null = null

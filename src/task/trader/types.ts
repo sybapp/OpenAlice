@@ -3,6 +3,8 @@ import type { AccountManager } from '../../extension/trading/index.js'
 import type { ITradingGit } from '../../extension/trading/index.js'
 import type { Engine } from '../../core/engine.js'
 import type { EventLog } from '../../core/event-log.js'
+import type { ToolCenter } from '../../core/tool-center.js'
+import type { Config, MarketDataBridge } from '../../core/types.js'
 import type { CronSchedule } from '../cron/engine.js'
 
 export type TraderAssetClass = 'crypto' | 'equity'
@@ -98,6 +100,89 @@ export interface TraderDecision {
   brainUpdate: string
 }
 
+export interface TraderMarketCandidate {
+  source: string
+  symbol: string
+  reason: string
+}
+
+export interface TraderMarketScanResult {
+  candidates: TraderMarketCandidate[]
+  summary: string
+}
+
+export interface TraderTradeThesisResult {
+  status: 'thesis_ready' | 'no_trade'
+  source: string
+  symbol: string
+  bias: 'long' | 'short' | 'flat'
+  chosenScenario: string
+  alternateScenario?: string
+  rationale: string
+  invalidation: string[]
+  confidence: number
+  contextNotes: string[]
+}
+
+export interface TraderRiskCheckResult {
+  verdict: 'pass' | 'fail' | 'reduce'
+  source: string
+  symbol: string
+  rationale: string
+  maxRiskPercent?: number
+}
+
+export interface TraderPlannedOrder {
+  aliceId: string
+  symbol: string
+  side: 'buy' | 'sell'
+  type: 'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit' | 'trailing_stop' | 'trailing_stop_limit' | 'moc'
+  qty?: number
+  notional?: number
+  price?: number
+  stopPrice?: number
+  trailingAmount?: number
+  trailingPercent?: number
+  reduceOnly?: boolean
+  timeInForce: 'day' | 'gtc' | 'ioc' | 'fok' | 'opg' | 'gtd'
+  goodTillDate?: string
+  extendedHours?: boolean
+  parentId?: string
+  ocaGroup?: string
+  protection?: {
+    stopLossPct?: number
+    takeProfitPct?: number
+    stopLossPrice?: number
+    takeProfitPrice?: number
+    takeProfitSizeRatio?: number
+  }
+}
+
+export interface TraderTradePlanResult {
+  status: 'plan_ready' | 'skip'
+  source: string
+  symbol: string
+  chosenScenario: string
+  rationale: string
+  invalidation: string[]
+  commitMessage: string
+  brainUpdate: string
+  orders: TraderPlannedOrder[]
+}
+
+export interface TraderTradeExecuteResult {
+  status: 'execute' | 'abort'
+  source: string
+  symbol: string
+  rationale: string
+  brainUpdate: string
+}
+
+export interface TraderTradeReviewSummary {
+  summary: string
+  brainUpdate: string
+}
+
 export interface TraderJobEngine {
   start(): Promise<void>
   stop(): void
@@ -117,10 +202,13 @@ export interface TraderRunnerResult {
 }
 
 export interface TraderRunnerDeps {
+  config: Config
   engine: Engine
   eventLog: EventLog
   brain: Brain
   accountManager: AccountManager
+  toolCenter: ToolCenter
+  marketData: MarketDataBridge
   getAccountGit: (accountId: string) => ITradingGit | undefined
 }
 

@@ -1,7 +1,23 @@
 import type { SessionStore } from '../../core/session.js'
 import { setSessionSkill } from '../../core/skills/session-skill.js'
+import {
+  traderMarketScanSchema,
+  traderRiskCheckSchema,
+  traderTradeExecuteSchema,
+  traderTradePlanSchema,
+  traderTradeReviewSchema,
+  traderTradeThesisSchema,
+} from '../../core/skills/completion-schemas.js'
+import { getSkillScript } from '../../core/skills/script-registry.js'
 import { computeTradingStats } from '../../extension/trading/stats.js'
-import { buildTraderPrompt, buildTraderReviewSummary, buildTraderSystemPrompt } from './prompt.js'
+import {
+  buildMarketScanPrompt,
+  buildRiskCheckPrompt,
+  buildTradeExecutePrompt,
+  buildTradePlanPrompt,
+  buildTraderReviewPrompt,
+  buildTradeThesisPrompt,
+} from './prompt.js'
 import { getTraderStrategy } from './strategy.js'
 import type {
   TraderDecision,
@@ -10,6 +26,15 @@ import type {
   TraderRunnerResult,
   TraderStrategy,
 } from './types.js'
+
+const TRADER_SKILLS = {
+  marketScan: 'trader-market-scan',
+  tradeThesis: 'trader-trade-thesis',
+  riskCheck: 'trader-risk-check',
+  tradePlan: 'trader-trade-plan',
+  tradeExecute: 'trader-trade-execute',
+  tradeReview: 'trader-trade-review',
+} as const
 
 function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(10_000, value)) : 0
@@ -28,27 +53,14 @@ function extractJsonObject(text: string): string | null {
   return trimmed.slice(start, end + 1)
 }
 
-function parseTraderDecision(text: string, strategyId: string): TraderDecision | null {
+function parseStageOutput<T>(text: string, schema: { parse: (value: unknown) => T }): T | null {
   const candidate = extractJsonObject(text)
   if (!candidate) return null
 
   try {
-    const parsed = JSON.parse(candidate) as Partial<TraderDecision>
-    if (!parsed || typeof parsed !== 'object') return null
-    if (!parsed.status || !parsed.source || !parsed.symbol || !parsed.chosenScenario || !parsed.rationale) {
-      return null
-    }
-    return {
-      status: parsed.status,
-      strategyId: parsed.strategyId ?? strategyId,
-      source: parsed.source,
-      symbol: parsed.symbol,
-      chosenScenario: parsed.chosenScenario,
-      rationale: parsed.rationale,
-      invalidation: Array.isArray(parsed.invalidation) ? parsed.invalidation.map(String) : [],
-      actionsTaken: Array.isArray(parsed.actionsTaken) ? parsed.actionsTaken.map(String) : [],
-      brainUpdate: typeof parsed.brainUpdate === 'string' ? parsed.brainUpdate : '',
-    }
+    const parsed = JSON.parse(candidate) as Record<string, unknown>
+    const output = parsed.type === 'complete' && 'output' in parsed ? parsed.output : parsed
+    return schema.parse(output)
   } catch {
     return null
   }
@@ -120,6 +132,47 @@ async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunn
   }
 }
 
+async function runSkillStage<T>(params: {
+  session: SessionStore
+  skillId: string
+  prompt: string
+  schema: { parse: (value: unknown) => T }
+  deps: TraderRunnerDeps
+  skillContext?: Record<string, unknown>
+}) {
+  await setSessionSkill(params.session, params.skillId)
+  const result = await params.deps.engine.askWithSession(params.prompt, params.session, {
+    historyPreamble: 'The following is the prior structured skill-loop history for this trader session.',
+    maxHistoryEntries: 30,
+    skillContext: params.skillContext,
+  })
+  const output = parseStageOutput(result.text, params.schema)
+  if (!output) {
+    throw new Error(`Skill ${params.skillId} did not return a valid completion payload`)
+  }
+  return { output, rawText: result.text }
+}
+
+function combineBrainUpdates(...updates: Array<string | undefined>): string {
+  return updates.filter(Boolean).join('\n')
+}
+
+function updateBrainIfPresent(deps: TraderRunnerDeps, ...updates: Array<string | undefined>) {
+  const combined = combineBrainUpdates(...updates)
+  if (combined) {
+    deps.brain.updateFrontalLobe(combined)
+  }
+  return combined
+}
+
+function buildSkipResult(reason: string, rawText: string): TraderRunnerResult {
+  return {
+    status: 'skip',
+    reason,
+    rawText,
+  }
+}
+
 export async function runTraderJob(
   params: { jobId: string; strategyId: string; session: SessionStore },
   deps: TraderRunnerDeps,
@@ -137,67 +190,164 @@ export async function runTraderJob(
     return { status: 'skip', reason: snapshot.warnings.join(' ') }
   }
 
-  await setSessionSkill(params.session, 'trader-auto')
-  const prompt = buildTraderPrompt(strategy, snapshot)
-  const result = await deps.engine.askWithSession(prompt, params.session, {
-    appendSystemPrompt: buildTraderSystemPrompt(strategy),
-    historyPreamble: 'The following is the prior automated trader job history for this strategy.',
-    maxHistoryEntries: 30,
+  const scan = await runSkillStage({
+    session: params.session,
+    skillId: TRADER_SKILLS.marketScan,
+    prompt: buildMarketScanPrompt(strategy, snapshot),
+    schema: traderMarketScanSchema,
+    deps,
+    skillContext: { strategy, snapshot, stage: 'market-scan' },
   })
 
-  const decision = parseTraderDecision(result.text, strategy.id)
-  if (decision?.brainUpdate) {
-    deps.brain.updateFrontalLobe(decision.brainUpdate)
+  const candidate = scan.output.candidates[0]
+  if (!candidate) {
+    return {
+      status: 'skip',
+      reason: scan.output.summary || 'No tradable candidate found.',
+      rawText: scan.rawText,
+    }
+  }
+
+  const thesis = await runSkillStage({
+    session: params.session,
+    skillId: TRADER_SKILLS.tradeThesis,
+    prompt: buildTradeThesisPrompt(strategy, candidate, snapshot),
+    schema: traderTradeThesisSchema,
+    deps,
+    skillContext: { strategy, candidate, snapshot, stage: 'trade-thesis' },
+  })
+
+  if (thesis.output.status === 'no_trade') {
+    updateBrainIfPresent(deps, ...thesis.output.contextNotes)
+    return buildSkipResult(thesis.output.rationale, thesis.rawText)
+  }
+
+  const risk = await runSkillStage({
+    session: params.session,
+    skillId: TRADER_SKILLS.riskCheck,
+    prompt: buildRiskCheckPrompt(strategy, thesis.output, snapshot),
+    schema: traderRiskCheckSchema,
+    deps,
+    skillContext: { strategy, thesis: thesis.output, snapshot, stage: 'risk-check' },
+  })
+
+  if (risk.output.verdict !== 'pass') {
+    return buildSkipResult(risk.output.rationale, risk.rawText)
+  }
+
+  const plan = await runSkillStage({
+    session: params.session,
+    skillId: TRADER_SKILLS.tradePlan,
+    prompt: buildTradePlanPrompt(strategy, thesis.output, risk.output),
+    schema: traderTradePlanSchema,
+    deps,
+    skillContext: { strategy, thesis: thesis.output, risk: risk.output, stage: 'trade-plan' },
+  })
+
+  if (plan.output.status !== 'plan_ready' || plan.output.orders.length === 0) {
+    updateBrainIfPresent(deps, plan.output.brainUpdate)
+    return buildSkipResult(plan.output.rationale, plan.rawText)
+  }
+
+  const execute = await runSkillStage({
+    session: params.session,
+    skillId: TRADER_SKILLS.tradeExecute,
+    prompt: buildTradeExecutePrompt(strategy, plan.output),
+    schema: traderTradeExecuteSchema,
+    deps,
+    skillContext: { strategy, plan: plan.output, stage: 'trade-execute' },
+  })
+
+  if (execute.output.status !== 'execute') {
+    updateBrainIfPresent(deps, execute.output.brainUpdate)
+    return buildSkipResult(execute.output.rationale, execute.rawText)
+  }
+
+  const executeScript = getSkillScript('trader-execute-plan')
+  if (!executeScript) {
+    throw new Error('Missing trader-execute-plan script')
+  }
+  const executionResult = await executeScript.run({
+    config: deps.config,
+    eventLog: deps.eventLog,
+    toolCenter: deps.toolCenter,
+    brain: deps.brain,
+    accountManager: deps.accountManager,
+    marketData: deps.marketData,
+    getAccountGit: deps.getAccountGit,
+    invocation: {
+      strategy,
+      plan: plan.output,
+      stage: 'trade-execute-script',
+    },
+  }, {
+    source: plan.output.source,
+    commitMessage: plan.output.commitMessage,
+    orders: plan.output.orders,
+  })
+
+  const brainUpdate = updateBrainIfPresent(deps, plan.output.brainUpdate, execute.output.brainUpdate)
+
+  const decision: TraderDecision = {
+    status: 'trade',
+    strategyId: strategy.id,
+    source: plan.output.source,
+    symbol: plan.output.symbol,
+    chosenScenario: plan.output.chosenScenario,
+    rationale: execute.output.rationale,
+    invalidation: plan.output.invalidation,
+    actionsTaken: [`Executed deterministic trade plan: ${plan.output.commitMessage}`],
+    brainUpdate,
   }
 
   return {
-    status: decision?.status === 'skip' ? 'skip' : 'done',
-    reason: decision?.rationale ?? 'Trader job completed',
-    decision: decision ?? undefined,
-    rawText: result.text,
+    status: 'done',
+    reason: decision.rationale,
+    decision,
+    rawText: JSON.stringify(executionResult, null, 2),
   }
 }
 
 export async function runTraderReview(
   strategyId: string | undefined,
-  deps: Pick<TraderRunnerDeps, 'brain' | 'accountManager' | 'getAccountGit' | 'eventLog'>,
+  deps: TraderRunnerDeps,
   meta?: { trigger?: 'manual' | 'scheduled'; jobId?: string; jobName?: string },
 ): Promise<TraderReviewResult> {
-  const sources = strategyId
-    ? ((await getTraderStrategy(strategyId))?.sources ?? [])
-    : deps.accountManager.listAccounts().map((account) => account.id)
+  const strategy = strategyId ? await getTraderStrategy(strategyId) : null
+  const sources = strategy?.sources ?? deps.accountManager.listAccounts().map((account) => account.id)
+  const session = {
+    id: `trader-review/${strategyId ?? 'all'}`,
+    appendUser: async () => undefined,
+    appendAssistant: async () => undefined,
+    appendSystem: async () => undefined,
+    appendRaw: async () => undefined,
+    readAll: async () => [],
+    readActive: async () => [],
+    restore: async () => {},
+    exists: async () => false,
+  } as unknown as SessionStore
 
-  const summaries = sources.map((source) => {
-    const git = deps.getAccountGit(source)
-    if (!git) {
-      return { source, summary: 'No trading history available.' }
-    }
-    const commits = git.log({ limit: 50 })
-    const stats = computeTradingStats(commits)
-    const topSymbol = Object.entries(stats.bySymbol)
-      .sort((a, b) => Math.abs(b[1].pnl) - Math.abs(a[1].pnl))[0]
-    const summary = [
-      `${stats.totalTrades} trades`,
-      `winRate ${(stats.winRate * 100).toFixed(1)}%`,
-      `totalPnL ${stats.totalPnL.toFixed(2)}`,
-      topSymbol ? `top symbol ${topSymbol[0]} (${topSymbol[1].pnl.toFixed(2)})` : 'no closed trades yet',
-    ].join(', ')
-    return { source, summary }
+  const review = await runSkillStage({
+    session,
+    skillId: TRADER_SKILLS.tradeReview,
+    prompt: buildTraderReviewPrompt(strategy, sources),
+    schema: traderTradeReviewSchema,
+    deps: deps as TraderRunnerDeps,
+    skillContext: { strategy, sources, stage: 'trade-review' },
   })
 
-  const brainSummary = buildTraderReviewSummary({ strategyId, summaries })
-  deps.brain.updateFrontalLobe(brainSummary)
+  deps.brain.updateFrontalLobe(review.output.brainUpdate)
   await deps.eventLog.append('trader.review.done', {
     strategyId,
     trigger: meta?.trigger ?? 'manual',
     jobId: meta?.jobId,
     jobName: meta?.jobName,
     updated: true,
-    summary: brainSummary,
+    summary: review.output.summary,
   })
   return {
     updated: true,
-    summary: brainSummary,
+    summary: review.output.summary,
     strategyId,
   }
 }

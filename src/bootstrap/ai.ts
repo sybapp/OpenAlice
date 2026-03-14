@@ -11,11 +11,16 @@ import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
+import { SkillLoopRunner } from '../core/skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
 import { CodexCliProvider } from '../ai-providers/codex-cli/index.js'
 import { createBacktestStorage, createBacktestRunManager } from '../extension/trading/index.js'
-import type { BacktestRunManager } from '../extension/trading/index.js'
+import type { AccountManager, BacktestRunManager } from '../extension/trading/index.js'
+import type { Brain } from '../extension/cognition/brain/index.js'
+import type { EventLog } from '../core/event-log.js'
+import type { ITradingGit } from '../extension/trading/index.js'
+import type { MarketDataBridge } from '../core/types.js'
 
 export interface AIResult {
   engine: Engine
@@ -24,7 +29,20 @@ export interface AIResult {
   backtest: BacktestRunManager
 }
 
-export function initAIProviders(config: Config, toolCenter: ToolCenter, instructions: string): AIResult {
+export interface SkillRuntimeDeps {
+  brain: Brain
+  eventLog: EventLog
+  accountManager: AccountManager
+  marketData: MarketDataBridge
+  getAccountGit: (accountId: string) => ITradingGit | undefined
+}
+
+export function initAIProviders(
+  config: Config,
+  toolCenter: ToolCenter,
+  instructions: string,
+  skillRuntime: SkillRuntimeDeps,
+): AIResult {
   const vercelProvider = new VercelAIProvider(
     (policy) => toolCenter.getVercelTools(policy),
     instructions,
@@ -36,7 +54,20 @@ export function initAIProviders(config: Config, toolCenter: ToolCenter, instruct
   const router = new ProviderRouter(vercelProvider, claudeCodeProvider, codexCliProvider)
 
   const agentCenter = new AgentCenter(router)
-  const engine = new Engine({ agentCenter, commandRouter: createLocalCommandRouter() })
+  const engine = new Engine({
+    agentCenter,
+    commandRouter: createLocalCommandRouter(),
+    skillLoopRunner: new SkillLoopRunner(agentCenter, {
+      config,
+      toolCenter,
+      brain: skillRuntime.brain,
+      eventLog: skillRuntime.eventLog,
+      accountManager: skillRuntime.accountManager,
+      marketData: skillRuntime.marketData,
+      getAccountGit: skillRuntime.getAccountGit,
+      invocation: {},
+    }),
+  })
 
   const backtestStorage = createBacktestStorage()
   const backtest = createBacktestRunManager({ storage: backtestStorage, engine })
