@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install UI dependencies
+        run: pnpm install:ui
+
       - name: Run backend tests
         run: pnpm test
 
