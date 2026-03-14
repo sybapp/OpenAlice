@@ -122,7 +122,7 @@ importers:
         specifier: ^3.0.6
         version: 3.2.4(@types/node@22.19.15)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
-  ui:
+  web:
     dependencies:
       dompurify:
         specifier: ^3.3.1
