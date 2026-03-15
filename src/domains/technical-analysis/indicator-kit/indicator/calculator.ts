@@ -1,12 +1,12 @@
 /**
  * Indicator Calculator — AST 表达式解析与求值
  *
- * 通用量化因子计算器，支持 equity / crypto / currency。
+ * 通用量化因子计算器，当前由 OpenAlice 以 crypto 模式接入。
  *
  * 支持类 Excel 公式语法：
- * - SMA(CLOSE('AAPL', '1d'), 50)
- * - RSI(CLOSE('BTCUSD', '1d'), 14)
- * - (CLOSE('EURUSD', '1d')[-1] - SMA(CLOSE('EURUSD', '1d'), 50)) / SMA(CLOSE('EURUSD', '1d'), 50) * 100
+ * - SMA(CLOSE('BTC/USDT', '1d'), 50)
+ * - RSI(CLOSE('ETH/USDT', '1d'), 14)
+ * - (CLOSE('SOL/USDT', '1d')[-1] - SMA(CLOSE('SOL/USDT', '1d'), 50)) / SMA(CLOSE('SOL/USDT', '1d'), 50) * 100
  */
 
 import type {

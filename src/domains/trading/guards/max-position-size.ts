@@ -24,7 +24,7 @@ export class MaxPositionSizeGuard implements OperationGuard {
     const existing = positions.find(pos => pos.contract.symbol === symbol)
     const currentValue = existing?.marketValue ?? 0
 
-    // Estimate added value — handle both crypto (usd_size/size) and securities (notional/qty) params
+    // Estimate added value from either notional- or quantity-based order params.
     const dollarAmount = p.notional ?? p.usd_size
     const quantity = p.qty ?? p.size
 

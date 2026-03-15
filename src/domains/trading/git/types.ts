@@ -2,7 +2,6 @@
  * Trading-as-Git type definitions
  *
  * Unified git-like state management for tracking trading operation history.
- * Merges crypto-trading/wallet/types.ts and securities-trading/wallet/types.ts.
  */
 
 import type { Position, Order, OrderType, TimeInForce } from '../interfaces.js'

@@ -17,7 +17,7 @@ Your one-person Wall Street. Alice is an AI trading agent that gives you your ow
 ## Features
 
 - **Dual AI provider** — switch between Claude Code CLI and Vercel AI SDK at runtime, no restart needed
-- **Unified trading** — multi-account architecture supporting CCXT (Bybit, OKX, Binance, etc.) and Alpaca (US equities) with a git-like workflow (stage, commit, push)
+- **Unified trading** — multi-account architecture supporting CCXT (Bybit, OKX, Binance, etc.) with a git-like workflow (stage, commit, push)
 - **Guard pipeline** — extensible pre-execution safety checks (max position size, cooldown between trades, symbol whitelist)
 - **Market data** — CCXT-backed crypto market data and technical indicator calculator
 - **News collector** — background RSS collection from configurable feeds with archive search tools (`globNews`/`grepNews`/`readNews`)
@@ -209,7 +209,7 @@ src/
       indicator-tools/       # Indicator tool surface (calculateIndicator)
       brooks-pa/             # Brooks price action analysis tool
       ict-smc/               # ICT / SMC market-structure analysis tools
-    trading/                 # Unified multi-account trading (CCXT + Alpaca), guard pipeline, git-like commit history
+    trading/                 # Unified multi-account trading (CCXT), guard pipeline, git-like commit history
   connectors/
     web/                     # Web UI chat (Hono, SSE push)
     telegram/                # Telegram bot (grammY, polling, commands)

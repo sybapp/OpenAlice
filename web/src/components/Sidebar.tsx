@@ -8,34 +8,15 @@ interface SidebarProps {
   onClose: () => void
 }
 
-// Chevron icon for expandable groups
-const Chevron = ({ expanded }: { expanded: boolean }) => (
-  <svg
-    width="14" height="14" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-    className={`transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
-  >
-    <polyline points="9 18 15 12 9 6" />
-  </svg>
-)
-
-// ==================== Nav item definitions ====================
-
 interface NavLeaf {
   page: Page
   label: string
   icon: (active: boolean) => ReactNode
 }
 
-interface NavGroup {
-  prefix: string
-  label: string
-  icon: (active: boolean) => ReactNode
-  children: { page: Page; label: string }[]
-}
+// ==================== Nav item definitions ====================
 
-type NavItem = NavLeaf | NavGroup
-const isGroup = (item: NavItem): item is NavGroup => 'children' in item
+type NavItem = NavLeaf
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -231,54 +212,6 @@ export function Sidebar({ sseConnected, open, onClose }: SidebarProps) {
         {/* Navigation */}
         <nav className="flex-1 flex flex-col gap-0.5 px-3">
           {NAV_ITEMS.map((item) => {
-            if (isGroup(item)) {
-              const expanded = location.pathname.startsWith(`/${item.prefix}`)
-              return (
-                <div key={item.prefix}>
-                  {/* Group parent */}
-                  <Link
-                    to={ROUTES[item.children[0].page]}
-                    onClick={onClose}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
-                      expanded
-                        ? 'text-text'
-                        : 'text-text-muted hover:text-text hover:bg-bg-tertiary/50'
-                    }`}
-                  >
-                    <span className="flex items-center justify-center w-5 h-5">{item.icon(expanded)}</span>
-                    <span className="flex-1">{item.label}</span>
-                    <Chevron expanded={expanded} />
-                  </Link>
-
-                  {/* Children — animate height */}
-                  <div
-                    className={`overflow-hidden transition-all duration-150 ${
-                      expanded ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
-                    }`}
-                  >
-                    {item.children.map((child) => {
-                      const isActive = currentPage === child.page
-                      return (
-                        <Link
-                          key={child.page}
-                          to={ROUTES[child.page]}
-                          onClick={onClose}
-                          className={`w-full flex items-center pl-11 pr-3 py-1.5 rounded-lg text-[13px] transition-colors text-left ${
-                            isActive
-                              ? 'bg-bg-tertiary text-text'
-                              : 'text-text-muted hover:text-text hover:bg-bg-tertiary/50'
-                          }`}
-                        >
-                          {child.label}
-                        </Link>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            }
-
-            // Leaf item
             const isActive = currentPage === item.page
             return (
               <Link

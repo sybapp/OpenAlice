@@ -1,12 +1,12 @@
 /**
  * Indicator Calculator — 类型定义
  *
- * 通用 OHLCV 量化因子计算器，支持 equity / crypto / currency。
+ * 通用 OHLCV 量化因子计算器，当前由 OpenAlice 以 crypto 模式接入。
  */
 
 // ==================== Data ====================
 
-/** 通用 OHLCV 数据，equity/crypto/currency 共用 */
+/** 通用 OHLCV 数据结构 */
 export interface OhlcvData {
   date: string
   open: number
@@ -23,7 +23,7 @@ export interface OhlcvData {
 export interface IndicatorContext {
   /**
    * 获取历史 OHLCV 数据
-   * @param symbol - 资产 symbol，如 "AAPL"、"BTCUSD"、"EURUSD"
+   * @param symbol - 资产 symbol，如 "BTC/USDT"
    * @param interval - K 线周期，如 "1d", "1w", "1h"
    */
   getHistoricalData: (symbol: string, interval: string) => Promise<OhlcvData[]>

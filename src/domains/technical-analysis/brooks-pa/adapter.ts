@@ -6,7 +6,7 @@ import { buildBrooksCoreFromDetailed, type BrooksPaAnalyzeOutputV2 } from './ana
 import type { OhlcvStore } from '@/domains/technical-analysis/indicator-kit/index'
 
 const inputSchema = z.object({
-  asset: z.enum(['equity', 'crypto', 'currency']),
+  asset: z.literal('crypto'),
   symbol: z.string(),
   timeframes: z.object({
     context: z.string().optional(),

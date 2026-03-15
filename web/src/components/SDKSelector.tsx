@@ -169,7 +169,7 @@ export const DATASOURCE_OPTIONS: SDKOption[] = [
   {
     id: 'newsCollector',
     name: 'News Collector',
-    description: 'RSS/Atom feed aggregation for crypto and financial news.',
+    description: 'RSS/Atom feed aggregation for crypto news.',
     badge: 'NC',
     badgeColor: 'text-purple',
   },

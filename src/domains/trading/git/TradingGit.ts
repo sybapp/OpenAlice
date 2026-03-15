@@ -2,7 +2,6 @@
  * TradingGit — Trading-as-Git implementation
  *
  * Unified git-like operation tracking for all trading accounts.
- * Merges crypto-trading/wallet/Wallet.ts and securities-trading/wallet/SecWallet.ts.
  */
 
 import { createHash } from 'crypto'

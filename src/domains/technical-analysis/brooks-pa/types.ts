@@ -1,4 +1,4 @@
-export type AssetClass = 'equity' | 'crypto' | 'currency'
+export type AssetClass = 'crypto'
 
 export type Timeframes = {
   context: string

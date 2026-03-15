@@ -4,7 +4,7 @@ import type { OhlcvStore } from '@/domains/technical-analysis/indicator-kit/inde
 import { analyzeIctSmc, type IctSmcAnalyzeOutputV2 } from './analyze'
 
 const inputSchema = z.object({
-  asset: z.enum(['equity', 'crypto', 'currency']),
+  asset: z.literal('crypto'),
   symbol: z.string(),
   timeframe: z.string().optional(),
   lookbackBars: z.number().int().positive().optional(),

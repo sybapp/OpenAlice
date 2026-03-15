@@ -206,11 +206,6 @@ function AccountsTable({ accounts, platforms, onSelect }: {
         </thead>
         <tbody className="divide-y divide-border">
           {accounts.map((account) => {
-            const p = getPlatform(account.platformId)
-            const badge = p?.type === 'ccxt'
-              ? { text: 'CC', color: 'text-accent bg-accent/10' }
-              : { text: 'AL', color: 'text-green bg-green/10' }
-
             return (
               <tr
                 key={account.id}
@@ -218,8 +213,8 @@ function AccountsTable({ accounts, platforms, onSelect }: {
                 className="cursor-pointer transition-colors hover:bg-bg-tertiary/30"
               >
                 <td className="pl-4 pr-2 py-2.5">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge.color}`}>
-                    {badge.text}
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-accent bg-accent/10">
+                    CC
                   </span>
                 </td>
                 <td className="px-3 py-2.5 font-medium text-text">{account.id}</td>
