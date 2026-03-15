@@ -1,6 +1,8 @@
 node_modules/
 dist/
 logs/
+/config/
+/runtime/
 /data/*
 !/data/default/
 !/data/default/**
