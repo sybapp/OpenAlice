@@ -53,7 +53,7 @@ export async function VOLUME(
 ): Promise<number[]> {
   const data = await context.getHistoricalData(symbol, interval)
   const volumes = data.map((d) => d.volume ?? 0)
-  // Drop trailing zero-volume candle (yfinance returns volume=0 for the current incomplete candle)
+  // Drop trailing zero-volume candle from incomplete current interval bars.
   if (volumes.length > 1 && volumes[volumes.length - 1] === 0) {
     volumes.pop()
   }

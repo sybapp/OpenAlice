@@ -1,12 +1,14 @@
 /**
  * Bootstrap: Services
  *
- * Brain, EventLog, CronEngine, NewsCollectorStore, OpenTypeBB clients, SymbolIndex.
+ * Brain, EventLog, CronEngine, NewsCollectorStore, and CCXT-backed market data.
  */
 
 import { readFile, writeFile, appendFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import type { Config } from '../core/config.js'
+import ccxt from 'ccxt'
+import type { Exchange } from 'ccxt'
 import {
   BRAIN_STATE_FILE,
   EMOTION_LOG_FILE,
@@ -20,24 +22,6 @@ import type { BrainExportState } from '../domains/cognition/brain/index.js'
 import { createEventLog } from '../core/event-log.js'
 import { createCronEngine } from '../jobs/cron/index.js'
 import { NewsCollectorStore } from '../domains/research/news-collector/index.js'
-import { SymbolIndex } from '../integrations/opentypebb/equity/index.js'
-import {
-  buildRouteMap,
-  SDKCommodityClient,
-  SDKCryptoClient,
-  SDKCurrencyClient,
-  SDKEconomyClient,
-  SDKEquityClient,
-  getSDKExecutor,
-  SDKNewsClient,
-  type CommodityClientLike,
-  type CryptoClientLike,
-  type CurrencyClientLike,
-  type EconomyClientLike,
-  type EquityClientLike,
-  type NewsClientLike,
-} from '../integrations/opentypebb/sdk/index.js'
-import { buildSDKCredentials } from '../integrations/opentypebb/credential-map.js'
 import type { BacktestBar } from '../domains/trading/index.js'
 import { createOhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
@@ -58,6 +42,106 @@ interface HistoricalBarRow {
   low: number
   close: number
   volume: number | null
+}
+
+function normalizeCcxtSymbol(input: string): string {
+  const symbol = input.trim().toUpperCase()
+  if (symbol.includes('/')) return symbol
+  for (const quote of ['USDT', 'USDC', 'USD', 'BTC', 'ETH']) {
+    if (symbol.endsWith(quote) && symbol.length > quote.length) {
+      return `${symbol.slice(0, -quote.length)}/${quote}`
+    }
+  }
+  return symbol
+}
+
+function toEndOfDayIso(date: string): string {
+  return `${date}T23:59:59.999Z`
+}
+
+function createCcxtExchange(config: Config): Exchange {
+  if (config.crypto.provider.type !== 'ccxt') {
+    throw new Error('Crypto CCXT provider is disabled')
+  }
+  const p = config.crypto.provider
+  const exchanges = ccxt as unknown as Record<string, new (opts: Record<string, unknown>) => Exchange>
+  const ExchangeClass = exchanges[p.exchange]
+  if (!ExchangeClass) {
+    throw new Error(`Unknown CCXT exchange: ${p.exchange}`)
+  }
+  const exchange = new ExchangeClass({
+    apiKey: p.apiKey,
+    secret: p.apiSecret,
+    password: p.password,
+    options: p.options,
+    enableRateLimit: true,
+  })
+  if (p.sandbox) exchange.setSandboxMode(true)
+  if (p.demoTrading) {
+    (exchange as unknown as { enableDemoTrading?: (enable: boolean) => void }).enableDemoTrading?.(true)
+  }
+  return exchange
+}
+
+async function fetchCcxtHistoricalBars(params: {
+  exchange: Exchange
+  symbol: string
+  startDate: string
+  endDate: string
+  interval: string
+}): Promise<HistoricalBarRow[]> {
+  const { exchange, symbol, startDate, endDate, interval } = params
+  const startMs = Date.parse(`${startDate}T00:00:00.000Z`)
+  const endMs = Date.parse(toEndOfDayIso(endDate))
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) {
+    throw new Error('Invalid date range for historical bars')
+  }
+
+  await exchange.loadMarkets()
+  const candidate = normalizeCcxtSymbol(symbol)
+  const market = (() => {
+    try {
+      return exchange.market(candidate)
+    } catch {
+      return null
+    }
+  })()
+  const resolvedSymbol = market?.symbol ?? candidate
+  const timeframe = interval.trim() || '1d'
+  const timeframeSeconds = exchange.parseTimeframe(timeframe)
+  if (!Number.isFinite(timeframeSeconds) || timeframeSeconds <= 0) {
+    throw new Error(`Unsupported interval: ${timeframe}`)
+  }
+  const timeframeMs = timeframeSeconds * 1000
+
+  const rows: HistoricalBarRow[] = []
+  let since = startMs
+  const limit = 1000
+  while (since <= endMs) {
+    const batch = await exchange.fetchOHLCV(resolvedSymbol, timeframe, since, limit)
+    if (!Array.isArray(batch) || batch.length === 0) break
+
+    for (const item of batch) {
+      const [ts, open, high, low, close, volume] = item
+      if (!Number.isFinite(ts) || ts < startMs || ts > endMs) continue
+      rows.push({
+        date: new Date(ts).toISOString(),
+        open: Number(open),
+        high: Number(high),
+        low: Number(low),
+        close: Number(close),
+        volume: volume == null ? null : Number(volume),
+      })
+    }
+
+    const lastTs = Number(batch[batch.length - 1]?.[0] ?? NaN)
+    if (!Number.isFinite(lastTs)) break
+    const nextSince = lastTs + timeframeMs
+    if (nextSince <= since) break
+    since = nextSince
+    if (batch.length < limit) break
+  }
+  return rows
 }
 
 function toBacktestIsoTimestamp(input: string): string {
@@ -136,45 +220,46 @@ export async function initServices(config: Config) {
   })
   await newsStore.init()
 
-  // ---- OpenTypeBB Clients ----
-  const { providers, providerKeys } = config.opentypebb
-  const executor = getSDKExecutor()
-  const routeMap = buildRouteMap()
-  const credentials = buildSDKCredentials(providerKeys)
-
-  const equityClient: EquityClientLike = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
-  const cryptoClient: CryptoClientLike = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
-  const currencyClient: CurrencyClientLike = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
-  const commodityClient: CommodityClientLike = new SDKCommodityClient(executor, 'commodity', undefined, credentials, routeMap)
-  const economyClient: EconomyClientLike = new SDKEconomyClient(executor, 'economy', undefined, credentials, routeMap)
-  const newsClient: NewsClientLike = new SDKNewsClient(executor, 'news', undefined, credentials, routeMap)
+  const ccxtExchange = createCcxtExchange(config)
 
   const marketData = {
-    async getBacktestBars(query: { assetType: 'equity' | 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
-      if (!config.opentypebb.enabled) throw new Error('OpenTypeBB is disabled')
-      const symbol = query.symbol.trim().toUpperCase()
-      if (query.assetType === 'equity') {
-        const rows = (await equityClient.getHistorical({ symbol, start_date: query.startDate, end_date: query.endDate })) as unknown as HistoricalBarRow[]
-        return normalizeHistoricalBars(symbol, rows)
+    async getBacktestBars(query: { assetType: 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
+      if (query.assetType !== 'crypto') {
+        throw new Error('Only crypto bars are supported')
       }
-      const rows = (await cryptoClient.getHistorical({
-        symbol, start_date: query.startDate, end_date: query.endDate,
-        ...(query.interval ? { interval: query.interval } : {}),
-      })) as unknown as HistoricalBarRow[]
-      return normalizeHistoricalBars(symbol, rows)
+      const rows = await fetchCcxtHistoricalBars({
+        exchange: ccxtExchange,
+        symbol: query.symbol,
+        startDate: query.startDate,
+        endDate: query.endDate,
+        interval: query.interval ?? '1d',
+      })
+      return normalizeHistoricalBars(normalizeCcxtSymbol(query.symbol), rows)
     },
   }
 
-  // ---- Symbol Index ----
-  const symbolIndex = new SymbolIndex()
-  await symbolIndex.load(equityClient)
-
-  const ohlcvStore = createOhlcvStore({ equityClient, cryptoClient, currencyClient })
+  const ohlcvStore = createOhlcvStore({
+    cryptoClient: {
+      getHistorical: async (params: Record<string, unknown>) => {
+        const symbol = String(params.symbol ?? '').trim()
+        const startDate = String(params.start_date ?? '').trim()
+        const interval = String(params.interval ?? '1h')
+        const today = new Date().toISOString().slice(0, 10)
+        const rows = await fetchCcxtHistoricalBars({
+          exchange: ccxtExchange,
+          symbol,
+          startDate,
+          endDate: today,
+          interval,
+        })
+        return rows
+      },
+    },
+  })
 
   return {
     brain, instructions, eventLog, cronEngine, newsStore,
-    equityClient, cryptoClient, currencyClient, commodityClient, economyClient, newsClient,
-    symbolIndex, marketData, providers,
+    marketData,
     ohlcvStore,
   }
 }

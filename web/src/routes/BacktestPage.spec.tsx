@@ -188,10 +188,11 @@ describe('BacktestPage', () => {
 
     await waitFor(() => {
       expect(backtestApi.fetchBars).toHaveBeenCalledWith({
-        assetType: 'equity',
-        symbol: 'AAPL',
+        assetType: 'crypto',
+        symbol: 'BTC/USDT',
         startDate: '2025-01-01',
         endDate: '2025-01-31',
+        interval: '1d',
       })
     })
 

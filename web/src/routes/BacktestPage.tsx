@@ -148,7 +148,7 @@ export function BacktestPage() {
           <div>
             <h2 className="text-base font-semibold text-text">Backtest</h2>
             <p className="text-[12px] text-text-muted mt-1">
-              Run and inspect replay-based backtests for equities and crypto.
+              Run and inspect replay-based backtests for crypto.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -717,8 +717,8 @@ function CreateBacktestDialog({
 }) {
   const [runId, setRunId] = useState('')
   const [initialCash, setInitialCash] = useState('10000')
-  const [assetType, setAssetType] = useState<'equity' | 'crypto'>('equity')
-  const [symbol, setSymbol] = useState('AAPL')
+  const assetType: 'crypto' = 'crypto'
+  const [symbol, setSymbol] = useState('BTC/USDT')
   const [startDate, setStartDate] = useState('2025-01-01')
   const [endDate, setEndDate] = useState('2025-01-31')
   const [interval, setInterval] = useState('1d')
@@ -736,7 +736,7 @@ function CreateBacktestDialog({
   useEffect(() => {
     setBars([])
     setBarsError('')
-  }, [assetType, symbol, startDate, endDate, interval])
+  }, [symbol, startDate, endDate, interval])
 
   const parsedDecisions = useMemo(() => parseDecisions(decisionsJson), [decisionsJson])
   const runIdError = validateRunId(runId)
@@ -767,7 +767,7 @@ function CreateBacktestDialog({
         symbol: symbol.trim(),
         startDate,
         endDate,
-        ...(assetType === 'crypto' && interval.trim() ? { interval: interval.trim() } : {}),
+        ...(interval.trim() ? { interval: interval.trim() } : {}),
       })
       setBars(result.bars)
       if (result.bars.length === 0) {
@@ -779,7 +779,7 @@ function CreateBacktestDialog({
     } finally {
       setBarsLoading(false)
     }
-  }, [assetType, endDate, interval, startDate, symbol])
+  }, [endDate, interval, startDate, symbol])
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true)
@@ -837,14 +837,8 @@ function CreateBacktestDialog({
             <Field label="Initial Cash">
               <input value={initialCash} onChange={(e) => setInitialCash(e.target.value)} className={inputClass} inputMode="decimal" />
             </Field>
-            <Field label="Asset Type">
-              <select value={assetType} onChange={(e) => setAssetType(e.target.value as 'equity' | 'crypto')} className={inputClass}>
-                <option value="equity">Equity</option>
-                <option value="crypto">Crypto</option>
-              </select>
-            </Field>
             <Field label="Symbol">
-              <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} className={inputClass} placeholder="AAPL or BTCUSD" />
+              <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} className={inputClass} placeholder="BTC/USDT" />
             </Field>
             <Field label="Start Date">
               <input value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} type="date" />
@@ -852,11 +846,9 @@ function CreateBacktestDialog({
             <Field label="End Date">
               <input value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputClass} type="date" />
             </Field>
-            {assetType === 'crypto' && (
-              <Field label="Interval">
-                <input value={interval} onChange={(e) => setInterval(e.target.value)} className={inputClass} placeholder="1d, 1h, 5m" />
-              </Field>
-            )}
+            <Field label="Interval">
+              <input value={interval} onChange={(e) => setInterval(e.target.value)} className={inputClass} placeholder="1d, 1h, 5m" />
+            </Field>
           </div>
 
           {runIdError && <p className="text-[12px] text-red mt-2">{runIdError}</p>}

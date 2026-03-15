@@ -17,7 +17,7 @@ describe('trader strategy registry', () => {
 id: momentum
 label: Momentum
 enabled: true
-sources: [ccxt-main, alpaca-paper]
+sources: [ccxt-main]
 universe:
   asset: crypto
   symbols: [BTC/USDT:USDT, ETH/USDT:USDT]
@@ -51,7 +51,7 @@ executionPolicy:
     expect(strategies[0]).toMatchObject({
       id: 'momentum',
       label: 'Momentum',
-      sources: ['ccxt-main', 'alpaca-paper'],
+      sources: ['ccxt-main'],
       universe: {
         asset: 'crypto',
         symbols: ['BTC/USDT:USDT', 'ETH/USDT:USDT'],
@@ -67,7 +67,7 @@ executionPolicy:
         id: 'momentum',
         label: 'Momentum',
         enabled: true,
-        sources: ['ccxt-main', 'alpaca-paper'],
+        sources: ['ccxt-main'],
         asset: 'crypto',
         symbols: ['BTC/USDT:USDT', 'ETH/USDT:USDT'],
       },

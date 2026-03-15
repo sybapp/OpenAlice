@@ -136,18 +136,6 @@ export interface ConnectorsConfig {
   }
 }
 
-export interface OpentypebbConfig {
-  enabled: boolean
-  providers: {
-    equity: string
-    crypto: string
-    currency: string
-    newsCompany: string
-    newsWorld: string
-  }
-  providerKeys?: Record<string, boolean>
-}
-
 export interface UpdateConnectorsRequest {
   web?: {
     host?: string
@@ -188,7 +176,6 @@ export interface NewsCollectorConfig {
   intervalMinutes: number
   maxInMemory: number
   retentionDays: number
-  piggybackOpenTypeBB: boolean
   feeds: NewsCollectorFeed[]
 }
 
@@ -237,7 +224,7 @@ export interface TraderStrategySummary {
   label: string
   enabled: boolean
   sources: string[]
-  asset: 'crypto' | 'equity'
+  asset: 'crypto'
   symbols: string[]
 }
 
@@ -353,14 +340,7 @@ export interface CcxtPlatformConfig {
   defaultMarketType: 'spot' | 'swap'
 }
 
-export interface AlpacaPlatformConfig {
-  id: string
-  label?: string
-  type: 'alpaca'
-  paper: boolean
-}
-
-export type PlatformConfig = CcxtPlatformConfig | AlpacaPlatformConfig
+export type PlatformConfig = CcxtPlatformConfig
 
 export interface TradingConfigAccount {
   id: string
@@ -492,7 +472,7 @@ export interface BacktestEventEntry {
 }
 
 export interface BacktestBarsQuery {
-  assetType: 'equity' | 'crypto'
+  assetType: 'crypto'
   symbol: string
   startDate: string
   endDate: string

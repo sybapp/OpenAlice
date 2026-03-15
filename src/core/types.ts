@@ -24,7 +24,7 @@ export interface ReconnectResult {
 }
 
 export interface BacktestBarsQuery {
-  assetType: 'equity' | 'crypto'
+  assetType: 'crypto'
   symbol: string
   startDate: string
   endDate: string

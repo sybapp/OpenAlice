@@ -78,7 +78,7 @@ function requireGit(resolver: AccountResolver, accountId: string): ITradingGit {
 }
 
 const sourceDesc = (required: boolean, extra?: string) => {
-  const base = `Account source — matches account id (e.g. "alpaca-paper") or provider (e.g. "alpaca", "ccxt").`
+  const base = `Account source — matches account id (e.g. "bybit-main") or provider (e.g. "ccxt").`
   const req = required
     ? ' Required for this operation.'
     : ' Optional — omit to query all accounts.'
@@ -108,12 +108,12 @@ export function createTradingTools(resolver: AccountResolver) {
     searchContracts: tool({
       description: `Search broker accounts for tradeable contracts matching a pattern.
 
-This is a BROKER-LEVEL search — it queries your connected trading accounts to find
+This is an ACCOUNT-LEVEL search — it queries your connected trading accounts to find
 what contracts are available to trade and on which account. Returns contract details
 with source attribution.
 
 When to use:
-- You need to discover which account can trade a symbol (e.g. "Is BTC on ccxt or alpaca?")
+- You need to discover which account can trade a symbol (e.g. "Is BTC on bybit-main or binance-main?")
 - You want to find the exact broker contract format (e.g. "BTC" → "BTC/USDT:USDT" on ccxt)
 - You're unsure if a symbol is tradeable on a specific account
 
@@ -306,7 +306,7 @@ Returns real-time market data from the broker:
 
 Use searchContracts first to get the aliceId, then pass it here.`,
       inputSchema: z.object({
-        aliceId: z.string().describe('Contract identifier from searchContracts (e.g. "alpaca-AAPL", "bybit-BTCUSDT")'),
+        aliceId: z.string().describe('Contract identifier from searchContracts (e.g. "bybit-BTCUSDT")'),
         source: z.string().optional().describe(sourceDesc(false)),
       }),
       execute: async ({ aliceId, source }) => {
@@ -580,7 +580,7 @@ For crypto entries, you can attach an optional protection plan so stop-loss and 
 NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
       inputSchema: z.object({
         source: z.string().describe(sourceDesc(true)),
-        aliceId: z.string().describe('Contract identifier from searchContracts (e.g. "alpaca-AAPL", "bybit-BTCUSDT")'),
+        aliceId: z.string().describe('Contract identifier from searchContracts (e.g. "bybit-BTCUSDT")'),
         symbol: z.string().optional().describe('Human-readable symbol for logging (e.g. "AAPL", "BTC"). Optional — extracted from aliceId if omitted.'),
         side: z.enum(['buy', 'sell']).describe('Buy or sell'),
         type: z
@@ -598,7 +598,7 @@ NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
           .positive()
           .optional()
           .describe(
-            'Dollar amount to invest (e.g. 1000 = $1000 of the stock). Mutually exclusive with qty.',
+            'Dollar amount to invest (e.g. 1000 = $1000 notional). Mutually exclusive with qty.',
           ),
         price: z
           .number()
@@ -751,7 +751,7 @@ This is the preferred way to sell holdings instead of using placeOrder with side
 NOTE: This stages the operation. Call tradingCommit + tradingPush to execute.`,
       inputSchema: z.object({
         source: z.string().describe(sourceDesc(true)),
-        aliceId: z.string().describe('Contract identifier from searchContracts or getPortfolio (e.g. "alpaca-AAPL")'),
+        aliceId: z.string().describe('Contract identifier from searchContracts or getPortfolio (e.g. "bybit-BTCUSDT")'),
         symbol: z.string().optional().describe('Human-readable symbol for logging. Optional.'),
         qty: z
           .number()
@@ -803,8 +803,8 @@ This does NOT execute the trades yet - call tradingPush after this.
 If source is omitted, commits ALL accounts that have staged operations.
 
 Example workflow:
-1. placeOrder({ source: "alpaca", symbol: "AAPL", side: "buy", ... }) -> staged
-2. tradingCommit({ message: "Buying AAPL on strong earnings beat" })
+1. placeOrder({ source: "bybit-main", symbol: "BTC/USDT:USDT", side: "buy", ... }) -> staged
+2. tradingCommit({ message: "Long BTC breakout continuation" })
 3. tradingPush() -> executes and records`,
       inputSchema: z.object({
         source: z.string().optional().describe(sourceDesc(false, 'If omitted, commits all accounts with staged operations.')),

@@ -113,16 +113,6 @@ async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunn
   if (totalExposurePercent >= strategy.riskBudget.maxGrossExposurePercent) {
     warnings.push(`Current gross exposure ${totalExposurePercent.toFixed(2)}% meets/exceeds maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`)
   }
-  if (strategy.universe.asset === 'equity') {
-    const anyOpen = sourceSnapshots.some((snapshot) => {
-      const clock = snapshot.marketClock as { isOpen?: boolean } | undefined
-      return clock?.isOpen === true
-    })
-    if (!anyOpen) {
-      warnings.push('No configured equity source currently reports an open market clock.')
-    }
-  }
-
   return {
     frontalLobe,
     warnings,
@@ -273,12 +263,7 @@ export async function runTraderJob(
     brain: deps.brain,
     accountManager: deps.accountManager,
     marketData: deps.marketData,
-    symbolIndex: deps.symbolIndex,
     ohlcvStore: deps.ohlcvStore,
-    equityClient: deps.equityClient,
-    cryptoClient: deps.cryptoClient,
-    currencyClient: deps.currencyClient,
-    newsClient: deps.newsClient,
     newsStore: deps.newsStore,
     getAccountGit: deps.getAccountGit,
     invocation: {

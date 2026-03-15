@@ -90,8 +90,6 @@ export { createWalletStateBridge } from './wallet-state-bridge.js'
 export type { IPlatform, PlatformCredentials } from './platform.js'
 export { CcxtPlatform } from './providers/ccxt/CcxtPlatform.js'
 export type { CcxtPlatformConfig } from './providers/ccxt/CcxtPlatform.js'
-export { AlpacaPlatform } from './providers/alpaca/AlpacaPlatform.js'
-export type { AlpacaPlatformConfig } from './providers/alpaca/AlpacaPlatform.js'
 export {
   createPlatformFromConfig,
   createAccountFromConfig,
@@ -107,8 +105,6 @@ export { createTradingTools, resolveAccounts, resolveOne } from './adapter.js'
 export type { AccountResolver, ResolvedAccount } from './adapter.js'
 
 // Providers
-export { AlpacaAccount } from './providers/alpaca/index.js'
-export type { AlpacaAccountConfig } from './providers/alpaca/index.js'
 export { CcxtAccount } from './providers/ccxt/index.js'
 export { createCcxtProviderTools } from './providers/ccxt/index.js'
 export type { CcxtAccountConfig } from './providers/ccxt/index.js'

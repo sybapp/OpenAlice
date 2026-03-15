@@ -4,7 +4,7 @@ import { createOhlcvTtlCache } from './cache'
 import { fetchOhlcvByBars, fetchOhlcvByCalendarDays } from './fetch'
 import { parseIntervalToMinutes } from './interval'
 
-export type AssetClass = 'equity' | 'crypto' | 'currency'
+export type AssetClass = 'crypto'
 
 export interface OhlcvStore {
   fetch(params: {
@@ -47,9 +47,7 @@ function dropUnclosedBar(bars: OhlcvData[], interval: string): OhlcvData[] {
 }
 
 export function createOhlcvStore(params: {
-  equityClient: OhlcvClient
   cryptoClient: OhlcvClient
-  currencyClient: OhlcvClient
   ttlMs?: number // 默认 120_000
   maxSize?: number // 默认 50
 }): OhlcvStore {
@@ -60,11 +58,10 @@ export function createOhlcvStore(params: {
   const inFlight = new Map<string, Promise<OhlcvData[]>>()
 
   function pickClient(asset: AssetClass): OhlcvClient {
-    switch (asset) {
-      case 'equity': return params.equityClient
-      case 'crypto': return params.cryptoClient
-      case 'currency': return params.currencyClient
+    if (asset !== 'crypto') {
+      throw new Error(`Unsupported asset class for OHLCV: ${asset}`)
     }
+    return params.cryptoClient
   }
 
   async function fetchRaw(input: {

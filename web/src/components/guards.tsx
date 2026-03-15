@@ -24,13 +24,6 @@ export const CRYPTO_GUARD_TYPES: GuardType[] = [
   { type: 'symbol-whitelist', label: 'Symbol Whitelist', desc: 'Restricts trading to a specific set of symbols.' },
 ]
 
-/** Securities guards (no max-leverage) */
-export const SECURITIES_GUARD_TYPES: GuardType[] = [
-  { type: 'max-position-size', label: 'Max Position Size', desc: 'Limits each position as a percentage of account equity.' },
-  { type: 'cooldown', label: 'Cooldown', desc: 'Enforces a minimum interval between trades on the same symbol.' },
-  { type: 'symbol-whitelist', label: 'Symbol Whitelist', desc: 'Restricts trading to a specific set of symbols.' },
-]
-
 const GUARD_DEFAULTS: Record<string, Record<string, unknown>> = {
   'max-position-size': { maxPercentOfEquity: 25 },
   'max-leverage': { maxLeverage: 10 },

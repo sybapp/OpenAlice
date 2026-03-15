@@ -90,8 +90,4 @@ export async function migrateFilesystemLayout(): Promise<void> {
     resolve('data/crypto-trading/commit.json'),
     join(RUNTIME_TRADING_DIR, 'bybit-main', 'commit.json'),
   )
-  await copyFileIfMissing(
-    resolve('data/securities-trading/commit.json'),
-    join(RUNTIME_TRADING_DIR, 'alpaca-paper', 'commit.json'),
-  )
 }

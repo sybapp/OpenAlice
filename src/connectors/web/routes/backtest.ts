@@ -135,8 +135,8 @@ function parseBarsQuery(c: Context): BacktestBarsQuery {
   const endDate = c.req.query('endDate')?.trim()
   const interval = c.req.query('interval')?.trim()
 
-  if (assetType !== 'equity' && assetType !== 'crypto') {
-    throw new Error('Invalid assetType: expected "equity" or "crypto"')
+  if (assetType !== 'crypto') {
+    throw new Error('Invalid assetType: expected "crypto"')
   }
   if (!symbol) {
     throw new Error('Invalid symbol: expected non-empty value')
@@ -147,12 +147,8 @@ function parseBarsQuery(c: Context): BacktestBarsQuery {
   if (!endDate || !DATE_PATTERN.test(endDate)) {
     throw new Error('Invalid endDate: expected YYYY-MM-DD')
   }
-  if (assetType !== 'crypto' && interval) {
-    throw new Error('Invalid interval: only supported for crypto bars')
-  }
-
   return {
-    assetType,
+    assetType: 'crypto',
     symbol,
     startDate,
     endDate,

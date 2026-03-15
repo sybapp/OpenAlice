@@ -33,8 +33,6 @@ export function gitArchivePath(accountId: string): string {
 
 export const LEGACY_GIT_PATHS: Record<string, string> = {
   'bybit-main': resolve('data/crypto-trading/commit.json'),
-  'alpaca-paper': resolve('data/securities-trading/commit.json'),
-  'alpaca-live': resolve('data/securities-trading/commit.json'),
 }
 
 export function createGitPersister(filePath: string) {

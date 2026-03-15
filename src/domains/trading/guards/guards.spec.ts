@@ -135,7 +135,7 @@ describe('MaxPositionSizeGuard', () => {
     const ctx = makeContext({
       operation: {
         action: 'placeOrder',
-        params: { aliceId: 'alpaca-AAPL', side: 'buy', type: 'market', notional: 50_000 },
+        params: { aliceId: 'bybit-BTCUSDT', side: 'buy', type: 'market', notional: 50_000 },
       },
     })
     expect(guard.check(ctx)).toBeNull()
@@ -242,7 +242,7 @@ describe('SymbolWhitelistGuard', () => {
   it('rejects placeOrder without symbol', () => {
     const guard = new SymbolWhitelistGuard({ symbols: ['AAPL'] })
     const ctx = makeContext({
-      operation: { action: 'placeOrder', params: { aliceId: 'alpaca-AAPL', side: 'buy', type: 'market', qty: 1 } },
+      operation: { action: 'placeOrder', params: { aliceId: 'bybit-BTCUSDT', side: 'buy', type: 'market', qty: 1 } },
     })
     const result = guard.check(ctx)
     expect(result).not.toBeNull()
@@ -252,7 +252,7 @@ describe('SymbolWhitelistGuard', () => {
   it('rejects closePosition without symbol', () => {
     const guard = new SymbolWhitelistGuard({ symbols: ['AAPL'] })
     const ctx = makeContext({
-      operation: { action: 'closePosition', params: { aliceId: 'alpaca-AAPL' } },
+      operation: { action: 'closePosition', params: { aliceId: 'bybit-BTCUSDT' } },
     })
     const result = guard.check(ctx)
     expect(result).not.toBeNull()

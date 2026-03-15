@@ -9,7 +9,6 @@ scripts:
   - analysis-ict-smc
   - research-news-company
   - research-news-world
-  - research-equity-profile
 outputSchema: TraderMarketScan
 decisionWindowBars: 10
 analysisMode: tool-first

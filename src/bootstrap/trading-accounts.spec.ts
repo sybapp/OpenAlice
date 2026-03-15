@@ -123,7 +123,7 @@ describe('createAccountReconnector', () => {
     })
   })
 
-  it('reconnects a non-alpaca account without re-registering legacy provider tools', async () => {
+  it('reconnects a ccxt account', async () => {
     const initAccount = vi.fn(async () => true)
     const getAccount = vi.fn()
       .mockReturnValueOnce({ close: vi.fn(async () => undefined) })
@@ -158,12 +158,12 @@ describe('createAccountReconnector', () => {
 
   it('returns an init-failed error when the recreated account cannot initialize', async () => {
     mocks.loadTradingConfig.mockResolvedValue({
-      accounts: [{ id: 'paper-1', platformId: 'alpaca-main', guards: [] }],
-      platforms: [{ id: 'alpaca-main', type: 'alpaca', paper: true }],
+      accounts: [{ id: 'paper-1', platformId: 'binance-main', guards: [] }],
+      platforms: [{ id: 'binance-main', type: 'ccxt', exchange: 'binance' }],
     })
     mocks.createPlatformFromConfig.mockReturnValue({
-      id: 'alpaca-main',
-      providerType: 'alpaca',
+      id: 'binance-main',
+      providerType: 'ccxt',
     })
 
     const reconnect = createAccountReconnector({

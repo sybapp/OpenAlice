@@ -10,10 +10,6 @@ scripts:
   - analysis-indicator
   - research-news-company
   - research-news-world
-  - research-equity-profile
-  - research-equity-financials
-  - research-equity-ratios
-  - research-equity-estimates
 outputSchema: TraderTradeThesis
 decisionWindowBars: 10
 analysisMode: tool-first

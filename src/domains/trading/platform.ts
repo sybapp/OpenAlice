@@ -18,7 +18,7 @@ export interface PlatformCredentials {
 }
 
 export interface IPlatform {
-  /** Unique platform id, e.g. "bybit-swap", "alpaca-paper". */
+  /** Unique platform id, e.g. "bybit-swap", "binance-main". */
   readonly id: string
 
   /** Human-readable name, e.g. "Bybit USDT Perps". */
@@ -27,7 +27,6 @@ export interface IPlatform {
   /**
    * Provider class tag. Matches ITradingAccount.provider on created accounts.
    * CcxtPlatform → exchange name (e.g. "bybit").
-   * AlpacaPlatform → "alpaca".
    */
   readonly providerType: string
 

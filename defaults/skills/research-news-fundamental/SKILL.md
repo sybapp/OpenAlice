@@ -7,10 +7,6 @@ scripts:
   - research-market-search
   - research-news-company
   - research-news-world
-  - research-equity-profile
-  - research-equity-financials
-  - research-equity-ratios
-  - research-equity-estimates
 outputSchema: ChatResponse
 decisionWindowBars: 10
 analysisMode: tool-first
@@ -21,7 +17,7 @@ analysisMode: tool-first
 Use when the user asks for catalyst research, event-driven narrative, company fundamentals, or macro-to-market synthesis.
 
 ## Instructions
-Request only the scripts you need. Use company news for symbol-specific questions, world news for macro context, and the equity scripts for profile, financials, ratios, or estimates. If the symbol is unclear, resolve it first.
+Request only the scripts you need. Use company news for symbol-specific questions and world news for macro context. If the symbol is unclear, resolve it first.
 
 Synthesize script results into a grounded answer. Do not speculate beyond the evidence returned by the scripts.
 

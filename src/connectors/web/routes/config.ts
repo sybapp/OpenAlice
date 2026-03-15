@@ -3,16 +3,12 @@ import {
   loadConfig,
   writeConfigSection,
   readAIProviderConfig,
-  readAIConfig,
-  readOpentypebbConfig,
   validSections,
   type ConfigSection,
   type Config,
   writeAIConfig,
   type AIBackend,
 } from '../../../core/config.js'
-import { buildSDKCredentials } from '../../../integrations/opentypebb/credential-map.js'
-import { buildRouteMap, getSDKExecutor } from '../../../integrations/opentypebb/sdk/index.js'
 import {
   hasOwn,
   isRecord,
@@ -24,11 +20,6 @@ import {
 
 interface ConfigRouteOpts {
   onConnectorsChange?: () => Promise<void>
-}
-
-interface OpentypebbTestEndpoint {
-  credField: string
-  path: string
 }
 
 function resolveString(input: Record<string, unknown>, key: string, current: string): string {
@@ -64,13 +55,6 @@ function toClientAiProviderConfig(aiProvider: Config['aiProvider']) {
   }
 }
 
-function toClientOpentypebbConfig(opentypebb: Config['opentypebb']) {
-  return {
-    ...opentypebb,
-    providerKeys: toSecretPresenceMap(opentypebb.providerKeys),
-  }
-}
-
 function toClientConnectorsConfig(connectors: Config['connectors']) {
   return {
     ...connectors,
@@ -96,7 +80,6 @@ function toClientConfig(config: Config) {
   return {
     ...config,
     aiProvider: toClientAiProviderConfig(config.aiProvider),
-    opentypebb: toClientOpentypebbConfig(config.opentypebb),
     connectors: toClientConnectorsConfig(config.connectors),
   }
 }
@@ -116,27 +99,6 @@ async function writeAiProviderSection(body: unknown): Promise<Config['aiProvider
   }
 
   return writeConfigSection('aiProvider', merged) as Promise<Config['aiProvider']>
-}
-
-async function writeOpentypebbSection(body: unknown): Promise<Config['opentypebb']> {
-  const current = (await loadConfig()).opentypebb
-  const input = isRecord(body) ? body : {}
-  const providersInput = isRecord(input.providers) ? input.providers : {}
-  const mergedProviderKeys = mergeSecretRecord(current.providerKeys, input.providerKeys)
-
-  const merged: Config['opentypebb'] = {
-    enabled: resolveBoolean(input, 'enabled', current.enabled),
-    providers: {
-      equity: resolveString(providersInput, 'equity', current.providers.equity),
-      crypto: resolveString(providersInput, 'crypto', current.providers.crypto),
-      currency: resolveString(providersInput, 'currency', current.providers.currency),
-      newsCompany: resolveString(providersInput, 'newsCompany', current.providers.newsCompany),
-      newsWorld: resolveString(providersInput, 'newsWorld', current.providers.newsWorld),
-    },
-    providerKeys: mergedProviderKeys,
-  }
-
-  return writeConfigSection('opentypebb', merged) as Promise<Config['opentypebb']>
 }
 
 async function writeConnectorsSection(body: unknown): Promise<Config['connectors']> {
@@ -232,10 +194,6 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
           const validated = await writeAiProviderSection(body)
           return c.json(toClientAiProviderConfig(validated))
         }
-        case 'opentypebb': {
-          const validated = await writeOpentypebbSection(body)
-          return c.json(toClientOpentypebbConfig(validated))
-        }
         default: {
           const validated = await writeConfigSection(section, body)
           return c.json(validated)
@@ -259,85 +217,6 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       })
     } catch (err) {
       return c.json({ error: String(err) }, 500)
-    }
-  })
-
-  return app
-}
-
-/** OpenTypeBB routes: POST /test-provider */
-export function createOpentypebbRoutes() {
-  const TEST_ENDPOINTS: Record<string, OpentypebbTestEndpoint> = {
-    fred:             { credField: 'fred_api_key',             path: '/api/v1/economy/fred_search?query=GDP&provider=fred' },
-    bls:              { credField: 'bls_api_key',              path: '/api/v1/economy/survey/bls_search?query=unemployment&provider=bls' },
-    eia:              { credField: 'eia_api_key',              path: '/api/v1/commodity/short_term_energy_outlook?provider=eia' },
-    econdb:           { credField: 'econdb_api_key',           path: '/api/v1/economy/available_indicators?provider=econdb' },
-    fmp:              { credField: 'fmp_api_key',              path: '/api/v1/equity/screener?provider=fmp&limit=1' },
-    nasdaq:           { credField: 'nasdaq_api_key',           path: '/api/v1/equity/search?query=AAPL&provider=nasdaq&is_symbol=true' },
-    intrinio:         { credField: 'intrinio_api_key',         path: '/api/v1/equity/search?query=AAPL&provider=intrinio&limit=1' },
-    tradingeconomics: { credField: 'tradingeconomics_api_key', path: '/api/v1/economy/calendar?provider=tradingeconomics' },
-  }
-
-  const app = new Hono()
-  const routeMap = buildRouteMap()
-
-  function parseSdkParams(endpoint: OpentypebbTestEndpoint): { model: string; provider: string; params: Record<string, unknown> } {
-    const url = new URL(endpoint.path, 'http://localhost')
-    const routePath = url.pathname.replace(/^\/api\/v1/, '')
-    const model = routeMap.get(routePath)
-
-    if (!model) {
-      throw new Error(`No SDK route for: ${routePath}`)
-    }
-
-    const params: Record<string, unknown> = {}
-    let provider: string | undefined
-
-    for (const [key, value] of url.searchParams.entries()) {
-      if (key === 'provider') {
-        provider = value
-        continue
-      }
-      if (value === 'true' || value === 'false') {
-        params[key] = value === 'true'
-        continue
-      }
-      const asNumber = Number(value)
-      params[key] = Number.isNaN(asNumber) || value.trim() === '' ? value : asNumber
-    }
-
-    if (!provider) {
-      throw new Error(`No provider specified for: ${endpoint.path}`)
-    }
-
-    return { model, provider, params }
-  }
-
-  async function testProviderViaSdk(provider: string, key: string) {
-    const endpoint = TEST_ENDPOINTS[provider]
-    const openbbConfig = await readOpentypebbConfig()
-    const { model, provider: providerName, params } = parseSdkParams(endpoint)
-    const executor = getSDKExecutor()
-    const credentials = buildSDKCredentials({
-      ...openbbConfig.providerKeys,
-      [provider]: key,
-    })
-
-    await executor.execute(providerName, model, params, credentials)
-  }
-
-  app.post('/test-provider', async (c) => {
-    try {
-      const { provider, key } = await c.req.json<{ provider: string; key: string }>()
-      const endpoint = TEST_ENDPOINTS[provider]
-      if (!endpoint) return c.json({ ok: false, error: `Unknown provider: ${provider}` }, 400)
-      if (!key) return c.json({ ok: false, error: 'No API key provided' }, 400)
-      await testProviderViaSdk(provider, key)
-
-      return c.json({ ok: true })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return c.json({ ok: false, error: msg })
     }
   })
 

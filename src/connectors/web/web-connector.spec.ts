@@ -20,7 +20,6 @@ const mocks = vi.hoisted(() => {
     createChatRoutes: vi.fn(() => new Hono()),
     createMediaRoutes: vi.fn(() => new Hono()),
     createConfigRoutes: vi.fn(() => new Hono()),
-    createOpentypebbRoutes: vi.fn(() => new Hono()),
     createEventsRoutes: vi.fn(() => new Hono()),
     createCronRoutes: vi.fn(() => new Hono()),
     createHeartbeatRoutes: vi.fn(() => new Hono()),
@@ -61,7 +60,6 @@ vi.mock('./routes/chat.js', () => ({
 
 vi.mock('./routes/config.js', () => ({
   createConfigRoutes: mocks.createConfigRoutes,
-  createOpentypebbRoutes: mocks.createOpentypebbRoutes,
 }))
 
 vi.mock('./routes/events.js', () => ({

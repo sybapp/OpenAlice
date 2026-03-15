@@ -3,7 +3,7 @@ import { api, type AppConfig, type ConfigUpdateResponse } from '../api'
 import { useAutoSave, type SaveStatus } from './useAutoSave'
 
 interface UseConfigPageOptions<T, TPayload = T> {
-  /** Config section key, e.g. 'crypto', 'securities', 'opentypebb' */
+  /** Config section key, e.g. 'crypto', 'newsCollector', 'connectors' */
   section: string
   /** Extract the sub-config from the full AppConfig */
   extract: (full: AppConfig) => T
@@ -30,7 +30,7 @@ interface UseConfigPageResult<T> {
 }
 
 /**
- * Shared hook for config pages (DataSources, Trading, Securities).
+ * Shared hook for config pages (DataSources, Trading, Connectors).
  * Handles: load → autoSave → flush → updateConfig/updateConfigImmediate.
  */
 export function useConfigPage<T extends object, TPayload = T>({

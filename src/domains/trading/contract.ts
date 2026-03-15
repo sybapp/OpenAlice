@@ -6,7 +6,7 @@
  *
  * The only deviation from IBKR: `conId` is replaced by `aliceId` — a global
  * unique identifier with format "{provider}-{nativeId}".
- * Examples: "alpaca-AAPL", "binance-BTCUSDT", "ibkr-265598"
+ * Examples: "bybit-BTCUSDT", "binance-BTCUSDT", "ibkr-265598"
  */
 
 // ==================== Security type ====================

@@ -11,7 +11,6 @@ import { heartbeatApi as heartbeat } from './heartbeat'
 import { tradingApi as trading } from './trading'
 import { strategiesApi as strategies } from './strategies'
 import { backtestApi as backtest } from './backtest'
-import { opentypebbApi as opentypebb } from './opentypebb'
 import { devApi as dev } from './dev'
 import { toolsApi as tools } from './tools'
 
@@ -25,7 +24,6 @@ export const api = {
   trading,
   strategies,
   backtest,
-  opentypebb,
   dev,
   tools,
 }
@@ -70,7 +68,6 @@ export type {
   BacktestGitState,
   SessionEntry,
   ConnectorsConfig,
-  OpentypebbConfig,
   ConfigUpdateResponse,
   UpdateConnectorsRequest,
   TradingConfigAccount,

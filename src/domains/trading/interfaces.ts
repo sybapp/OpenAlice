@@ -1,9 +1,8 @@
 /**
  * Unified Trading interfaces — IBKR-style Account model
  *
- * Merges the concepts from crypto-trading (ICryptoTradingEngine) and
- * securities-trading (ISecuritiesTradingEngine) into a single Account interface.
- * All providers (Alpaca, CCXT, IBKR, ...) implement ITradingAccount.
+ * Unified account model for crypto trading providers.
+ * All providers (CCXT, exchange-native adapters, ...) implement ITradingAccount.
  */
 
 import type { Contract, SecType, ContractDescription, ContractDetails } from './contract.js'
@@ -158,10 +157,10 @@ export interface AccountCapabilities {
 // ==================== ITradingAccount ====================
 
 export interface ITradingAccount {
-  /** Unique account ID, e.g. "alpaca-paper", "bybit-main". */
+  /** Unique account ID, e.g. "binance-main", "bybit-main". */
   readonly id: string
 
-  /** Provider name, e.g. "alpaca", "ccxt". */
+  /** Provider name, e.g. "ccxt". */
   readonly provider: string
 
   /** User-facing display name. */

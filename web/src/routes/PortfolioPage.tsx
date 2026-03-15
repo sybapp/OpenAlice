@@ -220,7 +220,6 @@ function HeroItem({ label, value, pnl }: { label: string; value: string; pnl?: n
 
 const PROVIDER_COLORS: Record<string, string> = {
   ccxt: 'bg-accent',
-  alpaca: 'bg-green',
 }
 
 function AccountStrip({ sources }: { sources: AccountSource[] }) {
@@ -321,9 +320,7 @@ function TradeLog({ commits }: { commits: CommitWithAccount[] }) {
         {sorted.map((commit) => {
           const badgeColor = commit.accountProvider === 'ccxt'
             ? 'bg-accent/15 text-accent'
-            : commit.accountProvider === 'alpaca'
-              ? 'bg-green/15 text-green'
-              : 'bg-bg-tertiary text-text-muted'
+            : 'bg-bg-tertiary text-text-muted'
           return (
             <div key={commit.hash} className="border border-border rounded-lg bg-bg-secondary px-3 py-2.5">
               <div className="flex items-start gap-2">

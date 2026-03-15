@@ -28,24 +28,24 @@ const baseSkill: SkillPack = {
 
 describe('skill tool policy', () => {
   it('allows all when allow list is empty and deny does not match', () => {
-    expect(isSkillToolAllowed('newsGetWorld', undefined, ['trading*'])).toBe(true)
+    expect(isSkillToolAllowed('globNews', undefined, ['trading*'])).toBe(true)
   })
 
   it('applies allow globs and lets deny override allow', () => {
-    expect(isSkillToolAllowed('newsGetWorld', ['news*', 'trading*'], ['trading*'])).toBe(true)
-    expect(isSkillToolAllowed('tradingCommit', ['news*', 'trading*'], ['trading*'])).toBe(false)
+    expect(isSkillToolAllowed('globNews', ['glob*', 'trading*'], ['trading*'])).toBe(true)
+    expect(isSkillToolAllowed('tradingCommit', ['glob*', 'trading*'], ['trading*'])).toBe(false)
   })
 
   it('filters tool maps by policy', () => {
     const tools = {
-      newsGetWorld: { description: 'news' },
+      globNews: { description: 'news' },
       tradingCommit: { description: 'trade' },
       cronAdd: { description: 'cron' },
     }
 
-    const filtered = filterToolsBySkillPolicy(tools, ['news*', 'trading*'], ['trading*', 'cron*'])
+    const filtered = filterToolsBySkillPolicy(tools, ['glob*', 'trading*'], ['trading*', 'cron*'])
 
-    expect(Object.keys(filtered)).toEqual(['newsGetWorld'])
+    expect(Object.keys(filtered)).toEqual(['globNews'])
   })
 
   it('maps deny rules to Claude MCP tool patterns', () => {

@@ -33,7 +33,7 @@ export interface RSSFeedConfig {
 }
 
 /** Discriminator for how a news item was ingested */
-export type IngestSource = 'rss' | 'opentypebb-world' | 'opentypebb-company'
+export type IngestSource = 'rss'
 
 // ==================== News Provider Interface ====================
 

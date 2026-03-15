@@ -17,15 +17,13 @@ describe('OhlcvStore', () => {
     const getHistorical = vi.fn(() => new Promise<unknown[]>((r) => { resolve = r }))
 
     const store = createOhlcvStore({
-      equityClient: { getHistorical },
       cryptoClient: { getHistorical },
-      currencyClient: { getHistorical },
       ttlMs: 120_000,
       maxSize: 50,
     })
 
-    const p1 = store.fetch({ asset: 'equity', symbol: 'TEST', interval: '1h', strategy: 'bars', lookbackBars: 10 })
-    const p2 = store.fetch({ asset: 'equity', symbol: 'TEST', interval: '1h', strategy: 'bars', lookbackBars: 10 })
+    const p1 = store.fetch({ asset: 'crypto', symbol: 'TEST', interval: '1h', strategy: 'bars', lookbackBars: 10 })
+    const p2 = store.fetch({ asset: 'crypto', symbol: 'TEST', interval: '1h', strategy: 'bars', lookbackBars: 10 })
 
     expect(getHistorical).toHaveBeenCalledTimes(1)
 
@@ -65,13 +63,11 @@ describe('OhlcvStore', () => {
     const getHistorical = vi.fn(async () => bars as unknown[])
 
     const store = createOhlcvStore({
-      equityClient: { getHistorical },
       cryptoClient: { getHistorical },
-      currencyClient: { getHistorical },
     })
 
     const full = await store.fetch({
-      asset: 'equity',
+      asset: 'crypto',
       symbol: 'TEST',
       interval: '1h',
       strategy: 'calendar',
@@ -79,7 +75,7 @@ describe('OhlcvStore', () => {
     })
 
     const dropped = await store.fetch({
-      asset: 'equity',
+      asset: 'crypto',
       symbol: 'TEST',
       interval: '1h',
       strategy: 'calendar',

@@ -99,24 +99,24 @@ describe('createBacktestRoutes', () => {
 
   it('returns normalized bars for valid queries', async () => {
     const getBacktestBars = vi.fn().mockResolvedValue([
-      { ts: '2025-01-01T00:00:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+      { ts: '2025-01-01T00:00:00.000Z', symbol: 'BTC/USDT', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
     ])
     const app = createBacktestRoutes({
       backtest: makeBacktestManager(),
       marketData: makeMarketData({ getBacktestBars }),
     })
 
-    const res = await app.request('/bars?assetType=equity&symbol=AAPL&startDate=2025-01-01&endDate=2025-01-31')
+    const res = await app.request('/bars?assetType=crypto&symbol=BTCUSDT&startDate=2025-01-01&endDate=2025-01-31')
 
     expect(res.status).toBe(200)
     expect(getBacktestBars).toHaveBeenCalledWith({
-      assetType: 'equity',
-      symbol: 'AAPL',
+      assetType: 'crypto',
+      symbol: 'BTCUSDT',
       startDate: '2025-01-01',
       endDate: '2025-01-31',
     })
     expect(await res.json()).toEqual({
-      bars: [{ ts: '2025-01-01T00:00:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1000 }],
+      bars: [{ ts: '2025-01-01T00:00:00.000Z', symbol: 'BTC/USDT', open: 100, high: 101, low: 99, close: 100, volume: 1000 }],
     })
   })
 
@@ -146,12 +146,12 @@ describe('createBacktestRoutes', () => {
       marketData: makeMarketData({ getBacktestBars }),
     })
 
-    const res = await app.request('/bars?assetType=equity&symbol=AAPL&startDate=2025-01-01&endDate=2025-01-31&interval=1h')
+    const res = await app.request('/bars?assetType=fx&symbol=EURUSD&startDate=2025-01-01&endDate=2025-01-31&interval=1h')
 
     expect(res.status).toBe(400)
     expect(getBacktestBars).not.toHaveBeenCalled()
     expect(await res.json()).toEqual({
-      error: 'Invalid interval: only supported for crypto bars',
+      error: 'Invalid assetType: expected "crypto"',
     })
   })
 })

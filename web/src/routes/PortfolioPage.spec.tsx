@@ -31,13 +31,11 @@ describe('PortfolioPage', () => {
       totalRealizedPnL: 75,
       accounts: [
         { id: 'ccxt-main', label: 'Main Crypto', equity: 8_000, cash: 2_500 },
-        { id: 'alpaca-paper', label: 'Paper Equity', equity: 4_000, cash: 2_000 },
       ],
     })
     tradingApi.listAccounts.mockResolvedValue({
       accounts: [
         { id: 'ccxt-main', label: 'Main Crypto', provider: 'ccxt' },
-        { id: 'alpaca-paper', label: 'Paper Equity', provider: 'alpaca' },
       ],
     })
     tradingApi.positions.mockImplementation(async (accountId: string) => {

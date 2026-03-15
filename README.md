@@ -19,9 +19,8 @@ Your one-person Wall Street. Alice is an AI trading agent that gives you your ow
 - **Dual AI provider** — switch between Claude Code CLI and Vercel AI SDK at runtime, no restart needed
 - **Unified trading** — multi-account architecture supporting CCXT (Bybit, OKX, Binance, etc.) and Alpaca (US equities) with a git-like workflow (stage, commit, push)
 - **Guard pipeline** — extensible pre-execution safety checks (max position size, cooldown between trades, symbol whitelist)
-- **Market data** — OpenTypeBB-powered equity, crypto, commodity, and currency data layers with unified symbol search (`marketSearchForResearch`) and technical indicator calculator
-- **Equity research** — company profiles, financial statements, ratios, analyst estimates, earnings calendar, insider trading, and market movers (top gainers, losers, most active)
-- **News collector** — background RSS collection from configurable feeds with archive search tools (`globNews`/`grepNews`/`readNews`). Also captures OpenTypeBB news API results via piggyback
+- **Market data** — CCXT-backed crypto market data and technical indicator calculator
+- **News collector** — background RSS collection from configurable feeds with archive search tools (`globNews`/`grepNews`/`readNews`)
 - **Cognitive state** — persistent "brain" with frontal lobe memory, emotion tracking, and commit history
 - **Event log** — persistent append-only JSONL event log with real-time subscriptions and crash recovery
 - **Cron scheduling** — event-driven cron system with AI-powered job execution and automatic delivery to the last-interacted channel
@@ -69,7 +68,7 @@ graph LR
   end
 
   subgraph Domains
-    OBB[OpenTypeBB Data]
+    MD[Market Data]
     IK[Indicator Kit]
     IT[Indicator Tools]
     BPA[Brooks PA]
@@ -98,8 +97,7 @@ graph LR
   E --> S
   TC -->|Vercel tools| VS
   TC -->|MCP tools| MCP
-  OBB --> IK
-  OBB --> NC
+  MD --> IK
   IK --> IT
   IT --> TC
   IT --> BPA
@@ -122,7 +120,7 @@ graph LR
 
 **Core** — `Engine` is a thin facade that delegates to `AgentCenter`, which routes all calls (both stateless and session-aware) through `ProviderRouter`. `ToolCenter` is a centralized tool registry — domain modules register tools there, and it exports them in Vercel AI SDK and MCP formats. `EventLog` provides persistent append-only event storage (JSONL) with real-time subscriptions and crash recovery. `ConnectorCenter` tracks which channel the user last spoke through and handles delivery.
 
-**Domains** — domain-specific tool sets registered in `ToolCenter`, grouped under cognition, research, technical analysis, and trading. `Guards` enforce pre-execution safety checks (position size limits, trade cooldowns, symbol whitelist) on all trading operations. `NewsCollector` runs background RSS fetches and piggybacks OpenTypeBB news calls into a persistent archive searchable by the agent.
+**Domains** — domain-specific tool sets registered in `ToolCenter`, grouped under cognition, research, technical analysis, and trading. `Guards` enforce pre-execution safety checks (position size limits, trade cooldowns, symbol whitelist) on all trading operations. `NewsCollector` runs background RSS fetches into a persistent archive searchable by the agent.
 
 **Tasks** — scheduled background work. `CronEngine` manages jobs and fires `cron.fire` events into the EventLog on schedule; a listener picks them up, runs them through the AI engine, and delivers replies via the ConnectorCenter. `Heartbeat` is a periodic health-check that uses a structured response protocol (HEARTBEAT_OK / CHAT_NO / CHAT_YES).
 
@@ -156,7 +154,7 @@ All config lives in `config/` as JSON files with Zod validation. Missing files f
 
 **AI Provider** — The default provider is Claude Code (`claude -p` subprocess). To use the [Vercel AI SDK](https://sdk.vercel.ai/docs) instead (Anthropic, OpenAI, Google, etc.), switch `ai-provider.json` to `vercel-ai-sdk` and add your API keys in that same file.
 
-**Trading** — Multi-account architecture. Crypto via [CCXT](https://docs.ccxt.com/) (Bybit, OKX, Binance, etc.) configured in `crypto.json`. US equities via [Alpaca](https://alpaca.markets/) configured in `securities.json`. Both use the same git-like trading workflow.
+**Trading** — Multi-account architecture focused on crypto via [CCXT](https://docs.ccxt.com/) (Bybit, OKX, Binance, etc.) configured in `crypto.json`, with a git-like trading workflow.
 
 | File | Purpose |
 |------|---------|
@@ -164,10 +162,8 @@ All config lives in `config/` as JSON files with Zod validation. Missing files f
 | `agent.json` | Max agent steps, evolution mode toggle, Claude Code tool permissions |
 | `ai-provider.json` | Active AI provider, model, base URL, and API keys |
 | `crypto.json` | CCXT exchange config + API keys, allowed symbols, guards |
-| `securities.json` | Alpaca broker config + API keys, allowed symbols, guards |
 | `connectors.json` | Web/MCP server ports, Telegram bot credentials + enable, MCP Ask enable |
-| `opentypebb.json` | OpenTypeBB SDK defaults and provider API keys |
-| `news-collector.json` | RSS feeds, fetch interval, retention period, OpenTypeBB piggyback toggle |
+| `news-collector.json` | RSS feeds, fetch interval, and retention period |
 | `compaction.json` | Context window limits, auto-compaction thresholds |
 | `heartbeat.json` | Heartbeat enable/disable, interval, active hours |
 
@@ -206,25 +202,14 @@ src/
       brain/                 # Cognitive state (memory, emotion)
       thinking-kit/          # Reasoning and calculation tools
     research/
-      equity/                # Equity fundamentals and data adapter
-      market/                # Unified symbol search across equity, crypto, currency
-      news/                  # OpenTypeBB news tools (world + company headlines)
-      news-collector/        # RSS collector, piggyback wrapper, archive search tools
+      market/                # Symbol search across configured trading accounts
+      news-collector/        # RSS collector + archive search tools
     technical-analysis/
       indicator-kit/         # Indicator formulas + OHLCV fetch strategies (library)
       indicator-tools/       # Indicator tool surface (calculateIndicator)
       brooks-pa/             # Brooks price action analysis tool
       ict-smc/               # ICT / SMC market-structure analysis tools
     trading/                 # Unified multi-account trading (CCXT + Alpaca), guard pipeline, git-like commit history
-  integrations/
-    opentypebb/
-      sdk/                   # In-process OpenTypeBB executor + SDK client adapters
-      equity/                # OpenTypeBB-backed equity data layer (price, fundamentals, estimates, etc.)
-      crypto/                # OpenTypeBB-backed crypto data layer
-      currency/              # OpenTypeBB-backed currency data layer
-      commodity/             # OpenTypeBB-backed commodity data layer (EIA, spot prices)
-      economy/               # OpenTypeBB-backed macro economy data layer
-      news/                  # OpenTypeBB-backed news data layer
   connectors/
     web/                     # Web UI chat (Hono, SSE push)
     telegram/                # Telegram bot (grammY, polling, commands)

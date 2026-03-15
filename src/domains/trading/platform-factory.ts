@@ -5,29 +5,19 @@
 import type { IPlatform, PlatformCredentials } from './platform.js'
 import type { ITradingAccount } from './interfaces.js'
 import { CcxtPlatform } from './providers/ccxt/CcxtPlatform.js'
-import { AlpacaPlatform } from './providers/alpaca/AlpacaPlatform.js'
 import type { PlatformConfig, AccountConfig } from '../../core/config.js'
 
 /** Create an IPlatform from a parsed PlatformConfig. */
 export function createPlatformFromConfig(config: PlatformConfig): IPlatform {
-  switch (config.type) {
-    case 'ccxt':
-      return new CcxtPlatform({
-        id: config.id,
-        label: config.label,
-        exchange: config.exchange,
-        sandbox: config.sandbox,
-        demoTrading: config.demoTrading,
-        defaultMarketType: config.defaultMarketType,
-        options: config.options,
-      })
-    case 'alpaca':
-      return new AlpacaPlatform({
-        id: config.id,
-        label: config.label,
-        paper: config.paper,
-      })
-  }
+  return new CcxtPlatform({
+    id: config.id,
+    label: config.label,
+    exchange: config.exchange,
+    sandbox: config.sandbox,
+    demoTrading: config.demoTrading,
+    defaultMarketType: config.defaultMarketType,
+    options: config.options,
+  })
 }
 
 /** Create an ITradingAccount from a platform + account config. */

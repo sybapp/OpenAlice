@@ -86,54 +86,6 @@ const cryptoSchema = z.object({
   })).default([]),
 })
 
-const securitiesSchema = z.object({
-  provider: z.discriminatedUnion('type', [
-    z.object({
-      type: z.literal('alpaca'),
-      apiKey: z.string().optional(),
-      secretKey: z.string().optional(),
-      paper: z.boolean().default(true),
-    }),
-    z.object({
-      type: z.literal('none'),
-    }),
-  ]).default({ type: 'alpaca', paper: true }),
-  guards: z.array(z.object({
-    type: z.string(),
-    options: z.record(z.string(), z.unknown()).default({}),
-  })).default([]),
-})
-
-const opentypebbSchema = z.object({
-  enabled: z.boolean().default(true),
-  providers: z.object({
-    equity: z.string().default('yfinance'),
-    crypto: z.string().default('yfinance'),
-    currency: z.string().default('yfinance'),
-    newsCompany: z.string().default('yfinance'),
-    newsWorld: z.string().default('fmp'),
-  }).default({
-    equity: 'yfinance',
-    crypto: 'yfinance',
-    currency: 'yfinance',
-    newsCompany: 'yfinance',
-    newsWorld: 'fmp',
-  }),
-  providerKeys: z.object({
-    fred: z.string().optional(),
-    fmp: z.string().optional(),
-    eia: z.string().optional(),
-    bls: z.string().optional(),
-    nasdaq: z.string().optional(),
-    tradingeconomics: z.string().optional(),
-    econdb: z.string().optional(),
-    intrinio: z.string().optional(),
-    benzinga: z.string().optional(),
-    tiingo: z.string().optional(),
-    biztoc: z.string().optional(),
-  }).default({}),
-})
-
 const compactionSchema = z.object({
   maxContextTokens: z.number().default(200_000),
   maxOutputTokens: z.number().default(20_000),
@@ -201,17 +153,7 @@ const ccxtPlatformSchema = z.object({
   options: z.record(z.string(), z.unknown()).optional(),
 })
 
-const alpacaPlatformSchema = z.object({
-  id: z.string(),
-  label: z.string().optional(),
-  type: z.literal('alpaca'),
-  paper: z.boolean().default(true),
-})
-
-export const platformConfigSchema = z.discriminatedUnion('type', [
-  ccxtPlatformSchema,
-  alpacaPlatformSchema,
-])
+export const platformConfigSchema = z.discriminatedUnion('type', [ccxtPlatformSchema])
 
 export const platformsFileSchema = z.array(platformConfigSchema)
 
@@ -236,8 +178,6 @@ export type Config = {
   engine: z.infer<typeof engineSchema>
   agent: z.infer<typeof agentSchema>
   crypto: z.infer<typeof cryptoSchema>
-  securities: z.infer<typeof securitiesSchema>
-  opentypebb: z.infer<typeof opentypebbSchema>
   compaction: z.infer<typeof compactionSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
@@ -287,16 +227,12 @@ async function readSectionWithFallback<T>(filename: string, schema: z.ZodType<T>
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'opentypebb.json', 'compaction.json', 'ai-provider.json', 'heartbeat.json', 'connectors.json', 'news-collector.json', 'tools.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'compaction.json', 'ai-provider.json', 'heartbeat.json', 'connectors.json', 'news-collector.json', 'tools.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
-
-  if (raws[4] === undefined) {
-    raws[4] = await loadJsonFile('openbb.json')
-  }
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
   // ---------- Migration: consolidate old ai-provider + model + api-keys → ai-provider ----------
-  const aiProviderRaw = raws[6] as Record<string, unknown> | undefined
+  const aiProviderRaw = raws[4] as Record<string, unknown> | undefined
   if (aiProviderRaw && !('backend' in aiProviderRaw)) {
     // Old format detected — merge model.json + api-keys.json into ai-provider.json
     const oldModel = await loadJsonFile('model.json') as Record<string, unknown> | undefined
@@ -308,7 +244,7 @@ export async function loadConfig(): Promise<Config> {
       ...(oldModel?.baseUrl ? { baseUrl: oldModel.baseUrl } : {}),
       apiKeys: oldKeys ?? {},
     }
-    raws[6] = migrated
+    raws[4] = migrated
     await mkdir(CONFIG_DIR, { recursive: true })
     await writeFile(resolve(CONFIG_DIR, 'ai-provider.json'), JSON.stringify(migrated, null, 2) + '\n')
     await removeJsonFile('model.json')
@@ -316,7 +252,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   // ---------- Migration: consolidate old telegram.json + engine port fields ----------
-  const connectorsRaw = raws[8] as Record<string, unknown> | undefined
+  const connectorsRaw = raws[6] as Record<string, unknown> | undefined
   if (connectorsRaw === undefined) {
     const oldTelegram = await loadJsonFile('telegram.json')
     const oldEngine = raws[0] as Record<string, unknown> | undefined
@@ -333,21 +269,19 @@ export async function loadConfig(): Promise<Config> {
       await mkdir(CONFIG_DIR, { recursive: true })
       await writeFile(resolve(CONFIG_DIR, 'engine.json'), JSON.stringify(cleanEngine, null, 2) + '\n')
     }
-    raws[8] = Object.keys(migrated).length > 0 ? migrated : undefined
+    raws[6] = Object.keys(migrated).length > 0 ? migrated : undefined
   }
 
   return {
     engine:        await parseAndSeed(files[0], engineSchema, raws[0]),
     agent:         await parseAndSeed(files[1], agentSchema, raws[1]),
     crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2]),
-    securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
-    opentypebb:    await parseAndSeed(files[4], opentypebbSchema, raws[4]),
-    compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
-    aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
-    heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
-    connectors:    await parseAndSeed(files[8], connectorsSchema, raws[8]),
-    newsCollector: await parseAndSeed(files[9], newsCollectorSchema, raws[9]),
-    tools:         await parseAndSeed(files[10], toolsSchema, raws[10]),
+    compaction:    await parseAndSeed(files[3], compactionSchema, raws[3]),
+    aiProvider:    await parseAndSeed(files[4], aiProviderSchema, raws[4]),
+    heartbeat:     await parseAndSeed(files[5], heartbeatSchema, raws[5]),
+    connectors:    await parseAndSeed(files[6], connectorsSchema, raws[6]),
+    newsCollector: await parseAndSeed(files[7], newsCollectorSchema, raws[7]),
+    tools:         await parseAndSeed(files[8], toolsSchema, raws[8]),
   }
 }
 
@@ -355,7 +289,7 @@ export async function loadConfig(): Promise<Config> {
 
 /**
  * Load platform + account config.
- * Prefers platforms.json + accounts.json. Falls back to legacy crypto.json + securities.json.
+ * Prefers platforms.json + accounts.json. Falls back to legacy crypto.json.
  */
 export async function loadTradingConfig(): Promise<{
   platforms: PlatformConfig[]
@@ -373,23 +307,19 @@ export async function loadTradingConfig(): Promise<{
     }
   }
 
-  // Migration: derive from legacy crypto.json + securities.json
+  // Migration: derive from legacy crypto.json
   return migrateLegacyTradingConfig()
 }
 
-/** Derive platform+account config from old crypto.json + securities.json, then write to disk.
- *  TODO: remove before v1.0 — drop crypto.json/securities.json support entirely */
+/** Derive platform+account config from old crypto.json, then write to disk.
+ *  TODO: remove before v1.0 — drop crypto.json support entirely */
 async function migrateLegacyTradingConfig(): Promise<{
   platforms: PlatformConfig[]
   accounts: AccountConfig[]
 }> {
-  const [rawCrypto, rawSecurities] = await Promise.all([
-    loadJsonFile('crypto.json'),
-    loadJsonFile('securities.json'),
-  ])
+  const rawCrypto = await loadJsonFile('crypto.json')
 
   const crypto = cryptoSchema.parse(rawCrypto ?? {})
-  const securities = securitiesSchema.parse(rawSecurities ?? {})
 
   const platforms: PlatformConfig[] = []
   const accounts: AccountConfig[] = []
@@ -413,23 +343,6 @@ async function migrateLegacyTradingConfig(): Promise<{
       apiSecret: p.apiSecret,
       password: p.password,
       guards: crypto.guards,
-    })
-  }
-
-  if (securities.provider.type === 'alpaca') {
-    const p = securities.provider
-    const platformId = 'alpaca-platform'
-    platforms.push({
-      id: platformId,
-      type: 'alpaca',
-      paper: p.paper,
-    })
-    accounts.push({
-      id: p.paper ? 'alpaca-paper' : 'alpaca-live',
-      platformId,
-      apiKey: p.apiKey,
-      apiSecret: p.secretKey,
-      guards: securities.guards,
     })
   }
 
@@ -492,11 +405,6 @@ export async function writeAIConfig(backend: AIBackend): Promise<void> {
   })
 }
 
-/** Read OpenTypeBB config from disk (called per-request for hot-reload). */
-export async function readOpentypebbConfig() {
-  return readSectionWithFallback('opentypebb.json', opentypebbSchema)
-}
-
 /** Read tools config from disk (called per-request for hot-reload). */
 export async function readToolsConfig() {
   return readSectionWithFallback('tools.json', toolsSchema)
@@ -510,8 +418,6 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   engine: engineSchema,
   agent: agentSchema,
   crypto: cryptoSchema,
-  securities: securitiesSchema,
-  opentypebb: opentypebbSchema,
   compaction: compactionSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
@@ -524,8 +430,6 @@ const sectionFiles: Record<ConfigSection, string> = {
   engine: 'engine.json',
   agent: 'agent.json',
   crypto: 'crypto.json',
-  securities: 'securities.json',
-  opentypebb: 'opentypebb.json',
   compaction: 'compaction.json',
   aiProvider: 'ai-provider.json',
   heartbeat: 'heartbeat.json',

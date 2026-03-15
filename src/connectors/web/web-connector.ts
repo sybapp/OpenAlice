@@ -9,7 +9,7 @@ import type { ConnectorCenter, Connector } from '../../core/connector-center.js'
 import { persistMedia } from '../../core/media-store.js'
 import { createAuthMiddleware } from './auth-middleware.js'
 import { createChatRoutes, createMediaRoutes, type SSEClient } from './routes/chat.js'
-import { createConfigRoutes, createOpentypebbRoutes } from './routes/config.js'
+import { createConfigRoutes } from './routes/config.js'
 import { createEventsRoutes } from './routes/events.js'
 import { createCronRoutes } from './routes/cron.js'
 import { createHeartbeatRoutes } from './routes/heartbeat.js'
@@ -69,7 +69,6 @@ function createWebApp(args: {
   app.route('/api/config', createConfigRoutes({
     onConnectorsChange: async () => { await ctx.reconnectConnectors() },
   }))
-  app.route('/api/opentypebb', createOpentypebbRoutes())
   app.route('/api/events', createEventsRoutes(ctx))
   app.route('/api/cron', createCronRoutes(ctx))
   app.route('/api/strategies', createStrategiesRoutes(ctx))

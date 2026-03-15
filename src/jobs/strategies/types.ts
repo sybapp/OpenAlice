@@ -5,17 +5,10 @@ import type { Engine } from '../../core/engine.js'
 import type { EventLog } from '../../core/event-log.js'
 import type { Config, MarketDataBridge } from '../../core/types.js'
 import type { CronSchedule } from '../cron/engine.js'
-import type { SymbolIndex } from '../../integrations/opentypebb/equity/index.js'
-import type {
-  CryptoClientLike,
-  CurrencyClientLike,
-  EquityClientLike,
-  NewsClientLike,
-} from '../../integrations/opentypebb/sdk/index.js'
 import type { INewsProvider } from '../../domains/research/news-collector/index.js'
 import type { OhlcvStore } from '../../domains/technical-analysis/indicator-kit/index.js'
 
-export type TraderAssetClass = 'crypto' | 'equity'
+export type TraderAssetClass = 'crypto'
 export type TraderAllowedOrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'
 
 export interface TraderStrategy {
@@ -216,12 +209,7 @@ export interface TraderRunnerDeps {
   brain: Brain
   accountManager: AccountManager
   marketData: MarketDataBridge
-  symbolIndex: SymbolIndex
   ohlcvStore: OhlcvStore
-  equityClient: EquityClientLike
-  cryptoClient: CryptoClientLike
-  currencyClient: CurrencyClientLike
-  newsClient: NewsClientLike
   newsStore: INewsProvider
   getAccountGit: (accountId: string) => ITradingGit | undefined
 }

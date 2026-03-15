@@ -14,7 +14,7 @@ const traderStrategySchema = z.object({
   enabled: z.boolean().default(true),
   sources: z.array(z.string().min(1)).min(1),
   universe: z.object({
-    asset: z.enum(['crypto', 'equity']),
+    asset: z.literal('crypto'),
     symbols: z.array(z.string().min(1)).min(1),
   }),
   timeframes: z.object({

@@ -23,7 +23,7 @@ vi.mock('../../skills/registry.js', () => ({
         id: 'ta-brooks',
         label: 'Brooks',
         description: 'Brooks mode',
-        preferredTools: ['newsGetWorld'],
+        preferredTools: ['globNews'],
         toolAllow: undefined,
         toolDeny: ['trading*'],
         outputSchema: 'AnalysisReport',
@@ -42,8 +42,8 @@ vi.mock('../../skills/registry.js', () => ({
         id: 'research-news-fundamental',
         label: 'Research',
         description: 'Research mode',
-        preferredTools: ['newsGetWorld'],
-        toolAllow: ['news*'],
+        preferredTools: ['globNews'],
+        toolAllow: ['glob*'],
         toolDeny: ['trading*'],
         outputSchema: 'AnalysisReport',
         decisionWindowBars: 10,
@@ -68,12 +68,12 @@ describe('VercelAIProvider skill cache isolation', () => {
 
   it('does not reuse the same agent when skill id changes', async () => {
     const tools: Record<string, Tool> = {
-      newsGetWorld: {} as Tool,
+      globNews: {} as Tool,
       tradingCommit: {} as Tool,
     }
     const provider = new VercelAIProvider(async (policy) => {
       if (policy?.deny?.includes('trading*')) {
-        return { newsGetWorld: tools.newsGetWorld }
+        return { globNews: tools.globNews }
       }
       return tools
     }, 'base instructions', 3, {
@@ -104,12 +104,12 @@ describe('VercelAIProvider skill cache isolation', () => {
 
   it('does not reuse the same agent when filtered tools change', async () => {
     const tools: Record<string, Tool> = {
-      newsGetWorld: {} as Tool,
+      globNews: {} as Tool,
       tradingCommit: {} as Tool,
     }
     const provider = new VercelAIProvider(async (policy) => {
-      if (policy?.allow?.includes('news*')) {
-        return { newsGetWorld: tools.newsGetWorld }
+      if (policy?.allow?.includes('glob*')) {
+        return { globNews: tools.globNews }
       }
       return tools
     }, 'base instructions', 3, {

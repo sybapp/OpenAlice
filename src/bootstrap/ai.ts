@@ -21,13 +21,6 @@ import type { Brain } from '../domains/cognition/brain/index.js'
 import type { EventLog } from '../core/event-log.js'
 import type { ITradingGit } from '../domains/trading/index.js'
 import type { MarketDataBridge } from '../core/types.js'
-import type { SymbolIndex } from '../integrations/opentypebb/equity/index.js'
-import type {
-  CryptoClientLike,
-  CurrencyClientLike,
-  EquityClientLike,
-  NewsClientLike,
-} from '../integrations/opentypebb/sdk/index.js'
 import type { INewsProvider } from '../domains/research/news-collector/index.js'
 import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
@@ -43,12 +36,7 @@ export interface SkillRuntimeDeps {
   eventLog: EventLog
   accountManager: AccountManager
   marketData: MarketDataBridge
-  symbolIndex: SymbolIndex
   ohlcvStore: OhlcvStore
-  equityClient: EquityClientLike
-  cryptoClient: CryptoClientLike
-  currencyClient: CurrencyClientLike
-  newsClient: NewsClientLike
   newsStore: INewsProvider
   getAccountGit: (accountId: string) => ITradingGit | undefined
 }
@@ -79,12 +67,7 @@ export function initAIProviders(
       eventLog: skillRuntime.eventLog,
       accountManager: skillRuntime.accountManager,
       marketData: skillRuntime.marketData,
-      symbolIndex: skillRuntime.symbolIndex,
       ohlcvStore: skillRuntime.ohlcvStore,
-      equityClient: skillRuntime.equityClient,
-      cryptoClient: skillRuntime.cryptoClient,
-      currencyClient: skillRuntime.currencyClient,
-      newsClient: skillRuntime.newsClient,
       newsStore: skillRuntime.newsStore,
       getAccountGit: skillRuntime.getAccountGit,
       invocation: {},

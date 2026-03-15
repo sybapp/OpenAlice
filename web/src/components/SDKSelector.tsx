@@ -155,40 +155,6 @@ export const CRYPTO_SDK_OPTIONS: SDKOption[] = [
   },
 ]
 
-export const SECURITIES_SDK_OPTIONS: SDKOption[] = [
-  {
-    id: 'alpaca',
-    name: 'Alpaca',
-    description: 'Commission-free US equities and ETFs with fractional share support.',
-    badge: 'AL',
-    badgeColor: 'text-green',
-  },
-  {
-    id: 'ibkr',
-    name: 'Interactive Brokers',
-    description: 'Global multi-asset broker with access to 150+ markets in 33 countries.',
-    badge: 'IB',
-    badgeColor: 'text-text-muted',
-    comingSoon: true,
-  },
-  {
-    id: 'schwab',
-    name: 'Charles Schwab',
-    description: 'Full-service US broker with comprehensive research and zero-commission trades.',
-    badge: 'CS',
-    badgeColor: 'text-text-muted',
-    comingSoon: true,
-  },
-  {
-    id: 'tradier',
-    name: 'Tradier',
-    description: 'Developer-friendly brokerage API with equity and options trading.',
-    badge: 'TR',
-    badgeColor: 'text-text-muted',
-    comingSoon: true,
-  },
-]
-
 export const PLATFORM_TYPE_OPTIONS: SDKOption[] = [
   {
     id: 'ccxt',
@@ -197,23 +163,9 @@ export const PLATFORM_TYPE_OPTIONS: SDKOption[] = [
     badge: 'CC',
     badgeColor: 'text-accent',
   },
-  {
-    id: 'alpaca',
-    name: 'Alpaca (Securities)',
-    description: 'Commission-free US equities and ETFs with fractional share support.',
-    badge: 'AL',
-    badgeColor: 'text-green',
-  },
 ]
 
 export const DATASOURCE_OPTIONS: SDKOption[] = [
-  {
-    id: 'opentypebb',
-    name: 'OpenTypeBB',
-    description: 'Market data, financials, and macro indicators via the built-in OpenTypeBB SDK.',
-    badge: 'OB',
-    badgeColor: 'text-green',
-  },
   {
     id: 'newsCollector',
     name: 'News Collector',

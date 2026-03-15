@@ -12,7 +12,6 @@ import { TradingGit } from './git/TradingGit.js'
 import { createOperationDispatcher } from './operation-dispatcher.js'
 import { createWalletStateBridge } from './wallet-state-bridge.js'
 import { createGuardPipeline, resolveGuards } from './guards/index.js'
-import { AlpacaAccount } from './providers/alpaca/index.js'
 import { CcxtAccount } from './providers/ccxt/index.js'
 import type { Config } from '../../core/config.js'
 
@@ -78,22 +77,6 @@ export function wireAccountTrading(
 }
 
 // ==================== Config → Account helpers ====================
-
-/**
- * Create an AlpacaAccount from securities config section.
- * Returns null if provider type is 'none'.
- */
-export function createAlpacaFromConfig(
-  config: Config['securities'],
-): AlpacaAccount | null {
-  if (config.provider.type === 'none') return null
-  const { apiKey, secretKey, paper } = config.provider
-  return new AlpacaAccount({
-    apiKey: apiKey ?? '',
-    secretKey: secretKey ?? '',
-    paper,
-  })
-}
 
 /**
  * Create a CcxtAccount from crypto config section.

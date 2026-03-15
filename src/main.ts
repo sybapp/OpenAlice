@@ -50,7 +50,7 @@ async function main() {
   // ---- Trading Accounts ----
   const { accountManager, accountSetups, ccxtInitPromise, initAccount } = await initTradingAccounts()
 
-  // ---- Services (Brain, EventLog, Cron, OpenTypeBB, SymbolIndex) ----
+  // ---- Services (Brain, EventLog, Cron, News, OHLCV) ----
   const services = await initServices(config)
   const {
     brain,
@@ -59,12 +59,7 @@ async function main() {
     cronEngine,
     newsStore,
     marketData,
-    symbolIndex,
     ohlcvStore,
-    equityClient,
-    cryptoClient,
-    currencyClient,
-    newsClient,
   } = services
 
   // ---- Tool Center ----
@@ -81,12 +76,7 @@ async function main() {
     eventLog,
     accountManager,
     marketData,
-    symbolIndex,
     ohlcvStore,
-    equityClient,
-    cryptoClient,
-    currencyClient,
-    newsClient,
     newsStore,
     getAccountGit,
   })
@@ -108,12 +98,7 @@ async function main() {
     brain,
     accountManager,
     marketData,
-    symbolIndex,
     ohlcvStore,
-    equityClient,
-    cryptoClient,
-    currencyClient,
-    newsClient,
     newsStore,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
@@ -125,12 +110,7 @@ async function main() {
     brain,
     accountManager,
     marketData,
-    symbolIndex,
     ohlcvStore,
-    equityClient,
-    cryptoClient,
-    currencyClient,
-    newsClient,
     newsStore,
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
@@ -182,12 +162,7 @@ async function main() {
       brain,
       accountManager,
       marketData,
-      symbolIndex,
       ohlcvStore,
-      equityClient,
-      cryptoClient,
-      currencyClient,
-      newsClient,
       newsStore,
       getAccountGit,
     }),

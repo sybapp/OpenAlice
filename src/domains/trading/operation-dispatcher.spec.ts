@@ -44,7 +44,7 @@ describe('createOperationDispatcher', () => {
       const op: Operation = {
         action: 'placeOrder',
         params: {
-          aliceId: 'alpaca-AAPL',
+          aliceId: 'bybit-BTCUSDT',
           symbol: 'AAPL',
           secType: 'STK',
           currency: 'USD',
@@ -59,7 +59,7 @@ describe('createOperationDispatcher', () => {
       await dispatch(op)
 
       const call = account.placeOrder.mock.calls[0][0]
-      expect(call.contract.aliceId).toBe('alpaca-AAPL')
+      expect(call.contract.aliceId).toBe('bybit-BTCUSDT')
       expect(call.contract.secType).toBe('STK')
       expect(call.contract.currency).toBe('USD')
       expect(call.contract.exchange).toBe('NASDAQ')

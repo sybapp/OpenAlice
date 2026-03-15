@@ -5,8 +5,6 @@ import type { Brain } from '../domains/cognition/brain/index.js'
 import type { AccountManager } from '../domains/trading/index.js'
 import type { ITradingGit } from '../domains/trading/index.js'
 import type { MarketDataBridge } from '../types.js'
-import type { SymbolIndex } from '../../integrations/opentypebb/equity/index.js'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, NewsClientLike } from '../../integrations/opentypebb/sdk/types.js'
 import type { INewsProvider } from '../domains/research/news-collector/types.js'
 import { analyzeBrooksPa } from '../domains/technical-analysis/brooks-pa/analyzer/index.js'
 import { buildBrooksCoreFromDetailed } from '../domains/technical-analysis/brooks-pa/analyzer/core.js'
@@ -15,7 +13,7 @@ import { analyzeIctSmc } from '../domains/technical-analysis/ict-smc/analyze.js'
 import { IndicatorCalculator, getCalendarDaysForInterval } from '../domains/technical-analysis/indicator-kit/index.js'
 import type { OhlcvData } from '../domains/technical-analysis/indicator-kit/index.js'
 import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
-import { computeDedupKey } from '../domains/research/news-collector/index.js'
+import type { NewsItem } from '../domains/research/news-collector/types.js'
 import { globNews, grepNews, readNews } from '../domains/research/news-collector/tools.js'
 
 export interface SkillScriptContext {
@@ -24,12 +22,7 @@ export interface SkillScriptContext {
   brain: Brain
   accountManager: AccountManager
   marketData: MarketDataBridge
-  symbolIndex: SymbolIndex
   ohlcvStore: OhlcvStore
-  equityClient: EquityClientLike
-  cryptoClient: CryptoClientLike
-  currencyClient: CurrencyClientLike
-  newsClient: NewsClientLike
   newsStore: INewsProvider
   getAccountGit: (accountId: string) => ITradingGit | undefined
   invocation: Record<string, unknown>
@@ -45,7 +38,7 @@ export interface SkillScriptModule<TInput = unknown, TOutput = unknown> {
 
 interface BacktestScriptInvocation {
   mode?: 'backtest'
-  asset?: 'equity' | 'crypto' | 'currency'
+  asset?: 'crypto'
   source?: string
   currentTimestamp?: string
   bars?: Array<{
@@ -214,84 +207,23 @@ async function buildTraderAccountSnapshot(ctx: SkillScriptContext, source: strin
 }
 
 async function searchMarket(ctx: SkillScriptContext, query: string, limit: number = 20) {
-  const equityResults = ctx.symbolIndex.search(query, limit).map((result) => ({
-    ...result,
-    assetClass: 'equity' as const,
-  }))
+  const matches = await ctx.accountManager.searchContracts(query)
+  const results = matches
+    .flatMap((match) => match.results.map((item) => ({
+      assetClass: 'crypto' as const,
+      source: match.accountId,
+      aliceId: item.contract.aliceId,
+      symbol: item.contract.localSymbol ?? item.contract.symbol,
+      exchange: item.contract.exchange,
+      currency: item.contract.currency,
+      description: item.contract.description,
+    })))
+    .slice(0, limit)
 
-  const [cryptoSettled, currencySettled] = await Promise.allSettled([
-    ctx.cryptoClient.search({ query, provider: 'yfinance' }),
-    ctx.currencyClient.search({ query, provider: 'yfinance' }),
-  ])
-
-  const cryptoResults = (cryptoSettled.status === 'fulfilled' ? cryptoSettled.value : []).map((result) => ({
-    ...result,
-    assetClass: 'crypto' as const,
-  }))
-
-  const currencyResults = (currencySettled.status === 'fulfilled' ? currencySettled.value : [])
-    .filter((result) => {
-      const symbol = (result as Record<string, unknown>).symbol as string | undefined
-      return symbol?.endsWith('USD')
-    })
-    .map((result) => ({ ...result, assetClass: 'currency' as const }))
-
-  const results = [...equityResults, ...cryptoResults, ...currencyResults]
   if (results.length === 0) {
     return { results: [], message: `No symbols matching "${query}". Try a different keyword.` }
   }
   return { results, count: results.length }
-}
-
-async function piggybackNewsResults(
-  ctx: SkillScriptContext,
-  result: unknown,
-  ingestSource: 'opentypebb-company' | 'opentypebb-world',
-  symbol?: string,
-) {
-  if (!ctx.config.newsCollector.piggybackOpenTypeBB) return
-  if (!('ingest' in ctx.newsStore) || typeof (ctx.newsStore as { ingest?: unknown }).ingest !== 'function') return
-
-  const items = Array.isArray(result) ? result : []
-  const store = ctx.newsStore as INewsProvider & {
-    ingest: (item: {
-      title: string
-      content: string
-      pubTime: Date
-      dedupKey: string
-      metadata: Record<string, string | null>
-    }) => Promise<boolean>
-  }
-
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue
-    const raw = item as Record<string, unknown>
-    const title = String(raw.title ?? '')
-    if (!title) continue
-    const content = String(raw.text ?? raw.summary ?? raw.content ?? raw.description ?? '')
-    const link = raw.url ? String(raw.url) : null
-    const dateValue = raw.date ?? raw.published_utc ?? raw.datetime ?? raw.pubDate
-    const pubTime = dateValue ? new Date(String(dateValue)) : new Date()
-    const dedupKey = computeDedupKey({
-      guid: raw.id ? String(raw.id) : undefined,
-      link: link ?? undefined,
-      title,
-      content,
-    })
-
-    await store.ingest({
-      title,
-      content,
-      pubTime: Number.isNaN(pubTime.getTime()) ? new Date() : pubTime,
-      dedupKey,
-      metadata: {
-        source: ingestSource,
-        link,
-        ingestSource,
-        ...(symbol ? { symbol } : {}),
-      },
-    })
-  }
 }
 
 function createNewsArchiveReader(ctx: SkillScriptContext, lookback?: string) {
@@ -300,10 +232,42 @@ function createNewsArchiveReader(ctx: SkillScriptContext, lookback?: string) {
   }
 }
 
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase()
+}
+
+function newsMatchesSymbol(item: NewsItem, symbol: string): boolean {
+  if (item.metadata.symbol && item.metadata.symbol.toUpperCase() === symbol) return true
+  const text = `${item.title}\n${item.content}`.toUpperCase()
+  return text.includes(symbol)
+}
+
+async function getArchiveNews(
+  ctx: SkillScriptContext,
+  options: { lookback?: string; limit?: number; source?: string; symbol?: string },
+) {
+  const cap = options.limit ?? 20
+  const news = await ctx.newsStore.getNewsV2({ endTime: new Date(), lookback: options.lookback, limit: 500 })
+  const sourceFilter = options.source?.trim().toLowerCase()
+  const symbolFilter = options.symbol ? normalizeSymbol(options.symbol) : undefined
+  const filtered = news.filter((item) => {
+    if (sourceFilter && String(item.metadata.source ?? '').toLowerCase() !== sourceFilter) return false
+    if (symbolFilter && !newsMatchesSymbol(item, symbolFilter)) return false
+    return true
+  })
+  const sliced = filtered.slice(-cap)
+  return sliced.map((item) => ({
+    time: item.time.toISOString(),
+    title: item.title,
+    content: item.content,
+    metadata: item.metadata,
+  }))
+}
+
 const scripts = [
   {
     id: 'research-market-search',
-    description: 'Search symbols across equity, crypto, and currency before running analysis.',
+    description: 'Search crypto symbols across configured CCXT accounts before running analysis.',
     inputSchema: z.object({
       query: z.string().min(1),
       limit: z.number().int().positive().optional(),
@@ -316,7 +280,7 @@ const scripts = [
     id: 'analysis-brooks',
     description: 'Run deterministic Brooks-style price action analysis.',
     inputSchema: z.object({
-      asset: z.enum(['equity', 'crypto', 'currency']),
+      asset: z.literal('crypto'),
       symbol: z.string().min(1),
       timeframes: z.object({
         context: z.string().optional(),
@@ -399,7 +363,7 @@ const scripts = [
     id: 'analysis-ict-smc',
     description: 'Run deterministic ICT/SMC structure analysis.',
     inputSchema: z.object({
-      asset: z.enum(['equity', 'crypto', 'currency']),
+      asset: z.literal('crypto'),
       symbol: z.string().min(1),
       timeframe: z.string().optional(),
       lookbackBars: z.number().int().positive().optional(),
@@ -449,7 +413,7 @@ const scripts = [
     id: 'analysis-indicator',
     description: 'Calculate a technical indicator formula for a symbol.',
     inputSchema: z.object({
-      asset: z.enum(['equity', 'crypto', 'currency']),
+      asset: z.literal('crypto'),
       formula: z.string().min(1),
       precision: z.number().int().min(0).max(10).optional(),
       dropUnclosed: z.boolean().optional(),
@@ -479,99 +443,46 @@ const scripts = [
   },
   {
     id: 'research-news-company',
-    description: 'Load recent company-specific news.',
+    description: 'Load recent symbol-specific news from the collected news archive.',
     inputSchema: z.object({
       symbol: z.string().min(1),
+      lookback: z.string().optional(),
+      source: z.string().optional(),
       limit: z.number().int().positive().optional(),
     }),
     async run(ctx, input) {
-      const params: Record<string, unknown> = {
-        symbol: input.symbol,
-        provider: ctx.config.opentypebb.providers.newsCompany,
+      const symbol = normalizeSymbol(input.symbol)
+      const items = await getArchiveNews(ctx, {
+        symbol,
+        lookback: input.lookback,
+        source: input.source,
+        limit: input.limit,
+      })
+      return {
+        symbol,
+        count: items.length,
+        items,
       }
-      if (input.limit) params.limit = input.limit
-      const result = await ctx.newsClient.getCompanyNews(params)
-      await piggybackNewsResults(ctx, result, 'opentypebb-company', input.symbol)
-      return result
     },
   },
   {
     id: 'research-news-world',
-    description: 'Load recent world or macro news.',
+    description: 'Load recent world/macro news from the collected news archive.',
     inputSchema: z.object({
+      lookback: z.string().optional(),
+      source: z.string().optional(),
       limit: z.number().int().positive().optional(),
     }),
     async run(ctx, input) {
-      const params: Record<string, unknown> = {
-        provider: ctx.config.opentypebb.providers.newsWorld,
+      const items = await getArchiveNews(ctx, {
+        lookback: input.lookback,
+        source: input.source,
+        limit: input.limit,
+      })
+      return {
+        count: items.length,
+        items,
       }
-      if (input.limit) params.limit = input.limit
-      const result = await ctx.newsClient.getWorldNews(params)
-      await piggybackNewsResults(ctx, result, 'opentypebb-world')
-      return result
-    },
-  },
-  {
-    id: 'research-equity-profile',
-    description: 'Load company profile and key metrics.',
-    inputSchema: z.object({
-      symbol: z.string().min(1),
-    }),
-    async run(ctx, input) {
-      const [profile, metrics] = await Promise.all([
-        ctx.equityClient.getProfile({ symbol: input.symbol, provider: 'yfinance' }).catch(() => []),
-        ctx.equityClient.getKeyMetrics({ symbol: input.symbol, limit: 1, provider: 'yfinance' }).catch(() => []),
-      ])
-      return { profile: profile[0] ?? null, metrics: metrics[0] ?? null }
-    },
-  },
-  {
-    id: 'research-equity-financials',
-    description: 'Load company financial statements.',
-    inputSchema: z.object({
-      symbol: z.string().min(1),
-      type: z.enum(['income', 'balance', 'cash']),
-      period: z.enum(['annual', 'quarter']).optional(),
-      limit: z.number().int().positive().optional(),
-    }),
-    async run(ctx, input) {
-      const params: Record<string, unknown> = { symbol: input.symbol, provider: 'yfinance' }
-      if (input.period) params.period = input.period
-      if (input.limit) params.limit = input.limit
-
-      switch (input.type) {
-        case 'income':
-          return ctx.equityClient.getIncomeStatement(params)
-        case 'balance':
-          return ctx.equityClient.getBalanceSheet(params)
-        case 'cash':
-          return ctx.equityClient.getCashFlow(params)
-      }
-    },
-  },
-  {
-    id: 'research-equity-ratios',
-    description: 'Load company financial ratios.',
-    inputSchema: z.object({
-      symbol: z.string().min(1),
-      period: z.enum(['annual', 'quarter']).optional(),
-      limit: z.number().int().positive().optional(),
-    }),
-    async run(ctx, input) {
-      const params: Record<string, unknown> = { symbol: input.symbol, provider: 'fmp' }
-      if (input.period) params.period = input.period
-      if (input.limit) params.limit = input.limit
-      return ctx.equityClient.getFinancialRatios(params)
-    },
-  },
-  {
-    id: 'research-equity-estimates',
-    description: 'Load analyst estimate consensus for a company.',
-    inputSchema: z.object({
-      symbol: z.string().min(1),
-    }),
-    async run(ctx, input) {
-      return ctx.equityClient.getEstimateConsensus({ symbol: input.symbol, provider: 'yfinance' })
     },
   },
   {

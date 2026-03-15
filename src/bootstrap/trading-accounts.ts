@@ -70,24 +70,12 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
     return true
   }
 
-  const ccxtAccountConfigs: Array<{ cfg: typeof tradingConfig.accounts[number]; platform: IPlatform }> = []
-
   for (const accCfg of tradingConfig.accounts) {
     const platform = platformRegistry.get(accCfg.platformId)!
-    if (platform.providerType === 'alpaca') {
-      await initAccount(accCfg, platform)
-    } else {
-      ccxtAccountConfigs.push({ cfg: accCfg, platform })
-    }
+    await initAccount(accCfg, platform)
   }
 
-  const ccxtInitPromise = ccxtAccountConfigs.length > 0
-    ? (async () => {
-        for (const { cfg, platform } of ccxtAccountConfigs) {
-          await initAccount(cfg, platform)
-        }
-      })()
-    : Promise.resolve()
+  const ccxtInitPromise = Promise.resolve()
 
   return { accountManager, accountSetups, ccxtInitPromise, initAccount }
 }
