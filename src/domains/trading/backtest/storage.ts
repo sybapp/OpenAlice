@@ -82,16 +82,18 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   async function queueManifestCreate(manifest: BacktestRunManifest): Promise<void> {
     const paths = getRunPaths(manifest.runId)
     await mkdir(paths.runDir, { recursive: true })
-    // Clean stale artifacts from previous run with same ID
-    await Promise.all([
-      unlink(paths.equityCurvePath).catch(ignoreENOENT),
-      unlink(paths.eventLogPath).catch(ignoreENOENT),
-      unlink(paths.summaryPath).catch(ignoreENOENT),
-      unlink(paths.gitStatePath).catch(ignoreENOENT),
-      manifest.sessionId ? unlink(getSessionPath(manifest.sessionId)).catch(ignoreENOENT) : Promise.resolve(),
-    ])
-    await writeJson(paths.manifestPath, manifest)
-    await updateRunIndex(manifest)
+    const existing = await readJson<BacktestRunManifest>(paths.manifestPath)
+    const timestamp = `${process.pid}.${Date.now()}`
+    const backups = await backupExistingRunArtifacts(paths, existing, timestamp)
+
+    try {
+      await writeJson(paths.manifestPath, manifest)
+      await updateRunIndex(manifest)
+      await discardBackups(backups)
+    } catch (err) {
+      await restoreBackups(backups)
+      throw err
+    }
   }
 
   async function queueManifestUpdate(runId: string, patch: Partial<BacktestRunManifest>): Promise<BacktestRunManifest> {
@@ -256,6 +258,61 @@ async function readRunIndex(rootDir: string, runIndexPath: string): Promise<Back
     await writeJson(runIndexPath, rebuilt)
   }
   return rebuilt
+}
+
+async function backupExistingRunArtifacts(
+  paths: ReturnType<BacktestStorage['getRunPaths']>,
+  existingManifest: BacktestRunManifest | null,
+  stamp: string,
+): Promise<Array<{ path: string; backupPath: string }>> {
+  const candidates = [
+    paths.manifestPath,
+    paths.equityCurvePath,
+    paths.eventLogPath,
+    paths.summaryPath,
+    paths.gitStatePath,
+  ]
+
+  if (existingManifest?.sessionId) {
+    candidates.push(getSessionPath(existingManifest.sessionId))
+  }
+
+  const backups: Array<{ path: string; backupPath: string }> = []
+  for (const filePath of candidates) {
+    const backupPath = `${filePath}.${stamp}.bak`
+    try {
+      await rename(filePath, backupPath)
+      backups.push({ path: filePath, backupPath })
+    } catch (err) {
+      if (!isENOENT(err)) {
+        await restoreBackups(backups)
+        throw err
+      }
+    }
+  }
+
+  return backups
+}
+
+async function restoreBackups(backups: Array<{ path: string; backupPath: string }>): Promise<void> {
+  const restoreErrors: unknown[] = []
+
+  for (const { path, backupPath } of [...backups].reverse()) {
+    await unlink(path).catch(ignoreENOENT)
+    try {
+      await rename(backupPath, path)
+    } catch (err) {
+      if (!isENOENT(err)) restoreErrors.push(err)
+    }
+  }
+
+  if (restoreErrors.length > 0) throw restoreErrors[0]
+}
+
+async function discardBackups(backups: Array<{ path: string; backupPath: string }>): Promise<void> {
+  await Promise.all(backups.map(async ({ backupPath }) => {
+    await unlink(backupPath).catch(ignoreENOENT)
+  }))
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

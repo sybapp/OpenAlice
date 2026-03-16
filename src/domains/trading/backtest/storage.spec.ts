@@ -3,7 +3,7 @@ import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createBacktestStorage } from './storage.js'
-import { mkdir, readFile, writeFile, utimes } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile, utimes } from 'node:fs/promises'
 
 function tempDir(name: string) {
   return join(tmpdir(), `backtest-storage-${name}-${randomUUID()}`)
@@ -370,6 +370,80 @@ describe('createBacktestStorage', () => {
     const manifest = await storage.getManifest(runId)
     expect(manifest?.initialCash).toBe(20_000)
     expect(manifest?.status).toBe('queued')
+  })
+
+  it('restores the previous run artifacts when reused run creation fails mid-write', async () => {
+    const rootDir = tempDir('reuse-rollback')
+    const storage = createBacktestStorage({ rootDir })
+    const runId = 'rollback-run'
+    const paths = storage.getRunPaths(runId)
+
+    await storage.createRun({
+      runId,
+      status: 'completed',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: paths.runDir,
+      barCount: 3,
+      currentStep: 3,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+    await storage.appendEquityPoint(runId, {
+      step: 1,
+      ts: '2025-01-01T09:30:00.000Z',
+      equity: 10_000,
+      realizedPnL: 0,
+      unrealizedPnL: 0,
+    })
+    await storage.writeSummary(runId, {
+      runId,
+      startEquity: 10_000,
+      endEquity: 10_100,
+      totalReturn: 0.01,
+      realizedPnL: 100,
+      unrealizedPnL: 0,
+      maxDrawdown: 0,
+      tradeCount: 1,
+      winRate: 1,
+      guardRejectionCount: 0,
+    })
+    await storage.writeGitState(runId, { commits: [], head: null })
+
+    await chmod(rootDir, 0o555)
+    try {
+      await expect(storage.createRun({
+        runId,
+        status: 'queued',
+        mode: 'scripted',
+        createdAt: '2025-01-02T00:00:00.000Z',
+        artifactDir: paths.runDir,
+        barCount: 5,
+        currentStep: 0,
+        accountId: 'paper-1',
+        accountLabel: 'Paper 1',
+        initialCash: 20_000,
+        guards: [],
+      })).rejects.toThrow()
+    } finally {
+      await chmod(rootDir, 0o755)
+    }
+
+    await expect(storage.getManifest(runId)).resolves.toEqual(expect.objectContaining({
+      runId,
+      status: 'completed',
+      initialCash: 10_000,
+    }))
+    await expect(storage.readSummary(runId)).resolves.toEqual(expect.objectContaining({ endEquity: 10_100 }))
+    await expect(storage.readGitState(runId)).resolves.toEqual({ commits: [], head: null })
+    await expect(storage.readEquityCurve(runId)).resolves.toEqual([
+      expect.objectContaining({ step: 1, equity: 10_000 }),
+    ])
+    await expect(storage.listRuns()).resolves.toEqual([
+      expect.objectContaining({ runId, status: 'completed', initialCash: 10_000 }),
+    ])
   })
 
   it('reclaims an invalid stale .run.lock left behind before metadata was fully written', async () => {
