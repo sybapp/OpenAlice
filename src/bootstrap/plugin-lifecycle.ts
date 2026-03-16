@@ -30,7 +30,17 @@ export async function startPlugins(plugins: Iterable<Plugin>, ctx: EngineContext
 }
 
 export async function stopPlugins(plugins: Iterable<Plugin>) {
+  const errors: string[] = []
+
   for (const plugin of [...plugins].reverse()) {
-    await plugin.stop()
+    try {
+      await plugin.stop()
+    } catch (err) {
+      errors.push(`${plugin.name} stop failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '))
   }
 }

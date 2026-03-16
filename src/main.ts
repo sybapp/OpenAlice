@@ -31,6 +31,14 @@ import { startPlugins, stopPlugins } from './bootstrap/plugin-lifecycle.js'
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 let startupCleanup: null | (() => Promise<void>) = null
 
+async function runCleanupStep(errors: string[], label: string, fn: () => unknown | Promise<unknown>) {
+  try {
+    await fn()
+  } catch (err) {
+    errors.push(`${label} failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 async function main() {
   let cleanupStarted = false
   let cleanupResources: null | (() => Promise<void>) = null
@@ -170,23 +178,29 @@ async function main() {
   }
 
   cleanupResources = async () => {
-    newsCollector?.stop()
-    heartbeat.stop()
-    cronListener.stop()
-    cronEngine.stop()
-    traderListener.stop()
-    trader.stop()
-    traderReviewListener.stop()
-    traderReview.stop()
+    const cleanupErrors: string[] = []
+
+    await runCleanupStep(cleanupErrors, 'news collector stop', () => newsCollector?.stop())
+    await runCleanupStep(cleanupErrors, 'heartbeat stop', () => heartbeat.stop())
+    await runCleanupStep(cleanupErrors, 'cron listener stop', () => cronListener.stop())
+    await runCleanupStep(cleanupErrors, 'cron engine stop', () => cronEngine.stop())
+    await runCleanupStep(cleanupErrors, 'trader listener stop', () => traderListener.stop())
+    await runCleanupStep(cleanupErrors, 'trader stop', () => trader.stop())
+    await runCleanupStep(cleanupErrors, 'trader review listener stop', () => traderReviewListener.stop())
+    await runCleanupStep(cleanupErrors, 'trader review stop', () => traderReview.stop())
     if (pluginsStarted) {
-      await stopPlugins(getConnectors())
+      await runCleanupStep(cleanupErrors, 'plugin shutdown', () => stopPlugins(getConnectors()))
     }
-    for (const setup of accountSetups.values()) {
-      setup.disposeDispatcher()
+    for (const [accountId, setup] of accountSetups.entries()) {
+      await runCleanupStep(cleanupErrors, `account ${accountId} dispatcher dispose`, () => setup.disposeDispatcher())
     }
-    await newsStore.close()
-    await eventLog.close()
-    await accountManager.closeAll()
+    await runCleanupStep(cleanupErrors, 'news store close', () => newsStore.close())
+    await runCleanupStep(cleanupErrors, 'event log close', () => eventLog.close())
+    await runCleanupStep(cleanupErrors, 'account manager closeAll', () => accountManager.closeAll())
+
+    if (cleanupErrors.length > 0) {
+      throw new Error(cleanupErrors.join('; '))
+    }
   }
 
   await startPlugins(getConnectors(), ctx)

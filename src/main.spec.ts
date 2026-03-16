@@ -163,4 +163,30 @@ describe('main startup cleanup', () => {
     exitSpy.mockRestore()
     errorSpy.mockRestore()
   })
+
+  it('continues cleanup and reports aggregated cleanup failures when plugin shutdown fails', async () => {
+    stopPlugins.mockRejectedValueOnce(new Error('core stop failed'))
+    eventLog.close.mockRejectedValueOnce(new Error('event log busy'))
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await import('./main.ts')
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+
+    expect(stopPlugins).toHaveBeenCalledWith([coreConnector])
+    expect(newsStore.close).toHaveBeenCalledOnce()
+    expect(eventLog.close).toHaveBeenCalledOnce()
+    expect(accountManager.closeAll).toHaveBeenCalledOnce()
+    expect(disposeDispatcher).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledWith(
+      'fatal:',
+      expect.objectContaining({
+        message: 'ccxt init failed; startup cleanup failed: plugin shutdown failed: core stop failed; event log close failed: event log busy',
+      }),
+    )
+
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
 })

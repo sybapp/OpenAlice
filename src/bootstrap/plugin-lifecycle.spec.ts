@@ -61,4 +61,34 @@ describe('plugin lifecycle helpers', () => {
 
     expect(calls).toEqual(['stop:second', 'stop:first'])
   })
+
+  it('continues stopping later plugins and surfaces aggregated shutdown errors', async () => {
+    const calls: string[] = []
+    const first = {
+      name: 'first',
+      stop: vi.fn(async () => {
+        calls.push('stop:first')
+        throw new Error('socket hung')
+      }),
+    }
+    const second = {
+      name: 'second',
+      stop: vi.fn(async () => {
+        calls.push('stop:second')
+      }),
+    }
+    const third = {
+      name: 'third',
+      stop: vi.fn(async () => {
+        calls.push('stop:third')
+        throw new Error('timeout')
+      }),
+    }
+
+    await expect(stopPlugins([first, second, third] as never)).rejects.toThrow(
+      'third stop failed: timeout; first stop failed: socket hung',
+    )
+
+    expect(calls).toEqual(['stop:third', 'stop:second', 'stop:first'])
+  })
 })
