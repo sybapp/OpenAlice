@@ -5,7 +5,7 @@
  */
 
 import { loadConfig } from './core/config.js'
-import type { EngineContext, Plugin } from './core/types.js'
+import type { EngineContext } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { createCronListener } from './jobs/cron/index.js'
@@ -26,21 +26,9 @@ import { initServices } from './bootstrap/services.js'
 import { registerAllTools } from './bootstrap/tools.js'
 import { initAIProviders } from './bootstrap/ai.js'
 import { initConnectors, createConnectorReconnector } from './bootstrap/connectors.js'
+import { startPlugins, stopPlugins } from './bootstrap/plugin-lifecycle.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-async function startPlugins(plugins: Iterable<Plugin>, ctx: EngineContext) {
-  for (const plugin of plugins) {
-    await plugin.start(ctx)
-    console.log(`plugin started: ${plugin.name}`)
-  }
-}
-
-async function stopPlugins(plugins: Iterable<Plugin>) {
-  for (const plugin of plugins) {
-    await plugin.stop()
-  }
-}
 
 async function main() {
   await migrateFilesystemLayout()
