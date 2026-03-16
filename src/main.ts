@@ -29,8 +29,20 @@ import { initConnectors, createConnectorReconnector } from './bootstrap/connecto
 import { startPlugins, stopPlugins } from './bootstrap/plugin-lifecycle.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+let startupCleanup: null | (() => Promise<void>) = null
 
 async function main() {
+  let cleanupStarted = false
+  let cleanupResources: null | (() => Promise<void>) = null
+
+  const runCleanup = async () => {
+    if (cleanupStarted) return
+    cleanupStarted = true
+    await cleanupResources?.()
+  }
+
+  startupCleanup = runCleanup
+
   await migrateFilesystemLayout()
   const config = await loadConfig()
   await ensureDefaultSkillPacks()
@@ -159,12 +171,8 @@ async function main() {
   await startPlugins(getConnectors(), ctx)
 
   console.log('engine: started')
-  await ccxtInitPromise
 
-  // ---- Shutdown ----
-  let stopped = false
-  const shutdown = async () => {
-    stopped = true
+  cleanupResources = async () => {
     newsCollector?.stop()
     heartbeat.stop()
     cronListener.stop()
@@ -180,6 +188,15 @@ async function main() {
     await newsStore.close()
     await eventLog.close()
     await accountManager.closeAll()
+  }
+
+  await ccxtInitPromise
+
+  // ---- Shutdown ----
+  let stopped = false
+  const shutdown = async () => {
+    stopped = true
+    await runCleanup()
     process.exit(0)
   }
   process.on('SIGINT', shutdown)
@@ -191,7 +208,15 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('fatal:', err)
+main().catch(async (err) => {
+  let fatal = err
+  try {
+    await startupCleanup?.()
+  } catch (cleanupErr) {
+    const message = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+    const original = err instanceof Error ? err.message : String(err)
+    fatal = new Error(`${original}; startup cleanup failed: ${message}`)
+  }
+  console.error('fatal:', fatal)
   process.exit(1)
 })
