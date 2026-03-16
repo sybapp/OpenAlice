@@ -150,7 +150,7 @@ export class McpPlugin implements Plugin {
   }
 
   getConfig() {
-    return this.config
+    return { ...this.config }
   }
 
   async reconfigure(nextConfig: { host: string; port: number }): Promise<'restarted' | 'unchanged'> {

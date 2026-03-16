@@ -133,4 +133,18 @@ describe('McpServerConnector', () => {
 
     await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3405 })).resolves.toBe('restarted')
   })
+
+  it('exposes a defensive config snapshot for reconnect rollback', () => {
+    const plugin = new McpServerConnector({ getMcpTools: mocks.getMcpTools } as never, {
+      host: '127.0.0.1',
+      port: 3410,
+    })
+
+    expect(plugin.getConfig()).toEqual({ host: '127.0.0.1', port: 3410 })
+
+    const snapshot = plugin.getConfig()
+    snapshot.port = 3999
+
+    expect(plugin.getConfig()).toEqual({ host: '127.0.0.1', port: 3410 })
+  })
 })
