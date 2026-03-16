@@ -156,6 +156,54 @@ describe('createBacktestRunManager', () => {
     expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
   })
 
+  it('clears stale ai session history when reusing a runId', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('ai-reuse-session') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        await session.appendAssistant(JSON.stringify({ text: 'hold', operations: [] }), 'engine')
+        return {
+          text: JSON.stringify({ text: 'hold', operations: [] }),
+          media: [],
+        }
+      }),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const runId = 'reused-ai-run'
+
+    await manager.startRun({
+      runId,
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+    await expect(manager.getSessionEntries(runId)).resolves.toHaveLength(6)
+
+    await manager.startRun({
+      runId,
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay again.',
+      },
+    })
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    const sessionEntries = await manager.getSessionEntries(runId)
+
+    expect(engine.askWithSession).toHaveBeenCalledTimes(6)
+    expect(sessionEntries).toHaveLength(6)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'user')).toHaveLength(3)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
+  })
+
   it('returns the persisted failed manifest from waitForRun when execution crashes', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('failed-run') })
     const engine = {

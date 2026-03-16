@@ -88,6 +88,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
       unlink(paths.eventLogPath).catch(ignoreENOENT),
       unlink(paths.summaryPath).catch(ignoreENOENT),
       unlink(paths.gitStatePath).catch(ignoreENOENT),
+      manifest.sessionId ? unlink(getSessionPath(manifest.sessionId)).catch(ignoreENOENT) : Promise.resolve(),
     ])
     await writeJson(paths.manifestPath, manifest)
     await updateRunIndex(manifest)
@@ -208,6 +209,12 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
 
     getRunPaths,
   }
+}
+
+function getSessionPath(sessionId: string): string {
+  const sessionPath = resolve(RUNTIME_SESSIONS_DIR, `${sessionId}.jsonl`)
+  assertWithinRoot(RUNTIME_SESSIONS_DIR, sessionPath)
+  return sessionPath
 }
 
 function assertWithinRoot(rootDir: string, targetPath: string): void {
