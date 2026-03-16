@@ -105,15 +105,29 @@ export async function teardownAccountRuntime(args: {
 }): Promise<void> {
   const { accountId, accountManager, accountSetups } = args
   const setup = accountSetups.get(accountId)
-  setup?.disposeDispatcher()
+  const errors: string[] = []
+
+  try {
+    setup?.disposeDispatcher()
+  } catch (err) {
+    errors.push(`dispatcher dispose failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   const currentAccount = accountManager.getAccount(accountId)
   if (currentAccount) {
-    await currentAccount.close()
+    try {
+      await currentAccount.close()
+    } catch (err) {
+      errors.push(`account close failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   accountManager.removeAccount(accountId)
   accountSetups.delete(accountId)
+
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '))
+  }
 }
 
 export function createAccountReconnector(deps: {

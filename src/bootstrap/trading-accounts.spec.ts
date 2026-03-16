@@ -67,6 +67,33 @@ describe('teardownAccountRuntime', () => {
     expect(removeAccount).toHaveBeenCalledWith('paper-2')
     expect(accountSetups.has('paper-2')).toBe(false)
   })
+
+  it('continues teardown and surfaces aggregated cleanup errors', async () => {
+    const close = vi.fn(async () => {
+      throw new Error('socket hung')
+    })
+    const removeAccount = vi.fn()
+    const disposeDispatcher = vi.fn(() => {
+      throw new Error('watcher persist failed')
+    })
+    const accountSetups = new Map([
+      ['paper-3', { disposeDispatcher }],
+    ])
+
+    await expect(teardownAccountRuntime({
+      accountId: 'paper-3',
+      accountManager: {
+        getAccount: vi.fn(() => ({ close })),
+        removeAccount,
+      } as never,
+      accountSetups: accountSetups as never,
+    })).rejects.toThrow('dispatcher dispose failed: watcher persist failed; account close failed: socket hung')
+
+    expect(disposeDispatcher).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
+    expect(removeAccount).toHaveBeenCalledWith('paper-3')
+    expect(accountSetups.has('paper-3')).toBe(false)
+  })
 })
 
 describe('createAccountReconnector', () => {
