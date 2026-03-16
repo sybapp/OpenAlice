@@ -109,6 +109,43 @@ describe('createBacktestStorage', () => {
     expect(runs.map((run) => run.runId)).toEqual(['newer', 'older'])
   })
 
+  it('serializes concurrent manifest updates so fields are merged instead of clobbered', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('manifest-update-queue') })
+    for (let attempt = 1; attempt <= 25; attempt += 1) {
+      const runId = `queued-updates-${attempt}`
+      const paths = storage.getRunPaths(runId)
+
+      await storage.createRun({
+        runId,
+        status: 'queued',
+        mode: 'scripted',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        artifactDir: paths.runDir,
+        barCount: 3,
+        currentStep: 0,
+        accountId: 'paper-1',
+        accountLabel: 'Paper 1',
+        initialCash: 10_000,
+        guards: [],
+      })
+
+      await Promise.all([
+        storage.updateManifest(runId, {
+          status: 'running',
+          startedAt: '2025-01-01T09:30:00.000Z',
+        }),
+        storage.updateManifest(runId, { currentStep: attempt }),
+      ])
+
+      expect(await storage.getManifest(runId)).toEqual(expect.objectContaining({
+        runId,
+        status: 'running',
+        startedAt: '2025-01-01T09:30:00.000Z',
+        currentStep: attempt,
+      }))
+    }
+  })
+
   it('reads only the tail of the equity curve when limit is provided', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('equity-limit') })
     const runId = 'run-tail'

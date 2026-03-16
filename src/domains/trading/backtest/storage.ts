@@ -47,6 +47,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   const rootDir = resolve(options?.rootDir ?? 'runtime/backtest')
   const runIndexPath = resolve(rootDir, RUN_INDEX_FILENAME)
   let runIndexWriteQueue: Promise<void> = Promise.resolve()
+  let manifestWriteQueue: Promise<void> = Promise.resolve()
   const runClaims = new Map<string, FileHandle>()
 
   function getRunPaths(runId: string) {
@@ -97,11 +98,15 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   }
 
   async function queueManifestUpdate(runId: string, patch: Partial<BacktestRunManifest>): Promise<BacktestRunManifest> {
-    const current = await readJson<BacktestRunManifest>(getRunPaths(runId).manifestPath)
-    if (!current) throw new Error(`Backtest run not found: ${runId}`)
-    const next = { ...current, ...patch }
-    await writeJson(getRunPaths(runId).manifestPath, next)
-    await updateRunIndex(next)
+    const next = manifestWriteQueue.then(async () => {
+      const current = await readJson<BacktestRunManifest>(getRunPaths(runId).manifestPath)
+      if (!current) throw new Error(`Backtest run not found: ${runId}`)
+      const next = { ...current, ...patch }
+      await writeJson(getRunPaths(runId).manifestPath, next)
+      await updateRunIndex(next)
+      return next
+    })
+    manifestWriteQueue = next.then(() => {}, () => {})
     return next
   }
 
@@ -143,6 +148,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
     },
 
     async listRuns() {
+      await manifestWriteQueue
       await runIndexWriteQueue
       return readRunIndex(rootDir, runIndexPath)
     },
