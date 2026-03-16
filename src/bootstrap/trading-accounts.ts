@@ -60,6 +60,11 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
       await account.init()
     } catch (err) {
       console.warn(`trading: ${accountCfg.id} init failed (non-fatal):`, err)
+      try {
+        await account.close()
+      } catch (closeErr) {
+        console.warn(`trading: ${accountCfg.id} cleanup after init failure failed:`, closeErr)
+      }
       return null
     }
     const savedState = await loadGitState(accountCfg.id)

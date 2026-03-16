@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   loadTradingConfig: vi.fn(),
   createPlatformFromConfig: vi.fn(),
+  createAccountFromConfig: vi.fn(),
 }))
 
 vi.mock('../core/config.js', () => ({
@@ -14,13 +15,41 @@ vi.mock('../domains/trading/index.js', async () => {
   return {
     ...actual,
     createPlatformFromConfig: mocks.createPlatformFromConfig,
+    createAccountFromConfig: mocks.createAccountFromConfig,
   }
 })
 
 const {
+  initTradingAccounts,
   teardownAccountRuntime,
   createAccountReconnector,
 } = await import('./trading-accounts.js')
+
+describe('initTradingAccounts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('closes a partially created account when init fails during runtime preparation', async () => {
+    mocks.loadTradingConfig.mockResolvedValue({ accounts: [], platforms: [] })
+    const close = vi.fn(async () => undefined)
+    mocks.createAccountFromConfig.mockReturnValue({
+      init: vi.fn(async () => {
+        throw new Error('dial failed')
+      }),
+      close,
+    })
+
+    const result = await initTradingAccounts()
+
+    await expect(result.prepareAccountRuntime(
+      { id: 'paper-1', platformId: 'binance', guards: [] },
+      { id: 'binance' } as never,
+    )).resolves.toBeNull()
+
+    expect(close).toHaveBeenCalledOnce()
+  })
+})
 
 describe('teardownAccountRuntime', () => {
   it('disposes the dispatcher, closes the account, and removes runtime state', async () => {
