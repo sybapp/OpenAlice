@@ -34,11 +34,16 @@ export class McpAskPlugin implements Plugin {
   private server: ReturnType<typeof serve> | null = null
   private sessions = new Map<string, SessionStore>()
   private unregisterConnector?: () => void
+  private healthy = false
 
   constructor(private config: McpAskConfig) {}
 
   getConfig(): McpAskConfig {
     return { ...this.config }
+  }
+
+  isHealthy(): boolean {
+    return this.healthy
   }
 
   private async getSession(sessionId: string): Promise<SessionStore> {
@@ -52,6 +57,7 @@ export class McpAskPlugin implements Plugin {
   }
 
   async start(ctx: EngineContext) {
+    this.healthy = false
     const plugin = this
 
     const createMcpServer = () => {
@@ -159,6 +165,7 @@ export class McpAskPlugin implements Plugin {
         console.log(`mcp-ask connector listening on http://localhost:${info.port}/mcp`)
       })
       this.unregisterConnector = unregisterConnector
+      this.healthy = true
     } catch (err) {
       unregisterConnector()
       throw err
@@ -166,6 +173,7 @@ export class McpAskPlugin implements Plugin {
   }
 
   async stop() {
+    this.healthy = false
     this.unregisterConnector?.()
     this.unregisterConnector = undefined
     await closeServer(this.server)
