@@ -274,6 +274,43 @@ describe('createAccountReconnector', () => {
     expect(removeAccount).not.toHaveBeenCalled()
   })
 
+  it('aggregates replacement rollback failures when old runtime teardown fails during reconnect', async () => {
+    mocks.loadTradingConfig.mockResolvedValue({
+      accounts: [{ id: 'paper-1', platformId: 'binance', guards: [] }],
+      platforms: [{ id: 'binance', type: 'ccxt', exchange: 'binance' }],
+    })
+    mocks.createPlatformFromConfig.mockReturnValue({
+      id: 'binance',
+      providerType: 'ccxt',
+    })
+
+    const replacementClose = vi.fn(async () => {
+      throw new Error('replacement socket hung')
+    })
+    const replacementDisposeDispatcher = vi.fn(() => {
+      throw new Error('replacement watcher persist failed')
+    })
+    const reconnect = createAccountReconnector({
+      accountManager: {
+        getAccount: vi.fn(() => ({ close: vi.fn(async () => { throw new Error('old socket hung') }) })),
+        removeAccount: vi.fn(),
+        addAccount: vi.fn(),
+      } as never,
+      accountSetups: new Map([['paper-1', { disposeDispatcher: vi.fn() }]]),
+      prepareAccountRuntime: vi.fn(async () => ({
+        account: { id: 'paper-1', label: 'Main Binance', close: replacementClose },
+        setup: { disposeDispatcher: replacementDisposeDispatcher },
+      })),
+    })
+
+    await expect(reconnect('paper-1')).resolves.toEqual({
+      success: false,
+      error: 'account close failed: old socket hung; reconnect rollback failed: replacement dispatcher dispose failed: replacement watcher persist failed; replacement account close failed: replacement socket hung',
+    })
+    expect(replacementDisposeDispatcher).toHaveBeenCalledOnce()
+    expect(replacementClose).toHaveBeenCalledOnce()
+  })
+
   it('surfaces unexpected reconnect errors', async () => {
     mocks.loadTradingConfig.mockRejectedValue(new Error('disk unavailable'))
 

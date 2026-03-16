@@ -174,8 +174,23 @@ export function createAccountReconnector(deps: {
         accountManager.addAccount(prepared.account, accCfg.platformId)
         accountSetups.set(prepared.account.id, prepared.setup)
       } catch (err) {
-        prepared.setup.disposeDispatcher()
-        await prepared.account.close().catch(() => undefined)
+        const rollbackErrors: string[] = []
+        try {
+          prepared.setup.disposeDispatcher()
+        } catch (rollbackErr) {
+          rollbackErrors.push(`replacement dispatcher dispose failed: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`)
+        }
+        try {
+          await prepared.account.close()
+        } catch (rollbackErr) {
+          rollbackErrors.push(`replacement account close failed: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`)
+        }
+
+        if (rollbackErrors.length > 0) {
+          const message = err instanceof Error ? err.message : String(err)
+          throw new Error(`${message}; reconnect rollback failed: ${rollbackErrors.join('; ')}`)
+        }
+
         throw err
       }
 
