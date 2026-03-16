@@ -50,6 +50,14 @@ interface MissingCoreConnectorArgs {
   startedMessage: string
 }
 
+interface ExistingCoreConnectorArgs {
+  coreConnectors: Plugin[]
+  ctx: EngineContext
+  changes: string[]
+  plugin: Plugin
+  stoppedMessage: string
+}
+
 interface HealthAwarePlugin extends Plugin {
   isHealthy?: () => boolean
 }
@@ -221,6 +229,29 @@ async function startMissingCoreConnector(args: MissingCoreConnectorArgs): Promis
   }
 }
 
+async function stopExistingCoreConnector(args: ExistingCoreConnectorArgs): Promise<RollbackAction> {
+  const { coreConnectors, ctx, changes, plugin, stoppedMessage } = args
+  const previousIndex = coreConnectors.indexOf(plugin)
+
+  await plugin.stop()
+  if (previousIndex >= 0) {
+    coreConnectors.splice(previousIndex, 1)
+  }
+  changes.push(stoppedMessage)
+
+  return {
+    run: async () => {
+      await plugin.start(ctx)
+      if (!coreConnectors.includes(plugin)) {
+        const insertAt = previousIndex >= 0 && previousIndex <= coreConnectors.length
+          ? previousIndex
+          : coreConnectors.length
+        coreConnectors.splice(insertAt, 0, plugin)
+      }
+    },
+  }
+}
+
 export function initConnectors(config: Config, toolCenter: ToolCenter): ConnectorsResult {
   const coreConnectors: Plugin[] = []
 
@@ -278,20 +309,30 @@ export function createConnectorReconnector(args: {
       // --- Web ---
       const webConnector = coreConnectors.find((plugin) => plugin instanceof WebConnector)
       if (webConnector instanceof WebConnector) {
-        const previousConfig = webConnector.getConfig()
-        const result = await webConnector.reconfigure({
-          host: fresh.connectors.web.host,
-          port: fresh.connectors.web.port,
-          authToken: fresh.connectors.web.authToken,
-        })
-        if (result === 'updated') changes.push('web updated')
-        if (result === 'restarted') changes.push(`web restarted on ${fresh.connectors.web.host}:${fresh.connectors.web.port}`)
-        if (result !== 'unchanged') {
-          rollbackActions.push({
-            run: async () => {
-              await webConnector.reconfigure(previousConfig)
-            },
+        if (fresh.connectors.web.port) {
+          const previousConfig = webConnector.getConfig()
+          const result = await webConnector.reconfigure({
+            host: fresh.connectors.web.host,
+            port: fresh.connectors.web.port,
+            authToken: fresh.connectors.web.authToken,
           })
+          if (result === 'updated') changes.push('web updated')
+          if (result === 'restarted') changes.push(`web restarted on ${fresh.connectors.web.host}:${fresh.connectors.web.port}`)
+          if (result !== 'unchanged') {
+            rollbackActions.push({
+              run: async () => {
+                await webConnector.reconfigure(previousConfig)
+              },
+            })
+          }
+        } else {
+          rollbackActions.push(await stopExistingCoreConnector({
+            coreConnectors,
+            ctx,
+            changes,
+            plugin: webConnector,
+            stoppedMessage: 'web stopped',
+          }))
         }
       } else if (fresh.connectors.web.port) {
         rollbackActions.push(await startMissingCoreConnector({
@@ -310,18 +351,28 @@ export function createConnectorReconnector(args: {
       // --- MCP ---
       const mcpConnector = coreConnectors.find((plugin) => plugin instanceof McpServerConnector)
       if (mcpConnector instanceof McpServerConnector) {
-        const previousConfig = mcpConnector.getConfig()
-        const result = await mcpConnector.reconfigure({
-          host: fresh.connectors.mcp.host,
-          port: fresh.connectors.mcp.port,
-        })
-        if (result === 'restarted') changes.push(`mcp restarted on ${fresh.connectors.mcp.host}:${fresh.connectors.mcp.port}`)
-        if (result !== 'unchanged') {
-          rollbackActions.push({
-            run: async () => {
-              await mcpConnector.reconfigure(previousConfig)
-            },
+        if (fresh.connectors.mcp.port) {
+          const previousConfig = mcpConnector.getConfig()
+          const result = await mcpConnector.reconfigure({
+            host: fresh.connectors.mcp.host,
+            port: fresh.connectors.mcp.port,
           })
+          if (result === 'restarted') changes.push(`mcp restarted on ${fresh.connectors.mcp.host}:${fresh.connectors.mcp.port}`)
+          if (result !== 'unchanged') {
+            rollbackActions.push({
+              run: async () => {
+                await mcpConnector.reconfigure(previousConfig)
+              },
+            })
+          }
+        } else {
+          rollbackActions.push(await stopExistingCoreConnector({
+            coreConnectors,
+            ctx,
+            changes,
+            plugin: mcpConnector,
+            stoppedMessage: 'mcp stopped',
+          }))
         }
       } else if (fresh.connectors.mcp.port) {
         rollbackActions.push(await startMissingCoreConnector({

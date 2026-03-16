@@ -235,6 +235,35 @@ describe('bootstrap connectors', () => {
     expect(mocks.mcpInstances.at(-1)?.stop).toHaveBeenCalledOnce()
   })
 
+  it('stops existing core connectors when reload disables their ports', async () => {
+    const mcp = new FakeMcpPlugin({}, { host: '127.0.0.1', port: 3001 })
+    const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'secret' })
+    const coreConnectors = [mcp as never, web as never]
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 0, authToken: 'secret' },
+        mcp: { host: '127.0.0.1', port: 0 },
+        mcpAsk: { enabled: false },
+        telegram: { enabled: false, chatIds: [] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors,
+      optionalConnectors: new Map<string, any>(),
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({
+      success: true,
+      message: 'web stopped, mcp stopped',
+    })
+    expect(web.stop).toHaveBeenCalledOnce()
+    expect(mcp.stop).toHaveBeenCalledOnce()
+    expect(coreConnectors).toEqual([])
+  })
+
   it('keeps a healthy optional connector online when refreshed config is incomplete', async () => {
     const mcp = new FakeMcpPlugin({}, { host: '127.0.0.1', port: 3001 })
     const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002 })
