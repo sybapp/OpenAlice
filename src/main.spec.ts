@@ -139,6 +139,47 @@ describe('main startup cleanup', () => {
     errorSpy.mockRestore()
   })
 
+  it('cleans up started runtime resources when news collector startup fails', async () => {
+    loadConfig.mockResolvedValueOnce({
+      heartbeat: { enabled: false, every: '1m' },
+      engine: { interval: 60_000 },
+      newsCollector: { enabled: true, feeds: ['https://example.com/feed.xml'], intervalMinutes: 5 },
+    })
+
+    const newsCollectorStop = vi.fn()
+    const startupError = new Error('feed bootstrap failed')
+    NewsCollector.mockImplementationOnce(function NewsCollector() {
+      return {
+        start: vi.fn(() => { throw startupError }),
+        stop: newsCollectorStop,
+      }
+    })
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await import('./main.ts')
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+
+    expect(stopPlugins).not.toHaveBeenCalled()
+    expect(newsCollectorStop).toHaveBeenCalledOnce()
+    expect(heartbeat.stop).toHaveBeenCalledOnce()
+    expect(cronListener.stop).toHaveBeenCalledOnce()
+    expect(cronEngine.stop).toHaveBeenCalledOnce()
+    expect(traderListener.stop).toHaveBeenCalledOnce()
+    expect(trader.stop).toHaveBeenCalledOnce()
+    expect(traderReviewListener.stop).toHaveBeenCalledOnce()
+    expect(traderReview.stop).toHaveBeenCalledOnce()
+    expect(newsStore.close).toHaveBeenCalledOnce()
+    expect(eventLog.close).toHaveBeenCalledOnce()
+    expect(accountManager.closeAll).toHaveBeenCalledOnce()
+    expect(disposeDispatcher).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledWith('fatal:', startupError)
+
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
   it('cleans up started runtime resources when late startup fails', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)

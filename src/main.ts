@@ -5,7 +5,7 @@
  */
 
 import { loadConfig } from './core/config.js'
-import type { EngineContext } from './core/types.js'
+import type { EngineContext, Plugin } from './core/types.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { createCronListener } from './jobs/cron/index.js'
@@ -78,6 +78,10 @@ async function main() {
   // ---- Connector Center ----
   const connectorCenter = new ConnectorCenter(eventLog)
   const getAccountGit = (id: string) => accountSetups.get(id)?.git
+  let newsCollector: NewsCollector | null = null
+  let coreConnectors: Plugin[] = []
+  const optionalConnectors = new Map<string, Plugin>()
+  const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
 
   // ---- AI Providers & Engine ----
   const { engine, backtest } = initAIProviders(config, toolCenter, instructions, {
@@ -135,48 +139,6 @@ async function main() {
     console.log(`heartbeat: enabled (every ${config.heartbeat.every})`)
   }
 
-  // ---- News Collector ----
-  let newsCollector: NewsCollector | null = null
-  if (config.newsCollector.enabled && config.newsCollector.feeds.length > 0) {
-    newsCollector = new NewsCollector({
-      store: newsStore,
-      feeds: config.newsCollector.feeds,
-      intervalMs: config.newsCollector.intervalMinutes * 60 * 1000,
-    })
-    newsCollector.start()
-    console.log(`news-collector: started (${config.newsCollector.feeds.length} feeds, every ${config.newsCollector.intervalMinutes}m)`)
-  }
-
-  // ---- Plugins ----
-  const { coreConnectors, optionalConnectors } = initConnectors(config, toolCenter)
-
-  // ---- Reconnect handlers ----
-  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, prepareAccountRuntime })
-  let ctx: EngineContext
-  const reconnectConnectors = createConnectorReconnector({ coreConnectors, optionalConnectors, getCtx: () => ctx })
-  const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
-
-  // ---- Engine Context ----
-  ctx = {
-    config, connectorCenter, engine, eventLog, heartbeat, cronEngine, trader, traderReview, toolCenter,
-    accountManager, backtest, marketData,
-    getAccountGit,
-    reconnectAccount,
-    removeTradingAccountRuntime: (accountId) => teardownAccountRuntime({ accountId, accountManager, accountSetups }),
-    reconnectConnectors,
-    runTraderReview: (strategyId) => runTraderReview(strategyId, {
-      config,
-      engine,
-      eventLog,
-      brain,
-      accountManager,
-      marketData,
-      ohlcvStore,
-      newsStore,
-      getAccountGit,
-    }),
-  }
-
   cleanupResources = async () => {
     const cleanupErrors: string[] = []
 
@@ -201,6 +163,50 @@ async function main() {
     if (cleanupErrors.length > 0) {
       throw new Error(cleanupErrors.join('; '))
     }
+  }
+
+  // ---- News Collector ----
+  if (config.newsCollector.enabled && config.newsCollector.feeds.length > 0) {
+    newsCollector = new NewsCollector({
+      store: newsStore,
+      feeds: config.newsCollector.feeds,
+      intervalMs: config.newsCollector.intervalMinutes * 60 * 1000,
+    })
+    newsCollector.start()
+    console.log(`news-collector: started (${config.newsCollector.feeds.length} feeds, every ${config.newsCollector.intervalMinutes}m)`)
+  }
+
+  // ---- Plugins ----
+  const connectors = initConnectors(config, toolCenter)
+  coreConnectors = connectors.coreConnectors
+  for (const [name, connector] of connectors.optionalConnectors.entries()) {
+    optionalConnectors.set(name, connector)
+  }
+
+  // ---- Reconnect handlers ----
+  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, prepareAccountRuntime })
+  let ctx: EngineContext
+  const reconnectConnectors = createConnectorReconnector({ coreConnectors, optionalConnectors, getCtx: () => ctx })
+
+  // ---- Engine Context ----
+  ctx = {
+    config, connectorCenter, engine, eventLog, heartbeat, cronEngine, trader, traderReview, toolCenter,
+    accountManager, backtest, marketData,
+    getAccountGit,
+    reconnectAccount,
+    removeTradingAccountRuntime: (accountId) => teardownAccountRuntime({ accountId, accountManager, accountSetups }),
+    reconnectConnectors,
+    runTraderReview: (strategyId) => runTraderReview(strategyId, {
+      config,
+      engine,
+      eventLog,
+      brain,
+      accountManager,
+      marketData,
+      ohlcvStore,
+      newsStore,
+      getAccountGit,
+    }),
   }
 
   await startPlugins(getConnectors(), ctx)
