@@ -279,6 +279,17 @@ describe('WebPlugin', () => {
     expect(sseClients.size).toBe(0)
   })
 
+  it('exposes the current web config for reconnect rollback', async () => {
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3210, authToken: 'secret' })
+
+    expect(plugin.getConfig()).toEqual({ host: '127.0.0.1', port: 3210, authToken: 'secret' })
+
+    const snapshot = plugin.getConfig()
+    snapshot.authToken = 'changed-locally'
+
+    expect(plugin.getConfig()).toEqual({ host: '127.0.0.1', port: 3210, authToken: 'secret' })
+  })
+
   it('restarts an unchanged listener when the server is no longer running', async () => {
     const unregisterA = vi.fn()
     const unregisterB = vi.fn()

@@ -96,6 +96,10 @@ export class WebPlugin implements Plugin {
 
   constructor(private config: WebConfig) {}
 
+  getConfig(): WebConfig {
+    return { ...this.config }
+  }
+
   async start(ctx: EngineContext) {
     this.ctx = ctx
     // Initialize session (mirrors Telegram's per-user pattern, single user for web)
