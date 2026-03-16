@@ -220,12 +220,17 @@ export async function initServices(config: Config) {
   })
   await newsStore.init()
 
-  const ccxtExchange = createCcxtExchange(config)
+  const ccxtExchange = config.crypto.provider.type === 'ccxt'
+    ? createCcxtExchange(config)
+    : null
 
   const marketData = {
     async getBacktestBars(query: { assetType: 'crypto'; symbol: string; startDate: string; endDate: string; interval?: string }) {
       if (query.assetType !== 'crypto') {
         throw new Error('Only crypto bars are supported')
+      }
+      if (!ccxtExchange) {
+        throw new Error('Crypto CCXT provider is disabled')
       }
       const rows = await fetchCcxtHistoricalBars({
         exchange: ccxtExchange,
@@ -244,6 +249,9 @@ export async function initServices(config: Config) {
         const symbol = String(params.symbol ?? '').trim()
         const startDate = String(params.start_date ?? '').trim()
         const interval = String(params.interval ?? '1h')
+        if (!ccxtExchange) {
+          throw new Error('Crypto CCXT provider is disabled')
+        }
         const today = new Date().toISOString().slice(0, 10)
         const rows = await fetchCcxtHistoricalBars({
           exchange: ccxtExchange,

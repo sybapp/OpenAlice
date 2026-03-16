@@ -111,4 +111,78 @@ describe('core config', () => {
     const hotRead = await config.readAIConfig()
     expect(hotRead).toEqual({ backend: 'codex-cli' })
   })
+
+  it('does not overwrite existing new-format trading config when only one file is missing', async () => {
+    await writeJson(tempRoot, 'platforms.json', [
+      {
+        id: 'custom-platform',
+        type: 'ccxt',
+        exchange: 'bybit',
+        sandbox: true,
+        demoTrading: false,
+        defaultMarketType: 'spot',
+      },
+    ])
+    await writeJson(tempRoot, 'crypto.json', {
+      provider: {
+        type: 'ccxt',
+        exchange: 'binance',
+        apiKey: 'legacy-key',
+        apiSecret: 'legacy-secret',
+        sandbox: false,
+        demoTrading: true,
+        defaultMarketType: 'swap',
+      },
+      guards: [{ type: 'cooldown', options: { minIntervalMs: 60_000 } }],
+    })
+
+    const config = await import('./config.js')
+    const result = await config.loadTradingConfig()
+
+    expect(result).toEqual({
+      platforms: [
+        {
+          id: 'custom-platform',
+          type: 'ccxt',
+          exchange: 'bybit',
+          sandbox: true,
+          demoTrading: false,
+          defaultMarketType: 'spot',
+        },
+      ],
+      accounts: [],
+    })
+
+    const persistedPlatforms = JSON.parse(await readFile(join(tempRoot, 'config/platforms.json'), 'utf-8'))
+    const persistedAccounts = JSON.parse(await readFile(join(tempRoot, 'config/accounts.json'), 'utf-8'))
+
+    expect(persistedPlatforms).toEqual(result.platforms)
+    expect(persistedAccounts).toEqual([])
+  })
+
+  it('does not silently fall back to defaults when hot-read config is invalid', async () => {
+    await writeJson(tempRoot, 'ai-provider.json', {
+      backend: 'invalid-backend',
+      provider: 'openai',
+      model: 'gpt-5',
+      apiKeys: {
+        openai: 'openai-secret',
+      },
+    })
+
+    const config = await import('./config.js')
+
+    await expect(config.readAIProviderConfig()).rejects.toThrow()
+    await expect(config.writeAIConfig('codex-cli')).rejects.toThrow()
+
+    const persisted = JSON.parse(await readFile(join(tempRoot, 'config/ai-provider.json'), 'utf-8'))
+    expect(persisted).toEqual({
+      backend: 'invalid-backend',
+      provider: 'openai',
+      model: 'gpt-5',
+      apiKeys: {
+        openai: 'openai-secret',
+      },
+    })
+  })
 })

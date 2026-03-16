@@ -221,8 +221,11 @@ async function readSectionWithFallback<T>(filename: string, schema: z.ZodType<T>
   try {
     const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, filename), 'utf-8'))
     return schema.parse(raw)
-  } catch {
-    return schema.parse({})
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return schema.parse({})
+    }
+    throw err
   }
 }
 
@@ -300,10 +303,23 @@ export async function loadTradingConfig(): Promise<{
     loadJsonFile('accounts.json'),
   ])
 
-  if (rawPlatforms !== undefined && rawAccounts !== undefined) {
+  if (rawPlatforms !== undefined || rawAccounts !== undefined) {
+    const platforms = platformsFileSchema.parse(rawPlatforms ?? [])
+    const accounts = accountsFileSchema.parse(rawAccounts ?? [])
+
+    await mkdir(CONFIG_DIR, { recursive: true })
+    await Promise.all([
+      rawPlatforms === undefined
+        ? writeFile(resolve(CONFIG_DIR, 'platforms.json'), JSON.stringify(platforms, null, 2) + '\n')
+        : Promise.resolve(),
+      rawAccounts === undefined
+        ? writeFile(resolve(CONFIG_DIR, 'accounts.json'), JSON.stringify(accounts, null, 2) + '\n')
+        : Promise.resolve(),
+    ])
+
     return {
-      platforms: platformsFileSchema.parse(rawPlatforms),
-      accounts: accountsFileSchema.parse(rawAccounts),
+      platforms,
+      accounts,
     }
   }
 
