@@ -136,12 +136,23 @@ export class ConnectorCenter {
    * Falls back to the first registered connector if no interaction yet.
    */
   async notify(text: string, opts?: NotifyOpts): Promise<NotifyResult> {
-    const target = this.resolveTarget({ requirePush: true })
-    if (!target) return { delivered: false }
-
     const payload = this.buildPayload(text, opts)
-    const result = await target.send(payload)
-    return { ...result, channel: target.channel }
+    const target = this.resolveTarget({ requirePush: true })
+    const fallbacks = this.list()
+      .filter((connector) => connector.capabilities.push && connector !== target)
+
+    for (const connector of target ? [target, ...fallbacks] : fallbacks) {
+      try {
+        const result = await connector.send(payload)
+        if (result.delivered) {
+          return { ...result, channel: connector.channel }
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return { delivered: false }
   }
 
   /**

@@ -155,6 +155,34 @@ describe('ConnectorCenter', () => {
 
         expect(payloads[0].kind).toBe('message')
       })
+
+      it('should fall back to another push connector when the preferred one fails to send', async () => {
+        const delivered: string[] = []
+        const eventLog = await createEventLog({ logPath: join(tmpdir(), `cc-failover-${randomUUID()}.jsonl`) })
+        const ccWithEvent = new ConnectorCenter(eventLog)
+        ccWithEvent.register(makeConnector({
+          channel: 'telegram',
+          send: async () => {
+            delivered.push('telegram:last')
+            throw new Error('send failed')
+          },
+        }))
+        ccWithEvent.register(makeConnector({
+          channel: 'web',
+          send: async () => {
+            delivered.push('web:last')
+            return { delivered: true }
+          },
+        }))
+
+        await eventLog.append('message.received', {
+          channel: 'telegram', to: '123', prompt: 'hi',
+        })
+
+        await expect(ccWithEvent.notify('hello')).resolves.toEqual({ delivered: true, channel: 'web' })
+        expect(delivered).toEqual(['telegram:last', 'web:last'])
+        await eventLog._resetForTest()
+      })
     })
 
     describe('broadcast', () => {
