@@ -42,6 +42,14 @@ interface RollbackAction {
   run: () => Promise<void>
 }
 
+interface MissingCoreConnectorArgs {
+  coreConnectors: Plugin[]
+  ctx: EngineContext
+  changes: string[]
+  plugin: Plugin
+  startedMessage: string
+}
+
 interface HealthAwarePlugin extends Plugin {
   isHealthy?: () => boolean
 }
@@ -188,6 +196,31 @@ async function rollbackBatch(actions: RollbackAction[]): Promise<void> {
   }
 }
 
+async function startMissingCoreConnector(args: MissingCoreConnectorArgs): Promise<RollbackAction> {
+  const { coreConnectors, ctx, changes, plugin, startedMessage } = args
+
+  await plugin.start(ctx)
+  coreConnectors.push(plugin)
+  changes.push(startedMessage)
+
+  return {
+    run: async () => {
+      try {
+        await plugin.stop()
+        const index = coreConnectors.indexOf(plugin)
+        if (index >= 0) {
+          coreConnectors.splice(index, 1)
+        }
+      } catch (err) {
+        if (!coreConnectors.includes(plugin)) {
+          coreConnectors.push(plugin)
+        }
+        throw err
+      }
+    },
+  }
+}
+
 export function initConnectors(config: Config, toolCenter: ToolCenter): ConnectorsResult {
   const coreConnectors: Plugin[] = []
 
@@ -260,6 +293,18 @@ export function createConnectorReconnector(args: {
             },
           })
         }
+      } else if (fresh.connectors.web.port) {
+        rollbackActions.push(await startMissingCoreConnector({
+          coreConnectors,
+          ctx,
+          changes,
+          plugin: new WebConnector({
+            host: fresh.connectors.web.host,
+            port: fresh.connectors.web.port,
+            authToken: fresh.connectors.web.authToken,
+          }),
+          startedMessage: `web started on ${fresh.connectors.web.host}:${fresh.connectors.web.port}`,
+        }))
       }
 
       // --- MCP ---
@@ -278,6 +323,17 @@ export function createConnectorReconnector(args: {
             },
           })
         }
+      } else if (fresh.connectors.mcp.port) {
+        rollbackActions.push(await startMissingCoreConnector({
+          coreConnectors,
+          ctx,
+          changes,
+          plugin: new McpServerConnector(ctx.toolCenter, {
+            host: fresh.connectors.mcp.host,
+            port: fresh.connectors.mcp.port,
+          }),
+          startedMessage: `mcp started on ${fresh.connectors.mcp.host}:${fresh.connectors.mcp.port}`,
+        }))
       }
 
       // --- MCP Ask ---
