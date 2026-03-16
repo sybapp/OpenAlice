@@ -6,6 +6,7 @@ import {
   platformConfigSchema, accountConfigSchema,
 } from '../../../core/config.js'
 import { isRecord, mergeSecretField, withSecretPresence } from './secret-fields.js'
+import { getValidationErrorPayload } from './zod-error.js'
 
 type TradingAccountConfig = Awaited<ReturnType<typeof readAccountsConfig>>[number]
 
@@ -96,8 +97,9 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       }
       return c.json(validated)
     } catch (err) {
-      if (err instanceof Error && err.name === 'ZodError') {
-        return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
       }
       return c.json({ error: String(err) }, 500)
     }
@@ -160,8 +162,9 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       }
       return c.json(toClientAccount(validated))
     } catch (err) {
-      if (err instanceof Error && err.name === 'ZodError') {
-        return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
       }
       return c.json({ error: String(err) }, 500)
     }

@@ -17,6 +17,7 @@ import {
   toSecretPresenceMap,
   withSecretPresence,
 } from './secret-fields.js'
+import { getValidationErrorPayload } from './zod-error.js'
 
 interface ConfigRouteOpts {
   onConnectorsChange?: () => Promise<void>
@@ -200,8 +201,9 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
         }
       }
     } catch (err) {
-      if (err instanceof Error && err.name === 'ZodError') {
-        return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
       }
       return c.json({ error: String(err) }, 500)
     }

@@ -84,6 +84,34 @@ describe('MaxPositionSizeGuard', () => {
     expect(result).toContain('30.0%')
   })
 
+  it('allows sell orders that reduce an existing long position', () => {
+    const guard = new MaxPositionSizeGuard({ maxPercentOfEquity: 25 })
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'AAPL', side: 'sell', type: 'market', notional: 10_000 },
+      },
+      positions: [makePosition({ contract: { symbol: 'AAPL' }, side: 'long', marketValue: 30_000 })],
+      account: { equity: 100_000 },
+    })
+
+    expect(guard.check(ctx)).toBeNull()
+  })
+
+  it('allows buy orders that reduce an existing short position', () => {
+    const guard = new MaxPositionSizeGuard({ maxPercentOfEquity: 25 })
+    const ctx = makeContext({
+      operation: {
+        action: 'placeOrder',
+        params: { symbol: 'BTC/USD', side: 'buy', type: 'market', notional: 10_000 },
+      },
+      positions: [makePosition({ contract: { symbol: 'BTC/USD' }, side: 'short', marketValue: 30_000 })],
+      account: { equity: 100_000 },
+    })
+
+    expect(guard.check(ctx)).toBeNull()
+  })
+
   it('uses default 25% if no option provided', () => {
     const guard = new MaxPositionSizeGuard({})
     const ctx = makeContext({

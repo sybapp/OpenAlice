@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ZodError } from 'zod'
 
 const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
@@ -266,6 +267,38 @@ describe('createConfigRoutes', () => {
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
       error: 'Invalid backend. Must be "claude-code", "codex-cli", or "vercel-ai-sdk".',
+    })
+  })
+
+  it('returns structured zod issues when a config write fails validation', async () => {
+    mocks.loadConfig.mockResolvedValue(fullConfig)
+    mocks.writeConfigSection.mockRejectedValue(new ZodError([
+      {
+        code: 'invalid_type',
+        expected: 'number',
+        input: 'oops',
+        path: ['web', 'port'],
+        message: 'Invalid input: expected number, received string',
+      },
+    ]))
+
+    const app = createConfigRoutes()
+    const res = await app.request('/connectors', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ web: { port: 'oops' } }),
+    })
+    const body = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({
+      error: 'Validation failed',
+      details: [
+        expect.objectContaining({
+          code: 'invalid_type',
+          path: ['web', 'port'],
+        }),
+      ],
     })
   })
 

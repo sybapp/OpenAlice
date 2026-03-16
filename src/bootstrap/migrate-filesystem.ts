@@ -48,6 +48,22 @@ async function moveFile(source: string, target: string): Promise<void> {
   await movePath(source, target)
 }
 
+async function discardPath(path: string): Promise<void> {
+  if (!(await pathExists(path))) return
+  await rm(path, { recursive: true, force: true })
+}
+
+async function moveBundledPath(source: string, target: string): Promise<void> {
+  if (!(await pathExists(source))) return
+  if (await pathExists(target)) {
+    await discardPath(source)
+    return
+  }
+
+  await ensureParent(target)
+  await rename(source, target)
+}
+
 async function moveDirectoryContents(sourceDir: string, targetDir: string): Promise<void> {
   if (!(await pathExists(sourceDir))) return
 
@@ -55,6 +71,23 @@ async function moveDirectoryContents(sourceDir: string, targetDir: string): Prom
   const entries = await readdir(sourceDir, { withFileTypes: true })
   for (const entry of entries) {
     await movePath(join(sourceDir, entry.name), join(targetDir, entry.name))
+  }
+  await rm(sourceDir, { recursive: true, force: true })
+}
+
+async function moveBundledDirectoryContents(sourceDir: string, targetDir: string): Promise<void> {
+  if (!(await pathExists(sourceDir))) return
+
+  await mkdir(targetDir, { recursive: true })
+  const entries = await readdir(sourceDir, { withFileTypes: true })
+  for (const entry of entries) {
+    const sourcePath = join(sourceDir, entry.name)
+    const targetPath = join(targetDir, entry.name)
+    if (await pathExists(targetPath)) {
+      await discardPath(sourcePath)
+      continue
+    }
+    await movePath(sourcePath, targetPath)
   }
   await rm(sourceDir, { recursive: true, force: true })
 }
@@ -68,9 +101,9 @@ async function copyFileIfMissing(source: string, target: string): Promise<void> 
 export async function migrateFilesystemLayout(): Promise<void> {
   await movePath(resolve('data/config'), CONFIG_DIR)
 
-  await moveFile(resolve('data/default/persona.default.md'), PERSONA_DEFAULT_FILE)
-  await moveFile(resolve('data/default/heartbeat.default.md'), HEARTBEAT_DEFAULT_FILE)
-  await moveDirectoryContents(resolve('data/default/skills'), DEFAULT_SKILLS_DIR)
+  await moveBundledPath(resolve('data/default/persona.default.md'), PERSONA_DEFAULT_FILE)
+  await moveBundledPath(resolve('data/default/heartbeat.default.md'), HEARTBEAT_DEFAULT_FILE)
+  await moveBundledDirectoryContents(resolve('data/default/skills'), DEFAULT_SKILLS_DIR)
 
   await movePath(resolve('data/brain'), RUNTIME_BRAIN_DIR)
   await movePath(resolve('data/sessions'), RUNTIME_SESSIONS_DIR)

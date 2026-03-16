@@ -40,7 +40,11 @@ export class MaxPositionSizeGuard implements OperationGuard {
 
     if (addedValue === 0) return null
 
-    const projectedValue = currentValue + addedValue
+    const currentExposure = existing
+      ? (existing.side === 'short' ? -currentValue : currentValue)
+      : 0
+    const deltaExposure = p.side === 'sell' ? -addedValue : addedValue
+    const projectedValue = Math.abs(currentExposure + deltaExposure)
     const percent = account.equity > 0 ? (projectedValue / account.equity) * 100 : 0
 
     if (percent > this.maxPercent) {

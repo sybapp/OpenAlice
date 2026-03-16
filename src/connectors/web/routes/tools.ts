@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { ToolCenter } from '../../../core/tool-center.js'
 import { readToolsConfig, writeConfigSection } from '../../../core/config.js'
 import { buildCapabilityInventory } from '../../../core/capabilities.js'
+import { getValidationErrorPayload } from './zod-error.js'
 
 /** Capability routes: GET / (system tools + skills + scripts + MCP surface), PUT / (update disabled system tools) */
 export function createToolsRoutes(toolCenter: ToolCenter) {
@@ -35,8 +36,9 @@ export function createToolsRoutes(toolCenter: ToolCenter) {
       const validated = await writeConfigSection('tools', { disabled: nextDisabled })
       return c.json({ disabledSystemTools: validated.disabled })
     } catch (err) {
-      if (err instanceof Error && err.name === 'ZodError') {
-        return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
       }
       return c.json({ error: String(err) }, 500)
     }
