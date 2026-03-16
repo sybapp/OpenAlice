@@ -109,6 +109,34 @@ describe('main startup cleanup', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    startPlugins.mockImplementation(async () => undefined)
+  })
+
+  it('cleans up started runtime resources when connector startup fails', async () => {
+    const startupError = new Error('plugin bind failed')
+    startPlugins.mockRejectedValueOnce(startupError)
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await import('./main.ts')
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+
+    expect(stopPlugins).not.toHaveBeenCalled()
+    expect(heartbeat.stop).toHaveBeenCalledOnce()
+    expect(cronListener.stop).toHaveBeenCalledOnce()
+    expect(cronEngine.stop).toHaveBeenCalledOnce()
+    expect(traderListener.stop).toHaveBeenCalledOnce()
+    expect(trader.stop).toHaveBeenCalledOnce()
+    expect(traderReviewListener.stop).toHaveBeenCalledOnce()
+    expect(traderReview.stop).toHaveBeenCalledOnce()
+    expect(newsStore.close).toHaveBeenCalledOnce()
+    expect(eventLog.close).toHaveBeenCalledOnce()
+    expect(accountManager.closeAll).toHaveBeenCalledOnce()
+    expect(disposeDispatcher).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledWith('fatal:', startupError)
+
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
   })
 
   it('cleans up started runtime resources when late startup fails', async () => {

@@ -34,6 +34,7 @@ let startupCleanup: null | (() => Promise<void>) = null
 async function main() {
   let cleanupStarted = false
   let cleanupResources: null | (() => Promise<void>) = null
+  let pluginsStarted = false
 
   const runCleanup = async () => {
     if (cleanupStarted) return
@@ -168,10 +169,6 @@ async function main() {
     }),
   }
 
-  await startPlugins(getConnectors(), ctx)
-
-  console.log('engine: started')
-
   cleanupResources = async () => {
     newsCollector?.stop()
     heartbeat.stop()
@@ -181,7 +178,9 @@ async function main() {
     trader.stop()
     traderReviewListener.stop()
     traderReview.stop()
-    await stopPlugins(getConnectors())
+    if (pluginsStarted) {
+      await stopPlugins(getConnectors())
+    }
     for (const setup of accountSetups.values()) {
       setup.disposeDispatcher()
     }
@@ -189,6 +188,11 @@ async function main() {
     await eventLog.close()
     await accountManager.closeAll()
   }
+
+  await startPlugins(getConnectors(), ctx)
+  pluginsStarted = true
+
+  console.log('engine: started')
 
   await ccxtInitPromise
 
