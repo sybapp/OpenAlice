@@ -29,6 +29,37 @@ describe('McpAskConnector', () => {
     vi.clearAllMocks()
   })
 
+  it('waits for the listener to finish closing before stop resolves', async () => {
+    let closeCallback: ((err?: Error) => void) | undefined
+    const unregister = vi.fn()
+    const register = vi.fn(() => unregister)
+    mocks.serve.mockReturnValue({
+      close: vi.fn((callback?: (err?: Error) => void) => {
+        closeCallback = callback
+      }),
+    })
+
+    const plugin = new McpAskConnector({ port: 3105, authToken: 'secret' })
+    await plugin.start({
+      connectorCenter: { register },
+      engine: {},
+    } as never)
+
+    let stopped = false
+    const stopPromise = plugin.stop().then(() => {
+      stopped = true
+    })
+
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    expect(unregister).toHaveBeenCalledOnce()
+
+    closeCallback?.()
+    await stopPromise
+
+    expect(stopped).toBe(true)
+  })
+
   it('unregisters the connector when listener startup fails after registration', async () => {
     const unregister = vi.fn()
     const register = vi.fn(() => unregister)

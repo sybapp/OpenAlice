@@ -19,6 +19,7 @@ import { z } from 'zod'
 import { glob } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import type { Plugin, EngineContext } from '../../core/types.js'
+import { closeServer } from '../../core/close-server.js'
 import { SessionStore, toTextHistory } from '../../core/session.js'
 
 export interface McpAskConfig {
@@ -167,7 +168,7 @@ export class McpAskPlugin implements Plugin {
   async stop() {
     this.unregisterConnector?.()
     this.unregisterConnector = undefined
-    this.server?.close()
+    await closeServer(this.server)
     this.server = null
   }
 }
