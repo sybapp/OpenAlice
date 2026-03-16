@@ -49,7 +49,11 @@ const TRADER_SKILLS = {
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
 
-  async function executeRun(config: BacktestRunConfig): Promise<BacktestRunManifest> {
+  function prepareRun(config: BacktestRunConfig): {
+    runId: string
+    session: SessionStore | null
+    manifest: BacktestRunManifest
+  } {
     const runId = normalizeBacktestRunId(config.runId ?? createBacktestRunId())
     const storage = options.storage
     const accountId = config.accountId ?? `${runId}-paper`
@@ -58,28 +62,41 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     const artifactDir = storage.getRunPaths(runId).runDir
     const session = mode === 'ai' ? new SessionStore(`backtest/${runId}`) : null
 
-    const manifest: BacktestRunManifest = {
+    return {
       runId,
-      status: 'queued',
-      mode,
-      createdAt: new Date().toISOString(),
-      sessionId: session?.id,
-      artifactDir,
-      barCount: config.bars.length,
-      currentStep: 0,
-      accountId,
-      accountLabel,
-      initialCash: config.initialCash,
-      startTime: config.startTime,
-      guards: config.guards ?? [],
+      session,
+      manifest: {
+        runId,
+        status: 'queued',
+        mode,
+        createdAt: new Date().toISOString(),
+        sessionId: session?.id,
+        artifactDir,
+        barCount: config.bars.length,
+        currentStep: 0,
+        accountId,
+        accountLabel,
+        initialCash: config.initialCash,
+        startTime: config.startTime,
+        guards: config.guards ?? [],
+      },
     }
+  }
 
-    await storage.createRun(manifest)
-
-    const eventLog = await createEventLog({ logPath: storage.getRunPaths(runId).eventLogPath })
+  async function executeRun(
+    config: BacktestRunConfig,
+    prepared: { runId: string; session: SessionStore | null },
+  ): Promise<BacktestRunManifest> {
+    const { runId, session } = prepared
+    const storage = options.storage
+    const accountId = config.accountId ?? `${runId}-paper`
+    const accountLabel = config.accountLabel ?? 'Backtest Paper'
+    let eventLog: Awaited<ReturnType<typeof createEventLog>> | null = null
     let account: BacktestAccount | null = null
 
     try {
+      eventLog = await createEventLog({ logPath: storage.getRunPaths(runId).eventLogPath })
+
       await storage.updateManifest(runId, {
         status: 'running',
         startedAt: new Date().toISOString(),
@@ -178,14 +195,13 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         // ignore secondary manifest persistence failures
       }
       try {
-        await eventLog.append('backtest.run.failed', { runId, error: message })
+        await eventLog?.append('backtest.run.failed', { runId, error: message })
       } catch {
-        // ignore secondary logging failures
       }
       throw err
     } finally {
       await Promise.allSettled([
-        eventLog.close(),
+        eventLog?.close() ?? Promise.resolve(),
         account?.close() ?? Promise.resolve(),
       ])
     }
@@ -194,12 +210,20 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
   return {
     async startRun(config) {
       const validated = parseBacktestRunConfig(config)
-      const runId = normalizeBacktestRunId(validated.runId ?? createBacktestRunId())
+      const prepared = prepareRun(validated)
+      const { runId, manifest } = prepared
       if (running.has(runId)) {
         throw new Error(`Backtest run already in progress: ${runId}`)
       }
       await options.storage.claimRunId(runId)
-      const promise = executeRun({ ...validated, runId })
+      try {
+        await options.storage.createRun(manifest)
+      } catch (err) {
+        await options.storage.releaseRunId(runId)
+        throw err
+      }
+
+      const promise = executeRun({ ...validated, runId }, prepared)
         .finally(() => {
           running.delete(runId)
           return options.storage.releaseRunId(runId)

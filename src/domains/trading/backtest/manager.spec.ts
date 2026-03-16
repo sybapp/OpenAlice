@@ -1,11 +1,30 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createBacktestStorage } from './storage.js'
+
+const mocks = vi.hoisted(() => ({
+  createEventLogOverride: null as null | ((...args: unknown[]) => Promise<unknown>),
+}))
+
+vi.mock('../../../core/event-log.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../core/event-log.js')>('../../../core/event-log.js')
+  return {
+    ...actual,
+    createEventLog: (...args: Parameters<typeof actual.createEventLog>) => {
+      if (mocks.createEventLogOverride) {
+        return mocks.createEventLogOverride(...args) as ReturnType<typeof actual.createEventLog>
+      }
+      return actual.createEventLog(...args)
+    },
+  }
+})
+
 import { createBacktestRunManager } from './manager.js'
 import type { Engine } from '../../../core/engine.js'
 import { SessionStore } from '../../../core/session.js'
+import type { BacktestStorage } from './types.js'
 
 function tempDir(name: string) {
   return join(tmpdir(), `backtest-manager-${name}-${randomUUID()}`)
@@ -30,6 +49,10 @@ function deferred<T>() {
 }
 
 describe('createBacktestRunManager', () => {
+  beforeEach(() => {
+    mocks.createEventLogOverride = null
+  })
+
   it('runs scripted backtests and persists artifacts', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('scripted') })
     const engine = {
@@ -143,6 +166,80 @@ describe('createBacktestRunManager', () => {
     expect(manifest.status).toBe('failed')
     expect(manifest.error).toBe('model offline')
     expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
+  })
+
+  it('persists a failed manifest when startup crashes before the run reaches running state', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('event-log-init-failure') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    mocks.createEventLogOverride = vi.fn().mockRejectedValue(new Error('event log offline'))
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    const manifest = await manager.waitForRun(runId)
+
+    expect(manifest.status).toBe('failed')
+    expect(manifest.error).toBe('event log offline')
+    expect(manifest.startedAt).toBeUndefined()
+    await expect(storage.listRuns()).resolves.toContainEqual(expect.objectContaining({ runId, status: 'failed' }))
+  })
+
+  it('fails startRun immediately when the initial manifest cannot be persisted', async () => {
+    const releaseRunId = vi.fn().mockResolvedValue(undefined)
+    const storage = {
+      claimRunId: vi.fn().mockResolvedValue(undefined),
+      releaseRunId,
+      createRun: vi.fn().mockRejectedValue(new Error('disk full')),
+      updateManifest: vi.fn(),
+      getManifest: vi.fn(),
+      listRuns: vi.fn(),
+      writeSummary: vi.fn(),
+      readSummary: vi.fn(),
+      appendEquityPoint: vi.fn(),
+      readEquityCurve: vi.fn(),
+      writeGitState: vi.fn(),
+      readGitState: vi.fn(),
+      readEventEntries: vi.fn(),
+      readSessionEntries: vi.fn(),
+      getRunPaths: vi.fn((runId: string) => ({
+        runDir: `/tmp/${runId}`,
+        manifestPath: `/tmp/${runId}/manifest.json`,
+        summaryPath: `/tmp/${runId}/summary.json`,
+        equityCurvePath: `/tmp/${runId}/equity-curve.jsonl`,
+        eventLogPath: `/tmp/${runId}/events.jsonl`,
+        gitStatePath: `/tmp/${runId}/git-state.json`,
+      })),
+    } satisfies BacktestStorage
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.startRun({
+      runId: 'persist-failure',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })).rejects.toThrow('disk full')
+
+    expect(storage.claimRunId).toHaveBeenCalledWith('persist-failure')
+    expect(releaseRunId).toHaveBeenCalledWith('persist-failure')
   })
 
   it('rejects invalid bar payloads before scheduling a run', async () => {
