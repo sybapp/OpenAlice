@@ -565,6 +565,37 @@ describe('createBacktestRunManager', () => {
     expect(releaseRunId).toHaveBeenCalledWith('stale-failure')
   })
 
+  it('preserves a completed result when releasing the run claim fails after execution', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('release-runid-failure') })
+    const releaseRunId = vi.spyOn(storage, 'releaseRunId').mockRejectedValue(new Error('lock release failed'))
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const manager = createBacktestRunManager({ storage, engine })
+
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({
+      runId,
+      status: 'completed',
+    })
+    expect(releaseRunId).toHaveBeenCalledWith(runId)
+    expect(warn).toHaveBeenCalledWith(
+      `backtest-manager: failed to release run claim for ${runId}: lock release failed`,
+    )
+    warn.mockRestore()
+  })
+
   it('fails startRun immediately when the initial manifest cannot be persisted', async () => {
     const releaseRunId = vi.fn().mockResolvedValue(undefined)
     const storage = {

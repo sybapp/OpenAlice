@@ -54,6 +54,14 @@ const INVALID_RUN_CLAIM_STALE_MS = 5_000
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
 
+  async function releaseRunClaim(runId: string): Promise<void> {
+    try {
+      await options.storage.releaseRunId(runId)
+    } catch (err) {
+      console.warn(`backtest-manager: failed to release run claim for ${runId}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   async function requireManifest(runId: string): Promise<BacktestRunManifest> {
     const manifest = await options.storage.getManifest(runId)
     if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
@@ -307,14 +315,14 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       try {
         await options.storage.createRun(manifest)
       } catch (err) {
-        await options.storage.releaseRunId(runId)
+        await releaseRunClaim(runId)
         throw err
       }
 
       const promise = executeRun({ ...validated, runId }, prepared)
         .finally(() => {
           running.delete(runId)
-          return options.storage.releaseRunId(runId)
+          return releaseRunClaim(runId)
         })
       running.set(runId, promise)
       return { runId }
