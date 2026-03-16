@@ -15,7 +15,10 @@ import { WebConnector } from '../connectors/web/index.js'
 import { McpAskConnector } from '../connectors/mcp-ask/index.js'
 
 function sameNumberArray(a: number[], b: number[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index])
+  if (a.length !== b.length) return false
+  const left = [...a].sort((x, y) => x - y)
+  const right = [...b].sort((x, y) => x - y)
+  return left.every((value, index) => value === right[index])
 }
 
 export interface ConnectorsResult {

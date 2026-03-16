@@ -352,6 +352,33 @@ describe('bootstrap connectors', () => {
     expect(optionalConnectors.get('telegram')).not.toBe(telegram)
   })
 
+  it('does not restart a healthy telegram connector when chatIds are only reordered', async () => {
+    const mcp = new FakeMcpPlugin({}, { host: '127.0.0.1', port: 3001 })
+    const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002 })
+    const telegram = new FakeTelegramPlugin({ token: 'tg-token', allowedChatIds: [123, 456] })
+    const optionalConnectors = new Map<string, any>([['telegram', telegram]])
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 3002 },
+        mcp: { host: '127.0.0.1', port: 3001 },
+        mcpAsk: { enabled: false },
+        telegram: { enabled: true, botToken: 'tg-token', chatIds: [456, 123] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [mcp as never, web as never],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({ success: true, message: 'no changes' })
+    expect(telegram.stop).not.toHaveBeenCalled()
+    expect(telegram.start).not.toHaveBeenCalled()
+    expect(optionalConnectors.get('telegram')).toBe(telegram)
+  })
+
   it('rolls back earlier connector updates when a later connector fails in the same batch', async () => {
     const mcp = new FakeMcpPlugin({}, { host: '127.0.0.1', port: 3001 })
     const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'old-token' })
