@@ -126,6 +126,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     }
 
     if (manifest.status === 'failed') return { manifest }
+    if (running.has(runId)) return { manifest }
     if (await hasActiveRunClaim(join(options.storage.getRunPaths(runId).runDir, '.run.lock'))) {
       return { manifest }
     }

@@ -229,6 +229,45 @@ describe('createBacktestRunManager', () => {
     expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
   })
 
+  it('keeps an in-memory active run visible as running when its lock file disappears', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('running-with-missing-lock') })
+    const gate = deferred<void>()
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        await gate.promise
+        await session.appendAssistant(JSON.stringify({ text: 'hold', operations: [] }), 'engine')
+        return {
+          text: JSON.stringify({ text: 'hold', operations: [] }),
+          media: [],
+        }
+      }),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(engine.askWithSession).toHaveBeenCalledOnce()
+    })
+    await storage.releaseRunId(runId)
+
+    await expect(manager.getRun(runId)).resolves.toMatchObject({
+      manifest: expect.objectContaining({ runId, status: 'running' }),
+    })
+
+    gate.resolve()
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+  })
+
   it('does not emit a completed event when summary persistence fails after execution finishes', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('summary-persist-failure') })
     vi.spyOn(storage, 'writeSummary').mockRejectedValueOnce(new Error('summary disk offline'))
