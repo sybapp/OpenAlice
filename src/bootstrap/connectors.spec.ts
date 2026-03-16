@@ -18,6 +18,10 @@ class FakeMcpPlugin {
   constructor(public tools: unknown, config: { host: string; port: number }) {
     this.config = config
   }
+
+  getConfig() {
+    return this.config
+  }
 }
 
 class FakeWebPlugin {
@@ -29,6 +33,10 @@ class FakeWebPlugin {
   constructor(config: { host: string; port: number; authToken?: string }) {
     this.config = config
     mocks.webInstances.push(this)
+  }
+
+  getConfig() {
+    return this.config
   }
 }
 
@@ -202,6 +210,38 @@ describe('bootstrap connectors', () => {
     await expect(reconnect()).resolves.toEqual({ success: false, error: 'bad token' })
     expect(telegram.stop).toHaveBeenCalledOnce()
     expect(telegram.start).toHaveBeenCalledOnce()
+    expect(optionalConnectors.get('telegram')).toBe(telegram)
+  })
+
+  it('rolls back earlier connector updates when a later connector fails in the same batch', async () => {
+    const mcp = new FakeMcpPlugin({}, { host: '127.0.0.1', port: 3001 })
+    const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'old-token' })
+    web.reconfigure
+      .mockResolvedValueOnce('updated')
+      .mockResolvedValueOnce('updated')
+
+    const telegram = new FakeTelegramPlugin({ token: 'old-tg-token', allowedChatIds: [123] })
+    const optionalConnectors = new Map<string, any>([['telegram', telegram]])
+    mocks.telegramStartErrors.push(new Error('bad token'))
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 3002, authToken: 'new-token' },
+        mcp: { host: '127.0.0.1', port: 3001 },
+        mcpAsk: { enabled: false },
+        telegram: { enabled: true, botToken: 'new-tg-token', chatIds: [123] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [mcp as never, web as never],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({ success: false, error: 'bad token' })
+    expect(web.reconfigure).toHaveBeenNthCalledWith(1, { host: '127.0.0.1', port: 3002, authToken: 'new-token' })
+    expect(web.reconfigure).toHaveBeenNthCalledWith(2, { host: '127.0.0.1', port: 3002, authToken: 'old-token' })
     expect(optionalConnectors.get('telegram')).toBe(telegram)
   })
 })

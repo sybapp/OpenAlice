@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import { mkdir, open, readFile, writeFile, appendFile, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, writeFile, appendFile, unlink, rename } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { RUNTIME_SESSIONS_DIR } from '../../../core/paths.js'
 import type { GitExportState } from '../git/types.js'
@@ -220,7 +220,14 @@ async function readRunIndex(rootDir: string, runIndexPath: string): Promise<Back
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true })
-  await writeFile(filePath, JSON.stringify(value, null, 2) + '\n', 'utf-8')
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await writeFile(tempPath, JSON.stringify(value, null, 2) + '\n', 'utf-8')
+    await rename(tempPath, filePath)
+  } catch (err) {
+    await unlink(tempPath).catch(ignoreENOENT)
+    throw err
+  }
 }
 
 async function appendJsonLine(filePath: string, value: unknown): Promise<void> {

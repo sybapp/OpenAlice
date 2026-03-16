@@ -195,6 +195,9 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     async startRun(config) {
       const validated = parseBacktestRunConfig(config)
       const runId = normalizeBacktestRunId(validated.runId ?? createBacktestRunId())
+      if (running.has(runId)) {
+        throw new Error(`Backtest run already in progress: ${runId}`)
+      }
       const promise = executeRun({ ...validated, runId })
         .finally(() => {
           running.delete(runId)

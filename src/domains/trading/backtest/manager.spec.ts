@@ -19,6 +19,16 @@ function makeBars() {
   ]
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 describe('createBacktestRunManager', () => {
   it('runs scripted backtests and persists artifacts', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('scripted') })
@@ -157,5 +167,42 @@ describe('createBacktestRunManager', () => {
     })).rejects.toThrow()
 
     await expect(storage.listRuns()).resolves.toEqual([])
+  })
+
+  it('rejects concurrent runs that reuse the same runId', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('duplicate-runid') })
+    const reply = deferred<{ text: string; media: [] }>()
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        return reply.promise
+      }),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.startRun({
+      runId: 'same-run',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })).resolves.toEqual({ runId: 'same-run' })
+
+    await expect(manager.startRun({
+      runId: 'same-run',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })).rejects.toThrow('Backtest run already in progress: same-run')
+
+    reply.resolve({ text: JSON.stringify({ text: 'hold', operations: [] }), media: [] })
+    await expect(manager.waitForRun('same-run')).resolves.toMatchObject({ status: 'completed' })
   })
 })

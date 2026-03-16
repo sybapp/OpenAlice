@@ -38,6 +38,10 @@ interface OptionalConnectorReconcileArgs {
   incompleteMessage: string
 }
 
+interface RollbackAction {
+  run: () => Promise<void>
+}
+
 function createMcpAskConnector(config: Config['connectors']['mcpAsk']): McpAskConnector {
   return new McpAskConnector({
     port: config.port!,
@@ -57,7 +61,7 @@ function setOptionalConnector(optionalConnectors: Map<string, Plugin>, name: str
   optionalConnectors.set(name, plugin)
 }
 
-async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs): Promise<void> {
+async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs): Promise<RollbackAction | undefined> {
   const {
     optionalConnectors,
     ctx,
@@ -78,14 +82,19 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     await current.stop()
     optionalConnectors.delete(name)
     changes.push(stoppedMessage)
-    return
+    return {
+      run: async () => {
+        await current.start(ctx)
+        optionalConnectors.set(name, current)
+      },
+    }
   }
 
-  if (!enabled) return
+  if (!enabled) return undefined
 
   if (!configured) {
     console.warn(`reconnect: ${name} ${incompleteMessage}`)
-    return
+    return undefined
   }
 
   if (!current) {
@@ -93,10 +102,15 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     await plugin.start(ctx)
     optionalConnectors.set(name, plugin)
     changes.push(startedMessage)
-    return
+    return {
+      run: async () => {
+        optionalConnectors.delete(name)
+        await plugin.stop()
+      },
+    }
   }
 
-  if (!changed(current)) return
+  if (!changed(current)) return undefined
 
   const plugin = create()
   await current.stop()
@@ -104,6 +118,13 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     await plugin.start(ctx)
     optionalConnectors.set(name, plugin)
     changes.push(restartedMessage)
+    return {
+      run: async () => {
+        await plugin.stop()
+        await current.start(ctx)
+        optionalConnectors.set(name, current)
+      },
+    }
   } catch (err) {
     try {
       await current.start(ctx)
@@ -115,6 +136,22 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
       throw new Error(`${name} restart failed: ${restartMessage}; rollback failed: ${rollbackMessage}`)
     }
     throw err
+  }
+}
+
+async function rollbackBatch(actions: RollbackAction[]): Promise<void> {
+  const errors: string[] = []
+
+  for (const action of [...actions].reverse()) {
+    try {
+      await action.run()
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '))
   }
 }
 
@@ -166,6 +203,7 @@ export function createConnectorReconnector(args: {
   return async (): Promise<ReconnectResult> => {
     if (reconnecting) return { success: false, error: 'Reconnect already in progress' }
     reconnecting = true
+    const rollbackActions: RollbackAction[] = []
     try {
       const fresh = await loadConfig()
       const ctx = getCtx()
@@ -174,6 +212,7 @@ export function createConnectorReconnector(args: {
       // --- Web ---
       const webConnector = coreConnectors.find((plugin) => plugin instanceof WebConnector)
       if (webConnector instanceof WebConnector) {
+        const previousConfig = webConnector.getConfig()
         const result = await webConnector.reconfigure({
           host: fresh.connectors.web.host,
           port: fresh.connectors.web.port,
@@ -181,22 +220,37 @@ export function createConnectorReconnector(args: {
         })
         if (result === 'updated') changes.push('web updated')
         if (result === 'restarted') changes.push(`web restarted on ${fresh.connectors.web.host}:${fresh.connectors.web.port}`)
+        if (result !== 'unchanged') {
+          rollbackActions.push({
+            run: async () => {
+              await webConnector.reconfigure(previousConfig)
+            },
+          })
+        }
       }
 
       // --- MCP ---
       const mcpConnector = coreConnectors.find((plugin) => plugin instanceof McpServerConnector)
       if (mcpConnector instanceof McpServerConnector) {
+        const previousConfig = mcpConnector.getConfig()
         const result = await mcpConnector.reconfigure({
           host: fresh.connectors.mcp.host,
           port: fresh.connectors.mcp.port,
         })
         if (result === 'restarted') changes.push(`mcp restarted on ${fresh.connectors.mcp.host}:${fresh.connectors.mcp.port}`)
+        if (result !== 'unchanged') {
+          rollbackActions.push({
+            run: async () => {
+              await mcpConnector.reconfigure(previousConfig)
+            },
+          })
+        }
       }
 
       // --- MCP Ask ---
       const mcpAskEnabled = fresh.connectors.mcpAsk.enabled
       const mcpAskConfigured = !!fresh.connectors.mcpAsk.port
-      await reconcileOptionalConnector({
+      const mcpAskRollback = await reconcileOptionalConnector({
         optionalConnectors,
         ctx,
         changes,
@@ -219,11 +273,12 @@ export function createConnectorReconnector(args: {
         restartedMessage: 'mcp-ask restarted',
         incompleteMessage: 'config is incomplete; keeping current connector',
       })
+      if (mcpAskRollback) rollbackActions.push(mcpAskRollback)
 
       // --- Telegram ---
       const telegramEnabled = fresh.connectors.telegram.enabled
       const telegramConfigured = !!fresh.connectors.telegram.botToken
-      await reconcileOptionalConnector({
+      const telegramRollback = await reconcileOptionalConnector({
         optionalConnectors,
         ctx,
         changes,
@@ -246,13 +301,20 @@ export function createConnectorReconnector(args: {
         restartedMessage: 'telegram restarted',
         incompleteMessage: 'config is incomplete; keeping current connector',
       })
+      if (telegramRollback) rollbackActions.push(telegramRollback)
 
       if (changes.length > 0) {
         console.log(`reconnect: connectors — ${changes.join(', ')}`)
       }
       return { success: true, message: changes.length > 0 ? changes.join(', ') : 'no changes' }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      let msg = err instanceof Error ? err.message : String(err)
+      try {
+        await rollbackBatch(rollbackActions)
+      } catch (rollbackErr) {
+        const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+        msg = `${msg}; batch rollback failed: ${rollbackMessage}`
+      }
       console.error('reconnect: connectors failed:', msg)
       return { success: false, error: msg }
     } finally {
