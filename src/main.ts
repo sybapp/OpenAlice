@@ -48,7 +48,7 @@ async function main() {
   await ensureDefaultSkillPacks()
 
   // ---- Trading Accounts ----
-  const { accountManager, accountSetups, ccxtInitPromise, initAccount } = await initTradingAccounts()
+  const { accountManager, accountSetups, ccxtInitPromise, prepareAccountRuntime } = await initTradingAccounts()
 
   // ---- Services (Brain, EventLog, Cron, News, OHLCV) ----
   const services = await initServices(config)
@@ -142,7 +142,7 @@ async function main() {
   const { coreConnectors, optionalConnectors } = initConnectors(config, toolCenter)
 
   // ---- Reconnect handlers ----
-  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, initAccount })
+  const reconnectAccount = createAccountReconnector({ accountManager, accountSetups, prepareAccountRuntime })
   let ctx: EngineContext
   const reconnectConnectors = createConnectorReconnector({ coreConnectors, optionalConnectors, getCtx: () => ctx })
   const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]

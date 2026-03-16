@@ -22,10 +22,16 @@ type TradingAccountConfig = {
   guards: Array<{ type: string; options: Record<string, unknown> }>
 }
 
+interface PreparedAccountRuntime {
+  account: Awaited<ReturnType<typeof createAccountFromConfig>>
+  setup: AccountSetup
+}
+
 export interface TradingAccountsResult {
   accountManager: AccountManager
   accountSetups: Map<string, AccountSetup>
   ccxtInitPromise: Promise<void>
+  prepareAccountRuntime: (accountCfg: TradingAccountConfig, platform: IPlatform) => Promise<PreparedAccountRuntime | null>
   initAccount: (accountCfg: TradingAccountConfig, platform: IPlatform) => Promise<boolean>
 }
 
@@ -45,16 +51,16 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
   const platformRegistry = buildPlatformRegistry(tradingConfig.platforms)
   validatePlatformRefs([...platformRegistry.values()], tradingConfig.accounts)
 
-  async function initAccount(
+  async function prepareAccountRuntime(
     accountCfg: TradingAccountConfig,
     platform: IPlatform,
-  ): Promise<boolean> {
+  ): Promise<PreparedAccountRuntime | null> {
     const account = createAccountFromConfig(platform, accountCfg)
     try {
       await account.init()
     } catch (err) {
       console.warn(`trading: ${accountCfg.id} init failed (non-fatal):`, err)
-      return false
+      return null
     }
     const savedState = await loadGitState(accountCfg.id)
     const filePath = gitFilePath(accountCfg.id)
@@ -64,6 +70,18 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
       onCommit: createGitPersister(filePath),
       archivePath: gitArchivePath(accountCfg.id),
     })
+    return { account, setup }
+  }
+
+  async function initAccount(
+    accountCfg: TradingAccountConfig,
+    platform: IPlatform,
+  ): Promise<boolean> {
+    const prepared = await prepareAccountRuntime(accountCfg, platform)
+    if (!prepared) {
+      return false
+    }
+    const { account, setup } = prepared
     accountManager.addAccount(account, accountCfg.platformId)
     accountSetups.set(account.id, setup)
     console.log(`trading: ${account.label} initialized`)
@@ -77,7 +95,7 @@ export async function initTradingAccounts(): Promise<TradingAccountsResult> {
 
   const ccxtInitPromise = Promise.resolve()
 
-  return { accountManager, accountSetups, ccxtInitPromise, initAccount }
+  return { accountManager, accountSetups, ccxtInitPromise, prepareAccountRuntime, initAccount }
 }
 
 export async function teardownAccountRuntime(args: {
@@ -101,9 +119,9 @@ export async function teardownAccountRuntime(args: {
 export function createAccountReconnector(deps: {
   accountManager: AccountManager
   accountSetups: Map<string, AccountSetup>
-  initAccount: TradingAccountsResult['initAccount']
+  prepareAccountRuntime: TradingAccountsResult['prepareAccountRuntime']
 }): (accountId: string) => Promise<ReconnectResult> {
-  const { accountManager, accountSetups, initAccount } = deps
+  const { accountManager, accountSetups, prepareAccountRuntime } = deps
   const reconnecting = new Set<string>()
 
   return async (accountId: string): Promise<ReconnectResult> => {
@@ -114,10 +132,9 @@ export function createAccountReconnector(deps: {
     try {
       const freshTrading = await loadTradingConfig()
 
-      await teardownAccountRuntime({ accountId, accountManager, accountSetups })
-
       const accCfg = freshTrading.accounts.find((a) => a.id === accountId)
       if (!accCfg) {
+        await teardownAccountRuntime({ accountId, accountManager, accountSetups })
         return { success: true, message: `Account "${accountId}" not found in config (removed or disabled)` }
       }
 
@@ -128,9 +145,19 @@ export function createAccountReconnector(deps: {
         return { success: false, error: `Platform "${accCfg.platformId}" not found for account "${accountId}"` }
       }
 
-      const ok = await initAccount(accCfg, platform)
-      if (!ok) {
+      const prepared = await prepareAccountRuntime(accCfg, platform)
+      if (!prepared) {
         return { success: false, error: `Account "${accountId}" init failed` }
+      }
+
+      try {
+        await teardownAccountRuntime({ accountId, accountManager, accountSetups })
+        accountManager.addAccount(prepared.account, accCfg.platformId)
+        accountSetups.set(prepared.account.id, prepared.setup)
+      } catch (err) {
+        prepared.setup.disposeDispatcher()
+        await prepared.account.close().catch(() => undefined)
+        throw err
       }
 
       const label = accountManager.getAccount(accountId)?.label ?? accountId

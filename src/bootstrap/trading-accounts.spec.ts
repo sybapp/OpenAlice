@@ -86,7 +86,7 @@ describe('createAccountReconnector', () => {
         removeAccount: vi.fn(),
       } as never,
       accountSetups: new Map(),
-      initAccount: vi.fn(),
+      prepareAccountRuntime: vi.fn(),
     })
 
     const pending = reconnect('paper-1')
@@ -107,24 +107,56 @@ describe('createAccountReconnector', () => {
       accounts: [{ id: 'paper-1', platformId: 'missing-platform', guards: [] }],
       platforms: [],
     })
+    const close = vi.fn(async () => undefined)
+    const removeAccount = vi.fn()
 
     const reconnect = createAccountReconnector({
       accountManager: {
-        getAccount: vi.fn(),
-        removeAccount: vi.fn(),
+        getAccount: vi.fn(() => ({ close })),
+        removeAccount,
       } as never,
       accountSetups: new Map(),
-      initAccount: vi.fn(),
+      prepareAccountRuntime: vi.fn(),
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
       success: false,
       error: 'Platform "missing-platform" not found for account "paper-1"',
     })
+    expect(close).not.toHaveBeenCalled()
+    expect(removeAccount).not.toHaveBeenCalled()
+  })
+
+  it('tears down runtime only after the account is removed or disabled', async () => {
+    mocks.loadTradingConfig.mockResolvedValue({
+      accounts: [],
+      platforms: [],
+    })
+    const close = vi.fn(async () => undefined)
+    const removeAccount = vi.fn()
+
+    const reconnect = createAccountReconnector({
+      accountManager: {
+        getAccount: vi.fn(() => ({ close })),
+        removeAccount,
+      } as never,
+      accountSetups: new Map(),
+      prepareAccountRuntime: vi.fn(),
+    })
+
+    await expect(reconnect('paper-1')).resolves.toEqual({
+      success: true,
+      message: 'Account "paper-1" not found in config (removed or disabled)',
+    })
+    expect(close).toHaveBeenCalledOnce()
+    expect(removeAccount).toHaveBeenCalledWith('paper-1')
   })
 
   it('reconnects a ccxt account', async () => {
-    const initAccount = vi.fn(async () => true)
+    const prepareAccountRuntime = vi.fn(async () => ({
+      account: { id: 'paper-1', label: 'Main Binance' },
+      setup: { disposeDispatcher: vi.fn() },
+    }))
     const getAccount = vi.fn()
       .mockReturnValueOnce({ close: vi.fn(async () => undefined) })
       .mockReturnValue({ label: 'Main Binance' })
@@ -140,17 +172,18 @@ describe('createAccountReconnector', () => {
     const reconnect = createAccountReconnector({
       accountManager: {
         getAccount,
+        addAccount: vi.fn(),
         removeAccount: vi.fn(),
       } as never,
       accountSetups: new Map(),
-      initAccount,
+      prepareAccountRuntime,
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
       success: true,
       message: 'Main Binance reconnected',
     })
-    expect(initAccount).toHaveBeenCalledWith(
+    expect(prepareAccountRuntime).toHaveBeenCalledWith(
       { id: 'paper-1', platformId: 'binance', guards: [] },
       { id: 'binance', providerType: 'ccxt' },
     )
@@ -166,19 +199,23 @@ describe('createAccountReconnector', () => {
       providerType: 'ccxt',
     })
 
+    const close = vi.fn(async () => undefined)
+    const removeAccount = vi.fn()
     const reconnect = createAccountReconnector({
       accountManager: {
-        getAccount: vi.fn(() => ({ close: vi.fn(async () => undefined) })),
-        removeAccount: vi.fn(),
+        getAccount: vi.fn(() => ({ close })),
+        removeAccount,
       } as never,
       accountSetups: new Map(),
-      initAccount: vi.fn(async () => false),
+      prepareAccountRuntime: vi.fn(async () => null),
     })
 
     await expect(reconnect('paper-1')).resolves.toEqual({
       success: false,
       error: 'Account "paper-1" init failed',
     })
+    expect(close).not.toHaveBeenCalled()
+    expect(removeAccount).not.toHaveBeenCalled()
   })
 
   it('surfaces unexpected reconnect errors', async () => {
@@ -190,7 +227,7 @@ describe('createAccountReconnector', () => {
         removeAccount: vi.fn(),
       } as never,
       accountSetups: new Map(),
-      initAccount: vi.fn(),
+      prepareAccountRuntime: vi.fn(),
     })
 
     await expect(reconnect('paper-9')).resolves.toEqual({
