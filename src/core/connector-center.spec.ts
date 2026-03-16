@@ -320,6 +320,33 @@ describe('ConnectorCenter', () => {
       expect(result.channel).toBe('discord')
     })
 
+    it('should fall back to a push-capable connector when the last-interacted channel is pull-only', async () => {
+      cc.register(makeConnector({
+        channel: 'mcp-ask',
+        capabilities: { push: false, media: false },
+        send: async () => ({ delivered: false }),
+      }))
+      const payloads: SendPayload[] = []
+      cc.register(makeConnector({
+        channel: 'telegram',
+        capabilities: { push: true, media: false },
+        send: async (payload) => {
+          payloads.push(payload)
+          return { delivered: true }
+        },
+      }))
+
+      await eventLog.append('message.received', {
+        channel: 'mcp-ask', to: 'session-1', prompt: 'hi',
+      })
+
+      const result = await cc.notify('hello', { source: 'heartbeat' })
+
+      expect(result).toEqual({ delivered: true, channel: 'telegram' })
+      expect(payloads).toHaveLength(1)
+      expect(payloads[0]).toMatchObject({ text: 'hello', source: 'heartbeat', kind: 'notification' })
+    })
+
     it('should ignore non-message events', async () => {
       await eventLog.append('cron.fire', {
         jobId: 'abc', jobName: 'test', payload: 'hi',

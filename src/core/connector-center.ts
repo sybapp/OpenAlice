@@ -136,7 +136,7 @@ export class ConnectorCenter {
    * Falls back to the first registered connector if no interaction yet.
    */
   async notify(text: string, opts?: NotifyOpts): Promise<NotifyResult> {
-    const target = this.resolveTarget()
+    const target = this.resolveTarget({ requirePush: true })
     if (!target) return { delivered: false }
 
     const payload = this.buildPayload(text, opts)
@@ -170,18 +170,26 @@ export class ConnectorCenter {
   // ==================== Private ====================
 
   /** Resolve the send target: the connector the user last interacted with. */
-  private resolveTarget(): Connector | null {
-    if (!this.lastInteraction) {
+  private resolveTarget(opts?: { requirePush?: boolean }): Connector | null {
+    const matches = (connector: Connector | null | undefined) => {
+      if (!connector) return false
+      return opts?.requirePush ? connector.capabilities.push : true
+    }
+
+    if (this.lastInteraction) {
+      const connector = this.connectors.get(this.lastInteraction.channel)
+      if (matches(connector)) return connector
+    }
+
+    const fallback = this.list().find((connector) => matches(connector))
+    if (fallback) return fallback
+
+    if (opts?.requirePush) {
       const first = this.connectors.values().next()
       return first.done ? null : first.value
     }
 
-    const connector = this.connectors.get(this.lastInteraction.channel)
-    if (connector) return connector
-
-    // Channel was unregistered since — fall back to first available
-    const first = this.connectors.values().next()
-    return first.done ? null : first.value
+    return null
   }
 
   /** Build a SendPayload from text + options. */
