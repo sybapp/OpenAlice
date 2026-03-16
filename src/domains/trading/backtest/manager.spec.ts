@@ -270,6 +270,27 @@ describe('createBacktestRunManager', () => {
     expect(events.some((entry) => entry.type === 'backtest.run.completed')).toBe(true)
   })
 
+  it('persists final git state for completed runs even when no commits were created', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('completed-no-commit-git-state') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+    await expect(manager.getGitState(runId)).resolves.toEqual({ commits: [], head: null })
+  })
+
   it('downgrades a completed run to failed when its persisted summary becomes unreadable', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('corrupted-summary') })
     const engine = {

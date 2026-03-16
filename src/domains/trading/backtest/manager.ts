@@ -210,7 +210,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
               })
               return parseAIBacktestResponse(result.text)
             },
-          })
+      })
 
       const runner = new BacktestRunner({
         runId,
@@ -235,6 +235,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       })
 
       const summary = await runner.run()
+      await storage.writeGitState(runId, setup.git.exportState())
       await storage.writeSummary(runId, summary)
       const finalManifest = await storage.updateManifest(runId, {
         status: 'completed',
