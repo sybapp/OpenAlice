@@ -291,6 +291,72 @@ describe('createBacktestRunManager', () => {
     await expect(manager.getGitState(runId)).resolves.toEqual({ commits: [], head: null })
   })
 
+  it('downgrades a completed run to failed when its persisted git-state becomes unreadable', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('corrupted-git-state') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    await writeFile(storage.getRunPaths(runId).gitStatePath, '{"commits":', 'utf-8')
+
+    await expect(manager.getGitState(runId)).resolves.toBeNull()
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({
+      runId,
+      status: 'failed',
+      error: expect.stringContaining('git-state is unreadable'),
+    })
+    await expect(manager.getRun(runId)).resolves.toEqual({
+      manifest: expect.objectContaining({
+        runId,
+        status: 'failed',
+        error: expect.stringContaining('git-state is unreadable'),
+      }),
+      summary: undefined,
+    })
+  })
+
+  it('downgrades a completed run to failed when its persisted git-state goes missing', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('missing-git-state') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    await unlink(storage.getRunPaths(runId).gitStatePath)
+
+    await expect(manager.getGitState(runId)).resolves.toBeNull()
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({
+      runId,
+      status: 'failed',
+      error: 'Completed backtest run is missing its git-state artifact.',
+    })
+  })
+
   it('downgrades a completed run to failed when its persisted summary becomes unreadable', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('corrupted-summary') })
     const engine = {

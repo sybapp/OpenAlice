@@ -29,7 +29,7 @@ import {
   type BacktestRunSummary,
   type BacktestStrategyContext,
 } from './types.js'
-import type { Operation } from '../git/types.js'
+import type { GitExportState, Operation } from '../git/types.js'
 import { getTraderStrategy } from '../../../jobs/strategies/strategy.js'
 import {
   buildMarketScanPrompt,
@@ -71,6 +71,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
   async function resolveVisibleRun(runId: string, existingManifest?: BacktestRunManifest): Promise<{
     manifest: BacktestRunManifest
     summary?: BacktestRunSummary
+    gitState?: GitExportState
   }> {
     const manifest = existingManifest ?? await options.storage.getManifest(runId)
     if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
@@ -78,9 +79,26 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     if (manifest.status === 'completed') {
       try {
         const summary = await options.storage.readSummary(runId)
-        if (summary) return { manifest, summary }
-        return {
-          manifest: await persistFailedManifest(runId, manifest, 'Completed backtest run is missing its summary artifact.'),
+        if (!summary) {
+          return {
+            manifest: await persistFailedManifest(runId, manifest, 'Completed backtest run is missing its summary artifact.'),
+          }
+        }
+
+        try {
+          const gitState = await options.storage.readGitState(runId)
+          if (gitState) return { manifest, summary, gitState }
+          return {
+            manifest: await persistFailedManifest(runId, manifest, 'Completed backtest run is missing its git-state artifact.'),
+          }
+        } catch (err) {
+          return {
+            manifest: await persistFailedManifest(
+              runId,
+              manifest,
+              `Completed backtest run git-state is unreadable: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          }
         }
       } catch (err) {
         return {
@@ -340,7 +358,8 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     },
 
     async getGitState(runId) {
-      return options.storage.readGitState(runId)
+      const { manifest, gitState } = await resolveVisibleRun(runId)
+      return manifest.status === 'completed' ? gitState ?? null : null
     },
 
     async getSessionEntries(runId) {
