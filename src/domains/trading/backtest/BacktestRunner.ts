@@ -96,7 +96,6 @@ export class BacktestRunner {
       guardRejectionCount,
     }
 
-    await this.options.eventLog.append('backtest.run.completed', summary)
     return summary
   }
 }

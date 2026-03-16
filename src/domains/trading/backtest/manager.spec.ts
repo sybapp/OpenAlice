@@ -38,6 +38,18 @@ function makeBars() {
   ]
 }
 
+function makeBarsCount(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    ts: new Date(Date.UTC(2025, 0, 1, 9, 30 + index)).toISOString(),
+    symbol: 'AAPL',
+    open: 100 + index,
+    high: 101 + index,
+    low: 99 + index,
+    close: 100 + index,
+    volume: 1_000,
+  }))
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void
@@ -166,6 +178,95 @@ describe('createBacktestRunManager', () => {
     expect(manifest.status).toBe('failed')
     expect(manifest.error).toBe('model offline')
     expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
+  })
+
+  it('does not emit a completed event when summary persistence fails after execution finishes', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('summary-persist-failure') })
+    vi.spyOn(storage, 'writeSummary').mockRejectedValueOnce(new Error('summary disk offline'))
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    const manifest = await manager.waitForRun(runId)
+    const events = await manager.getEvents(runId)
+
+    expect(manifest.status).toBe('failed')
+    expect(manifest.error).toBe('summary disk offline')
+    expect(await manager.getSummary(runId)).toBeNull()
+    expect(events.some((entry) => entry.type === 'backtest.run.completed')).toBe(false)
+    expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
+  })
+
+  it('keeps a run completed when the completed event cannot be appended', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('completed-event-failure') })
+    const append = vi.fn(async (type: string, payload: unknown) => {
+      if (type === 'backtest.run.completed') {
+        throw new Error('event sink offline')
+      }
+      return { seq: 1, ts: Date.now(), type, payload }
+    })
+    mocks.createEventLogOverride = vi.fn().mockResolvedValue({
+      append,
+      close: vi.fn().mockResolvedValue(undefined),
+    })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    const manifest = await manager.waitForRun(runId)
+
+    expect(manifest.status).toBe('completed')
+    expect(manifest.error).toBeUndefined()
+    await expect(manager.getSummary(runId)).resolves.toEqual(expect.objectContaining({ runId }))
+    expect(append).toHaveBeenCalledWith('backtest.run.completed', expect.objectContaining({ runId }))
+  })
+
+  it('keeps the terminal completed event visible when callers request only a limited event tail', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('completed-event-tail') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBarsCount(550),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    const events = await manager.getEvents(runId, { limit: 50 })
+
+    expect(events).toHaveLength(50)
+    expect(events.at(-1)?.type).toBe('backtest.run.completed')
+    expect(events.some((entry) => entry.type === 'backtest.run.completed')).toBe(true)
   })
 
   it('persists a failed manifest when startup crashes before the run reaches running state', async () => {

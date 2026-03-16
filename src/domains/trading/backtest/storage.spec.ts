@@ -180,6 +180,42 @@ describe('createBacktestStorage', () => {
     ])
   })
 
+  it('returns the newest terminal event when limiting a full event history read', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('event-tail') })
+    const runId = 'run-event-tail'
+    const paths = storage.getRunPaths(runId)
+
+    await storage.createRun({
+      runId,
+      status: 'completed',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: paths.runDir,
+      barCount: 5,
+      currentStep: 5,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+
+    const lines = [
+      { seq: 1, ts: 1, type: 'backtest.run.started', payload: { step: 0 } },
+      { seq: 2, ts: 2, type: 'backtest.run.step', payload: { step: 1 } },
+      { seq: 3, ts: 3, type: 'backtest.run.step', payload: { step: 2 } },
+      { seq: 4, ts: 4, type: 'backtest.run.step', payload: { step: 3 } },
+      { seq: 5, ts: 5, type: 'backtest.run.completed', payload: { step: 3 } },
+    ]
+    await writeFile(paths.eventLogPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf-8')
+
+    const entries = await storage.readEventEntries(runId, { limit: 2 })
+
+    expect(entries).toEqual([
+      { seq: 4, ts: 4, type: 'backtest.run.step', payload: { step: 3 } },
+      { seq: 5, ts: 5, type: 'backtest.run.completed', payload: { step: 3 } },
+    ])
+  })
+
   it('ignores a truncated trailing JSONL line while still reading completed entries', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('truncated-tail') })
     const runId = 'run-tail-truncated'

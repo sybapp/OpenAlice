@@ -207,6 +207,11 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         status: 'completed',
         completedAt: new Date().toISOString(),
       })
+      try {
+        await eventLog.append('backtest.run.completed', summary)
+      } catch (err) {
+        console.warn(`backtest-manager: failed to append completed event for ${runId}: ${err instanceof Error ? err.message : String(err)}`)
+      }
       return finalManifest
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

@@ -192,7 +192,8 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
         if (entry.seq <= afterSeq) return
         if (type && entry.type !== type) return
         filtered.push(entry)
-        if (limit && limit > 0 && filtered.length >= limit) return false
+        if (limit && limit > 0 && afterSeq > 0 && filtered.length >= limit) return false
+        if (limit && limit > 0 && afterSeq <= 0 && filtered.length > limit) filtered.shift()
       })
 
       return filtered
