@@ -42,12 +42,21 @@ interface RollbackAction {
   run: () => Promise<void>
 }
 
+interface HealthAwarePlugin extends Plugin {
+  isHealthy?: () => boolean
+}
+
 function setConnectorAlive(optionalConnectors: Map<string, Plugin>, name: string, plugin: Plugin): void {
   optionalConnectors.set(name, plugin)
 }
 
 function setConnectorUnknown(optionalConnectors: Map<string, Plugin>, name: string): void {
   optionalConnectors.delete(name)
+}
+
+function isPluginHealthy(plugin: Plugin): boolean {
+  const healthAware = plugin as HealthAwarePlugin
+  return typeof healthAware.isHealthy === 'function' ? healthAware.isHealthy() !== false : true
 }
 
 function createMcpAskConnector(config: Config['connectors']['mcpAsk']): McpAskConnector {
@@ -123,7 +132,7 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     }
   }
 
-  if (!changed(current)) return undefined
+  if (!changed(current) && isPluginHealthy(current)) return undefined
 
   const plugin = create()
   await current.stop()

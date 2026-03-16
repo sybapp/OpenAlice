@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   writeAIConfig: vi.fn(),
   autoRetry: vi.fn(() => 'auto-retry-middleware'),
   botInstances: [] as any[],
+  botStartErrors: [] as unknown[],
   Bot: class FakeBot {
     token: string
     botInfo = { username: 'alice_bot' }
@@ -39,7 +40,10 @@ const mocks = vi.hoisted(() => ({
     })
     catch = vi.fn()
     init = vi.fn(async () => undefined)
-    start = vi.fn(async () => undefined)
+    start = vi.fn(() => {
+      const error = mocks.botStartErrors.shift()
+      return error ? Promise.reject(error) : Promise.resolve(undefined)
+    })
     stop = vi.fn(async () => undefined)
   },
   InlineKeyboard: class FakeInlineKeyboard {
@@ -87,6 +91,7 @@ describe('TelegramPlugin', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.botInstances.length = 0
+    mocks.botStartErrors.length = 0
     mocks.readAIConfig.mockResolvedValue({ backend: 'claude-code' })
   })
 
@@ -210,6 +215,41 @@ describe('TelegramPlugin', () => {
     expect(getSession).toHaveBeenCalledWith(5)
     expect(sendReply).toHaveBeenNthCalledWith(1, 123, '> Compacting session...')
     expect(sendReply).toHaveBeenNthCalledWith(2, 123, 'Compacted.')
+  })
+
+  it('unregisters outbound delivery after polling hits an async fatal error', async () => {
+    const unregister = vi.fn()
+    const register = vi.fn(() => unregister)
+    const plugin = new TelegramPlugin({ token: 'secret', allowedChatIds: [123] })
+    const pollingFatal = new Error('polling crashed')
+    mocks.botStartErrors.push(pollingFatal)
+
+    await plugin.start({
+      connectorCenter: { register },
+      heartbeat: {},
+      eventLog: {},
+      cronEngine: {},
+      trader: {},
+      traderReview: {},
+      accountManager: {},
+      backtest: {},
+      marketData: {},
+      getAccountGit: vi.fn(),
+      reconnectAccount: vi.fn(),
+      removeTradingAccountRuntime: vi.fn(),
+      reconnectConnectors: vi.fn(),
+      runTraderReview: vi.fn(),
+      toolCenter: {},
+      config: {},
+      engine: {},
+    } as never)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(register).toHaveBeenCalledOnce()
+    expect(unregister).toHaveBeenCalledOnce()
+    expect(plugin.isHealthy()).toBe(false)
   })
 
   it('handles messages through engine sessions and records sent events', async () => {

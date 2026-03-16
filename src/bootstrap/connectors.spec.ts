@@ -62,13 +62,16 @@ class FakeMcpAskPlugin {
 }
 
 class FakeTelegramPlugin {
+  healthy = true
   start = vi.fn(async () => {
     const error = mocks.telegramStartErrors.shift()
     if (error) throw error
+    this.healthy = true
   })
   stop = vi.fn(async () => {
     const error = mocks.telegramStopErrors.shift()
     if (error) throw error
+    this.healthy = false
   })
 
   constructor(private config: { token: string; allowedChatIds: number[] }) {
@@ -77,6 +80,10 @@ class FakeTelegramPlugin {
 
   getConfig() {
     return this.config
+  }
+
+  isHealthy() {
+    return this.healthy
   }
 }
 
@@ -221,6 +228,32 @@ describe('bootstrap connectors', () => {
     expect(telegram.stop).toHaveBeenCalledOnce()
     expect(telegram.start).toHaveBeenCalledOnce()
     expect(optionalConnectors.get('telegram')).toBe(telegram)
+  })
+
+  it('restarts an unhealthy optional connector even when config is unchanged', async () => {
+    const telegram = new FakeTelegramPlugin({ token: 'tg-token', allowedChatIds: [123] })
+    telegram.healthy = false
+    const optionalConnectors = new Map<string, any>([['telegram', telegram]])
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 3002 },
+        mcp: { host: '127.0.0.1', port: 3001 },
+        mcpAsk: { enabled: false },
+        telegram: { enabled: true, botToken: 'tg-token', chatIds: [123] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({ success: true, message: 'telegram restarted' })
+    expect(telegram.stop).toHaveBeenCalledOnce()
+    expect(optionalConnectors.get('telegram')).toBeInstanceOf(FakeTelegramPlugin)
+    expect(optionalConnectors.get('telegram')).not.toBe(telegram)
   })
 
   it('rolls back earlier connector updates when a later connector fails in the same batch', async () => {

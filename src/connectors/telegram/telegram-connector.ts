@@ -25,6 +25,7 @@ export class TelegramPlugin implements Plugin {
   private connectorCenter: ConnectorCenter | null = null
   private merger: MediaGroupMerger | null = null
   private unregisterConnector?: () => void
+  private healthy = false
 
   /** Per-user unified session stores (keyed by userId). */
   private sessions = new Map<number, SessionStore>()
@@ -45,7 +46,12 @@ export class TelegramPlugin implements Plugin {
     }
   }
 
+  isHealthy(): boolean {
+    return this.healthy
+  }
+
   async start(engineCtx: EngineContext) {
+    this.healthy = false
     this.connectorCenter = engineCtx.connectorCenter
 
     const bot = new Bot(this.config.token)
@@ -175,19 +181,30 @@ export class TelegramPlugin implements Plugin {
     }
 
     // ── Start polling ──
+    this.healthy = true
     this.bot = bot
     bot.start({
       allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query'],
       onStart: () => console.log('telegram: polling started'),
     }).catch((err) => {
-      console.error('telegram polling fatal error:', err)
+      this.handlePollingFatal(err)
     })
   }
 
   async stop() {
+    this.healthy = false
     this.merger?.flush()
     await this.bot?.stop()
     this.unregisterConnector?.()
+    this.unregisterConnector = undefined
+    this.bot = null
+  }
+
+  private handlePollingFatal(err: unknown) {
+    this.healthy = false
+    console.error('telegram polling fatal error:', err)
+    this.unregisterConnector?.()
+    this.unregisterConnector = undefined
   }
 
   private createConnector(bot: Bot, chatId: number): Connector {
