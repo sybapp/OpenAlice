@@ -380,4 +380,48 @@ describe('WebPlugin', () => {
     await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3206, authToken: 'old-token' })).resolves.toBe('unchanged')
     expect(closeB).not.toHaveBeenCalled()
   })
+
+  it('waits for async server close before restarting on a new port', async () => {
+    const register = vi.fn(() => vi.fn())
+    const closeFinished: string[] = []
+    const ctx = {
+      connectorCenter: { register },
+      reconnectConnectors: vi.fn(),
+      eventLog: {},
+      cronEngine: {},
+      trader: {},
+      traderReview: {},
+      heartbeat: {},
+      accountManager: {},
+      backtest: {},
+      marketData: {},
+      getAccountGit: vi.fn(),
+      reconnectAccount: vi.fn(),
+      removeTradingAccountRuntime: vi.fn(),
+      runTraderReview: vi.fn(),
+      toolCenter: {},
+      config: {},
+      engine: {},
+    } as never
+
+    mocks.serve
+      .mockReturnValueOnce({
+        close: vi.fn((callback?: (err?: Error) => void) => {
+          setTimeout(() => {
+            closeFinished.push('closed')
+            callback?.()
+          }, 0)
+        }),
+      })
+      .mockImplementationOnce((opts) => {
+        expect(closeFinished).toEqual(['closed'])
+        expect(opts).toEqual(expect.objectContaining({ hostname: '127.0.0.1', port: 3308, fetch: expect.any(Function) }))
+        return { close: vi.fn() }
+      })
+
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3208, authToken: 'secret' })
+    await plugin.start(ctx)
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3308, authToken: 'secret' })).resolves.toBe('restarted')
+  })
 })

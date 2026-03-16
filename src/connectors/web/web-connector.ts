@@ -19,6 +19,7 @@ import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
 import { createBacktestRoutes } from './routes/backtest.js'
 import { createStrategiesRoutes } from './routes/strategies.js'
+import { closeServer } from '../../core/close-server.js'
 
 export interface WebConfig {
   host: string
@@ -130,7 +131,7 @@ export class WebPlugin implements Plugin {
     this.sseClients.clear()
     this.unregisterConnector?.()
     this.unregisterConnector = undefined
-    this.server?.close()
+    await closeServer(this.server)
     this.server = null
   }
 

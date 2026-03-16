@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { Tool } from 'ai'
 import { createMcpCapabilityTools } from '../../core/capabilities.js'
+import { closeServer } from '../../core/close-server.js'
 import type { ToolCenter } from '../../core/tool-center.js'
 import type { Plugin, EngineContext } from '../../core/types.js'
 
@@ -144,7 +145,7 @@ export class McpPlugin implements Plugin {
 
   async stop() {
     this.transports.clear()
-    this.server?.close()
+    await closeServer(this.server)
     this.server = null
   }
 

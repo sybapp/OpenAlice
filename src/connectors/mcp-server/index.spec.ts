@@ -105,4 +105,32 @@ describe('McpServerConnector', () => {
       expect.any(Function),
     )
   })
+
+  it('waits for async server close before restarting on a new port', async () => {
+    const closeFinished: string[] = []
+    mocks.serve
+      .mockReturnValueOnce({
+        close: vi.fn((callback?: (err?: Error) => void) => {
+          setTimeout(() => {
+            closeFinished.push('closed')
+            callback?.()
+          }, 0)
+        }),
+      })
+      .mockImplementationOnce((opts) => {
+        expect(closeFinished).toEqual(['closed'])
+        expect(opts).toEqual(expect.objectContaining({ hostname: '127.0.0.1', port: 3405, fetch: expect.any(Function) }))
+        return { close: vi.fn() }
+      })
+
+    const plugin = new McpServerConnector({ getMcpTools: mocks.getMcpTools } as never, {
+      host: '127.0.0.1',
+      port: 3404,
+    })
+    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {} } as never
+
+    await plugin.start(ctx)
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3405 })).resolves.toBe('restarted')
+  })
 })
