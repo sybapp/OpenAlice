@@ -110,37 +110,58 @@ export class WebPlugin implements Plugin {
     })
 
     // ==================== Connector registration ====================
-    this.unregisterConnector = ctx.connectorCenter.register(
+    const unregisterConnector = ctx.connectorCenter.register(
       this.createConnector(this.sseClients, session),
     )
 
-    // ==================== Start server ====================
-    this.server = serve({ fetch: app.fetch, hostname: this.config.host, port: this.config.port }, (info: { port: number }) => {
-      console.log(`web plugin listening on http://${this.config.host}:${info.port}`)
-    })
+    try {
+      this.server = serve({ fetch: app.fetch, hostname: this.config.host, port: this.config.port }, (info: { port: number }) => {
+        console.log(`web plugin listening on http://${this.config.host}:${info.port}`)
+      })
+      this.unregisterConnector = unregisterConnector
+    } catch (err) {
+      this.sseClients.clear()
+      unregisterConnector()
+      throw err
+    }
   }
 
   async stop() {
     this.sseClients.clear()
     this.unregisterConnector?.()
+    this.unregisterConnector = undefined
     this.server?.close()
     this.server = null
   }
 
   async reconfigure(nextConfig: WebConfig): Promise<'updated' | 'restarted' | 'unchanged'> {
     const prev = this.config
-    this.config = nextConfig
 
     if (prev.port === nextConfig.port && prev.host === nextConfig.host) {
+      this.config = nextConfig
       return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
     }
 
     const ctx = this.ctx
     await this.stop()
-    if (ctx) {
-      await this.start(ctx)
+    this.config = nextConfig
+    try {
+      if (ctx) {
+        await this.start(ctx)
+      }
+      return 'restarted'
+    } catch (err) {
+      this.config = prev
+      if (!ctx) throw err
+      try {
+        await this.start(ctx)
+      } catch (rollbackErr) {
+        const restartMessage = err instanceof Error ? err.message : String(err)
+        const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+        throw new Error(`web restart failed: ${restartMessage}; rollback failed: ${rollbackMessage}`)
+      }
+      throw err
     }
-    return 'restarted'
   }
 
   private createConnector(

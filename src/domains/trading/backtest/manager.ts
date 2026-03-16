@@ -16,6 +16,7 @@ import { BacktestRunner } from './BacktestRunner.js'
 import { ScriptedBacktestStrategyDriver } from './strategy-scripted.js'
 import { AIBacktestStrategyDriver } from './strategy-ai.js'
 import { normalizeBacktestRunId } from './storage.js'
+import { parseBacktestRunConfig } from './validation.js'
 import {
   createBacktestRunId,
   type BacktestRunManager,
@@ -192,8 +193,9 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
 
   return {
     async startRun(config) {
-      const runId = normalizeBacktestRunId(config.runId ?? createBacktestRunId())
-      const promise = executeRun({ ...config, runId })
+      const validated = parseBacktestRunConfig(config)
+      const runId = normalizeBacktestRunId(validated.runId ?? createBacktestRunId())
+      const promise = executeRun({ ...validated, runId })
         .finally(() => {
           running.delete(runId)
         })

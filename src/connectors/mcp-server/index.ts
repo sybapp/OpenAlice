@@ -157,13 +157,27 @@ export class McpPlugin implements Plugin {
       return 'unchanged'
     }
 
-    this.config = nextConfig
+    const prev = this.config
     const ctx = this.ctx
     await this.stop()
-    if (ctx) {
-      await this.start(ctx)
+    this.config = nextConfig
+    try {
+      if (ctx) {
+        await this.start(ctx)
+      }
+      return 'restarted'
+    } catch (err) {
+      this.config = prev
+      if (!ctx) throw err
+      try {
+        await this.start(ctx)
+      } catch (rollbackErr) {
+        const restartMessage = err instanceof Error ? err.message : String(err)
+        const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+        throw new Error(`mcp restart failed: ${restartMessage}; rollback failed: ${rollbackMessage}`)
+      }
+      throw err
     }
-    return 'restarted'
   }
 }
 

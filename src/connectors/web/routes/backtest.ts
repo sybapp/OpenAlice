@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono'
 import { normalizeBacktestRunId, type BacktestRunConfig, type BacktestRunManager } from '../../../domains/trading/index.js'
 import type { BacktestBarsQuery, MarketDataBridge } from '../../../core/types.js'
+import { parseBacktestBarsQuery, parseBacktestRunConfig } from '../../../domains/trading/backtest/validation.js'
+import { getValidationErrorPayload } from './zod-error.js'
 
 interface BacktestRoutesDeps {
   backtest: Pick<
@@ -10,8 +12,6 @@ interface BacktestRoutesDeps {
   marketData: Pick<MarketDataBridge, 'getBacktestBars'>
 }
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-
 export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDeps) {
   const app = new Hono()
 
@@ -20,6 +20,10 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
       const query = parseBarsQuery(c)
       return c.json({ bars: await marketData.getBacktestBars(query) })
     } catch (err) {
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
+      }
       const message = err instanceof Error ? err.message : String(err)
       return c.json({ error: message }, message.startsWith('Invalid ') ? 400 : 500)
     }
@@ -35,11 +39,7 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
 
   app.post('/runs', async (c) => {
     try {
-      const body = await c.req.json<BacktestRunConfig>()
-
-      if (!isValidInitialCash(body.initialCash) || !Array.isArray(body.bars) || body.bars.length === 0 || !body.strategy) {
-        return c.json({ error: 'initialCash, bars, and strategy are required' }, 400)
-      }
+      const body = parseBacktestRunConfig(await c.req.json<BacktestRunConfig>())
       if (body.runId != null) {
         try {
           body.runId = normalizeBacktestRunId(body.runId)
@@ -51,6 +51,10 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
       const result = await backtest.startRun(body)
       return c.json(result)
     } catch (err) {
+      const validationError = getValidationErrorPayload(err)
+      if (validationError) {
+        return c.json(validationError, 400)
+      }
       return c.json({ error: String(err) }, 500)
     }
   })
@@ -129,38 +133,20 @@ function parseRunId(runId: string): string {
 }
 
 function parseBarsQuery(c: Context): BacktestBarsQuery {
-  const assetType = c.req.query('assetType')
-  const symbol = c.req.query('symbol')?.trim()
-  const startDate = c.req.query('startDate')?.trim()
-  const endDate = c.req.query('endDate')?.trim()
-  const interval = c.req.query('interval')?.trim()
-
-  if (assetType !== 'crypto') {
-    throw new Error('Invalid assetType: expected "crypto"')
-  }
-  if (!symbol) {
-    throw new Error('Invalid symbol: expected non-empty value')
-  }
-  if (!startDate || !DATE_PATTERN.test(startDate)) {
-    throw new Error('Invalid startDate: expected YYYY-MM-DD')
-  }
-  if (!endDate || !DATE_PATTERN.test(endDate)) {
-    throw new Error('Invalid endDate: expected YYYY-MM-DD')
-  }
-  return {
-    assetType: 'crypto',
-    symbol,
-    startDate,
-    endDate,
-    ...(interval ? { interval } : {}),
-  }
-}
-
-function isValidInitialCash(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+  return parseBacktestBarsQuery({
+    assetType: c.req.query('assetType'),
+    symbol: c.req.query('symbol')?.trim(),
+    startDate: c.req.query('startDate')?.trim(),
+    endDate: c.req.query('endDate')?.trim(),
+    interval: c.req.query('interval')?.trim(),
+  })
 }
 
 function toBacktestErrorResponse(c: Context, err: unknown) {
+  const validationError = getValidationErrorPayload(err)
+  if (validationError) {
+    return c.json(validationError, 400)
+  }
   const message = err instanceof Error ? err.message : String(err)
   const status = message.startsWith('Invalid backtest runId:') ? 400 : 500
   return c.json({ error: message }, status)

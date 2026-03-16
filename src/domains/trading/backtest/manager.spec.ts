@@ -134,4 +134,28 @@ describe('createBacktestRunManager', () => {
     expect(manifest.error).toBe('model offline')
     expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
   })
+
+  it('rejects invalid bar payloads before scheduling a run', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('invalid-bars') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.startRun({
+      initialCash: 10_000,
+      startTime: '2025-01-01T09:40:00.000Z',
+      bars: [
+        { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 99, low: 98, close: 100, volume: 1_000 },
+      ],
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })).rejects.toThrow()
+
+    await expect(storage.listRuns()).resolves.toEqual([])
+  })
 })

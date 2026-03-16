@@ -278,4 +278,59 @@ describe('WebPlugin', () => {
     expect(close).toHaveBeenCalled()
     expect(sseClients.size).toBe(0)
   })
+
+  it('rolls back to the previous listener when restart fails', async () => {
+    const unregisterA = vi.fn()
+    const unregisterB = vi.fn()
+    const register = vi.fn()
+      .mockReturnValueOnce(unregisterA)
+      .mockReturnValueOnce(unregisterB)
+      .mockReturnValueOnce(unregisterB)
+    const closeA = vi.fn()
+    const closeB = vi.fn()
+
+    mocks.serve
+      .mockReturnValueOnce({ close: closeA })
+      .mockImplementationOnce(() => {
+        throw new Error('port busy')
+      })
+      .mockReturnValueOnce({ close: closeB })
+
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3206, authToken: 'old-token' })
+    const ctx = {
+      connectorCenter: { register },
+      reconnectConnectors: vi.fn(),
+      eventLog: {},
+      cronEngine: {},
+      trader: {},
+      traderReview: {},
+      heartbeat: {},
+      accountManager: {},
+      backtest: {},
+      marketData: {},
+      getAccountGit: vi.fn(),
+      reconnectAccount: vi.fn(),
+      removeTradingAccountRuntime: vi.fn(),
+      runTraderReview: vi.fn(),
+      toolCenter: {},
+      config: {},
+      engine: {},
+    } as never
+
+    await plugin.start(ctx)
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3306, authToken: 'new-token' })).rejects.toThrow('port busy')
+
+    expect(closeA).toHaveBeenCalledOnce()
+    expect(unregisterA).toHaveBeenCalledOnce()
+    expect(unregisterB).toHaveBeenCalledOnce()
+    expect(mocks.serve).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ hostname: '127.0.0.1', port: 3206, fetch: expect.any(Function) }),
+      expect.any(Function),
+    )
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3206, authToken: 'old-token' })).resolves.toBe('unchanged')
+    expect(closeB).not.toHaveBeenCalled()
+  })
 })

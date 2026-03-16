@@ -105,7 +105,33 @@ describe('createBacktestRoutes', () => {
 
     expect(res.status).toBe(400)
     expect(startRun).not.toHaveBeenCalled()
-    expect(await res.json()).toEqual({ error: 'initialCash, bars, and strategy are required' })
+    expect(await res.json()).toEqual(expect.objectContaining({ error: 'Validation failed' }))
+  })
+
+  it('rejects invalid bars and out-of-range startTime on create', async () => {
+    const startRun = vi.fn()
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({ startRun }),
+      marketData: makeMarketData(),
+    })
+
+    const res = await app.request('/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        initialCash: 10_000,
+        startTime: '2025-01-01T10:00:00.000Z',
+        bars: [
+          { ts: 'not-a-timestamp', symbol: 'AAPL', open: 100, high: 99, low: 100, close: 100, volume: 1_000 },
+        ],
+        strategy: { mode: 'scripted', decisions: [] },
+      }),
+    })
+
+    const payload = await res.json()
+    expect(res.status).toBe(400)
+    expect(startRun).not.toHaveBeenCalled()
+    expect(payload).toEqual(expect.objectContaining({ error: 'Validation failed' }))
   })
 
   it('rejects invalid runId on create', async () => {
@@ -198,8 +224,20 @@ describe('createBacktestRoutes', () => {
 
     expect(res.status).toBe(400)
     expect(getBacktestBars).not.toHaveBeenCalled()
-    expect(await res.json()).toEqual({
-      error: 'Invalid assetType: expected "crypto"',
+    expect(await res.json()).toEqual(expect.objectContaining({ error: 'Validation failed' }))
+  })
+
+  it('rejects bar queries whose endDate is before startDate', async () => {
+    const getBacktestBars = vi.fn()
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager(),
+      marketData: makeMarketData({ getBacktestBars }),
     })
+
+    const res = await app.request('/bars?assetType=crypto&symbol=BTCUSD&startDate=2025-01-31&endDate=2025-01-01')
+
+    expect(res.status).toBe(400)
+    expect(getBacktestBars).not.toHaveBeenCalled()
+    expect(await res.json()).toEqual(expect.objectContaining({ error: 'Validation failed' }))
   })
 })
