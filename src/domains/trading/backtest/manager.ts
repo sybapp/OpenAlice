@@ -1,4 +1,6 @@
 import { createEventLog } from '../../../core/event-log.js'
+import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { SessionStore } from '../../../core/session.js'
 import { setSessionSkill } from '../../../skills/session-skill.js'
 import type { Engine } from '../../../core/engine.js'
@@ -46,8 +48,31 @@ const TRADER_SKILLS = {
   tradeExecute: 'trader-trade-execute',
 } as const
 
+const INVALID_RUN_CLAIM_STALE_MS = 5_000
+
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
+
+  async function resolveVisibleManifest(runId: string): Promise<BacktestRunManifest> {
+    const manifest = await options.storage.getManifest(runId)
+    if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
+    if (manifest.status === 'completed' || manifest.status === 'failed') return manifest
+    if (await hasActiveRunClaim(join(options.storage.getRunPaths(runId).runDir, '.run.lock'))) {
+      return manifest
+    }
+
+    const patch: Partial<BacktestRunManifest> = {
+      status: 'failed',
+      completedAt: manifest.completedAt ?? new Date().toISOString(),
+      error: manifest.error ?? `Backtest run became orphaned while still ${manifest.status}.`,
+    }
+
+    try {
+      return await options.storage.updateManifest(runId, patch)
+    } catch {
+      return { ...manifest, ...patch }
+    }
+  }
 
   function prepareRun(config: BacktestRunConfig): {
     runId: string
@@ -238,23 +263,29 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         try {
           return await current
         } catch (err) {
-          const manifest = await options.storage.getManifest(runId)
+          const manifest = await resolveVisibleManifest(runId)
           if (manifest?.status === 'failed' || manifest?.status === 'completed') return manifest
           throw err
         }
       }
-      const manifest = await options.storage.getManifest(runId)
-      if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
-      return manifest
+      return resolveVisibleManifest(runId)
     },
 
     async listRuns() {
-      return options.storage.listRuns()
+      const manifests = await options.storage.listRuns()
+      const resolved = await Promise.all(manifests.map(async (manifest) => {
+        if (manifest.status === 'completed' || manifest.status === 'failed') return manifest
+        return resolveVisibleManifest(manifest.runId)
+      }))
+      return resolved.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     },
 
     async getRun(runId) {
-      const manifest = await options.storage.getManifest(runId)
-      if (!manifest) return null
+      const existing = await options.storage.getManifest(runId)
+      if (!existing) return null
+      const manifest = existing.status === 'completed' || existing.status === 'failed'
+        ? existing
+        : await resolveVisibleManifest(runId)
       const summary = await options.storage.readSummary(runId) ?? undefined
       const record: BacktestRunRecord = { manifest, summary }
       return record
@@ -280,6 +311,60 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       return options.storage.readSessionEntries(runId)
     },
   }
+}
+
+async function hasActiveRunClaim(claimPath: string): Promise<boolean> {
+  const metadata = await readClaimMetadata(claimPath)
+  if (metadata?.pid) {
+    return isProcessAlive(metadata.pid)
+  }
+
+  try {
+    await stat(claimPath)
+  } catch (err) {
+    if (isENOENT(err)) return false
+    throw err
+  }
+
+  return !(await isInvalidClaimStale(claimPath))
+}
+
+async function readClaimMetadata(claimPath: string): Promise<{ pid?: number } | null> {
+  const raw = await readFile(claimPath, 'utf-8').catch((err: unknown) => {
+    if (isENOENT(err)) return null
+    throw err
+  })
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as { pid?: number }
+  } catch {
+    return null
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return !(err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ESRCH')
+  }
+}
+
+async function isInvalidClaimStale(claimPath: string): Promise<boolean> {
+  try {
+    const info = await stat(claimPath)
+    return Date.now() - info.mtimeMs >= INVALID_RUN_CLAIM_STALE_MS
+  } catch (err) {
+    if (isENOENT(err)) return false
+    throw err
+  }
+}
+
+function isENOENT(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
 function buildAIBacktestPrompt(

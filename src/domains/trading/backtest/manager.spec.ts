@@ -402,4 +402,33 @@ describe('createBacktestRunManager', () => {
     reply.resolve({ text: JSON.stringify({ text: 'hold', operations: [] }), media: [] })
     await expect(managerA.waitForRun('shared-run')).resolves.toMatchObject({ status: 'completed' })
   })
+
+  it('returns a failed manifest from waitForRun when a queued run is orphaned before execution resumes', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('orphaned-wait') })
+    await storage.createRun({
+      runId: 'orphaned-wait',
+      status: 'queued',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: storage.getRunPaths('orphaned-wait').runDir,
+      barCount: 3,
+      currentStep: 0,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.waitForRun('orphaned-wait')).resolves.toMatchObject({
+      runId: 'orphaned-wait',
+      status: 'failed',
+      error: 'Backtest run became orphaned while still queued.',
+    })
+  })
 })
