@@ -739,4 +739,18 @@ describe('createBacktestRunManager', () => {
       error: 'Backtest run became orphaned while still queued.',
     })
   })
+
+  it('rejects artifact reads for unknown runIds instead of returning empty data', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('missing-artifacts') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.getEquityCurve('missing-run')).rejects.toThrow('Backtest run not found: missing-run')
+    await expect(manager.getEvents('missing-run')).rejects.toThrow('Backtest run not found: missing-run')
+    await expect(manager.getSessionEntries('missing-run')).rejects.toThrow('Backtest run not found: missing-run')
+  })
 })

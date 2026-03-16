@@ -171,6 +171,31 @@ describe('createBacktestRoutes', () => {
     expect(getSummary).not.toHaveBeenCalled()
   })
 
+  it('returns 404 for missing run artifact endpoints', async () => {
+    const missing = vi.fn().mockRejectedValue(new Error('Backtest run not found: missing-run'))
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({
+        getEquityCurve: missing,
+        getEvents: missing,
+        getSessionEntries: missing,
+      }),
+      marketData: makeMarketData(),
+    })
+
+    const [equityRes, eventsRes, sessionRes] = await Promise.all([
+      app.request('/runs/missing-run/equity'),
+      app.request('/runs/missing-run/events'),
+      app.request('/runs/missing-run/session'),
+    ])
+
+    expect(equityRes.status).toBe(404)
+    expect(await equityRes.json()).toEqual({ error: 'Backtest run not found: missing-run' })
+    expect(eventsRes.status).toBe(404)
+    expect(await eventsRes.json()).toEqual({ error: 'Backtest run not found: missing-run' })
+    expect(sessionRes.status).toBe(404)
+    expect(await sessionRes.json()).toEqual({ error: 'Backtest run not found: missing-run' })
+  })
+
   it('returns normalized bars for valid queries', async () => {
     const getBacktestBars = vi.fn().mockResolvedValue([
       { ts: '2025-01-01T00:00:00.000Z', symbol: 'BTC/USDT', open: 100, high: 101, low: 99, close: 100, volume: 1000 },

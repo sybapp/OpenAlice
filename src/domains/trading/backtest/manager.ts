@@ -54,6 +54,12 @@ const INVALID_RUN_CLAIM_STALE_MS = 5_000
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
 
+  async function requireManifest(runId: string): Promise<BacktestRunManifest> {
+    const manifest = await options.storage.getManifest(runId)
+    if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
+    return manifest
+  }
+
   async function persistFailedManifest(runId: string, manifest: BacktestRunManifest, error: string): Promise<BacktestRunManifest> {
     const patch: Partial<BacktestRunManifest> = {
       status: 'failed',
@@ -350,10 +356,12 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     },
 
     async getEquityCurve(runId, opts) {
+      await requireManifest(runId)
       return options.storage.readEquityCurve(runId, opts)
     },
 
     async getEvents(runId, opts) {
+      await requireManifest(runId)
       return options.storage.readEventEntries(runId, opts)
     },
 
@@ -363,6 +371,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     },
 
     async getSessionEntries(runId) {
+      await requireManifest(runId)
       return options.storage.readSessionEntries(runId)
     },
   }
