@@ -136,13 +136,27 @@ export class WebPlugin implements Plugin {
 
   async reconfigure(nextConfig: WebConfig): Promise<'updated' | 'restarted' | 'unchanged'> {
     const prev = this.config
+    const ctx = this.ctx
 
     if (prev.port === nextConfig.port && prev.host === nextConfig.host) {
       this.config = nextConfig
-      return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
+      if (this.server) {
+        return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
+      }
+
+      if (!ctx) {
+        return prev.authToken === nextConfig.authToken ? 'unchanged' : 'updated'
+      }
+
+      try {
+        await this.start(ctx)
+        return 'restarted'
+      } catch (err) {
+        this.config = prev
+        throw err
+      }
     }
 
-    const ctx = this.ctx
     await this.stop()
     this.config = nextConfig
     try {

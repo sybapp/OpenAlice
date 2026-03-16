@@ -82,4 +82,27 @@ describe('McpServerConnector', () => {
     await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3401 })).resolves.toBe('unchanged')
     expect(closeB).not.toHaveBeenCalled()
   })
+
+  it('restarts an unchanged listener when the server is no longer running', async () => {
+    const closeA = vi.fn()
+    mocks.serve
+      .mockReturnValueOnce({ close: closeA })
+      .mockReturnValueOnce({ close: vi.fn() })
+
+    const plugin = new McpServerConnector({ getMcpTools: mocks.getMcpTools } as never, {
+      host: '127.0.0.1',
+      port: 3403,
+    })
+    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {} } as never
+
+    await plugin.start(ctx)
+    await plugin.stop()
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3403 })).resolves.toBe('restarted')
+    expect(closeA).toHaveBeenCalledOnce()
+    expect(mocks.serve).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hostname: '127.0.0.1', port: 3403, fetch: expect.any(Function) }),
+      expect.any(Function),
+    )
+  })
 })

@@ -154,6 +154,10 @@ export class McpPlugin implements Plugin {
 
   async reconfigure(nextConfig: { host: string; port: number }): Promise<'restarted' | 'unchanged'> {
     if (this.config.host === nextConfig.host && this.config.port === nextConfig.port) {
+      if (!this.server && this.ctx) {
+        await this.start(this.ctx)
+        return 'restarted'
+      }
       return 'unchanged'
     }
 

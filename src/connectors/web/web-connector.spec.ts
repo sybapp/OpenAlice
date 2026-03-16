@@ -279,6 +279,53 @@ describe('WebPlugin', () => {
     expect(sseClients.size).toBe(0)
   })
 
+  it('restarts an unchanged listener when the server is no longer running', async () => {
+    const unregisterA = vi.fn()
+    const unregisterB = vi.fn()
+    const close = vi.fn()
+    const register = vi.fn()
+      .mockReturnValueOnce(unregisterA)
+      .mockReturnValueOnce(unregisterB)
+    mocks.serve
+      .mockReturnValueOnce({ close })
+      .mockReturnValueOnce({ close: vi.fn() })
+
+    const plugin = new WebPlugin({ host: '127.0.0.1', port: 3207, authToken: 'same-token' })
+    const ctx = {
+      connectorCenter: { register },
+      reconnectConnectors: vi.fn(),
+      eventLog: {},
+      cronEngine: {},
+      trader: {},
+      traderReview: {},
+      heartbeat: {},
+      accountManager: {},
+      backtest: {},
+      marketData: {},
+      getAccountGit: vi.fn(),
+      reconnectAccount: vi.fn(),
+      removeTradingAccountRuntime: vi.fn(),
+      runTraderReview: vi.fn(),
+      toolCenter: {},
+      config: {},
+      engine: {},
+    } as never
+
+    await plugin.start(ctx)
+    await plugin.stop()
+
+    await expect(plugin.reconfigure({ host: '127.0.0.1', port: 3207, authToken: 'same-token' })).resolves.toBe('restarted')
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(register).toHaveBeenCalledTimes(2)
+    expect(unregisterA).toHaveBeenCalledOnce()
+    expect(unregisterB).not.toHaveBeenCalled()
+    expect(mocks.serve).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hostname: '127.0.0.1', port: 3207, fetch: expect.any(Function) }),
+      expect.any(Function),
+    )
+  })
+
   it('rolls back to the previous listener when restart fails', async () => {
     const unregisterA = vi.fn()
     const unregisterB = vi.fn()
