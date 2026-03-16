@@ -120,6 +120,7 @@ export function createTraderJobEngine(opts: TraderJobEngineOpts): TraderJobEngin
 
   return {
     async start() {
+      stopped = false
       await load()
       const currentMs = now()
       for (const job of jobs) {

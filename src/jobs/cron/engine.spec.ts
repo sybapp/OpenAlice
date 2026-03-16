@@ -196,6 +196,33 @@ describe('cron engine', () => {
 
       engine2.stop()
     })
+
+    it('should resume scheduling when the same engine instance is restarted', async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+      const restartable = createCronEngine({
+        eventLog,
+        storePath,
+        now: () => clock,
+      })
+
+      try {
+        await restartable.start()
+        restartable.stop()
+        setTimeoutSpy.mockClear()
+        await restartable.start()
+
+        await restartable.add({
+          name: 'restartable',
+          schedule: { kind: 'every', every: '1s' },
+          payload: 'hello again',
+        })
+
+        expect(setTimeoutSpy).toHaveBeenCalled()
+      } finally {
+        restartable.stop()
+        setTimeoutSpy.mockRestore()
+      }
+    })
   })
 
   // ==================== one-shot (at) ====================

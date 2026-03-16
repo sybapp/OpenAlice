@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -96,5 +96,32 @@ describe('trader job engine', () => {
     ])
 
     engine2.stop()
+  })
+
+  it('resumes scheduling when the same engine instance is restarted', async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const restartable = createTraderJobEngine({
+      eventLog,
+      storePath,
+      now: () => clock,
+    })
+
+    try {
+      await restartable.start()
+      restartable.stop()
+      setTimeoutSpy.mockClear()
+      await restartable.start()
+
+      await restartable.add({
+        name: 'restartable',
+        strategyId: 'momentum',
+        schedule: { kind: 'every', every: '1s' },
+      })
+
+      expect(setTimeoutSpy).toHaveBeenCalled()
+    } finally {
+      restartable.stop()
+      setTimeoutSpy.mockRestore()
+    }
   })
 })

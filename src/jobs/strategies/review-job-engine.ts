@@ -116,6 +116,7 @@ export function createTraderReviewJobEngine(opts: TraderReviewJobEngineOpts): Tr
 
   return {
     async start() {
+      stopped = false
       await load()
       const currentMs = now()
       for (const job of jobs) {

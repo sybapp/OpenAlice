@@ -188,6 +188,7 @@ export function createCronEngine(opts: CronEngineOpts): CronEngine {
 
   return {
     async start() {
+      stopped = false
       await load()
 
       const currentMs = now()
