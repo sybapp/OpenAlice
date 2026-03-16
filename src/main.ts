@@ -43,6 +43,13 @@ async function main() {
   let cleanupStarted = false
   let cleanupResources: null | (() => Promise<void>) = null
   let pluginsStarted = false
+  let newsCollector: NewsCollector | null = null
+  let trader: ReturnType<typeof createTraderJobEngine> | null = null
+  let traderReview: ReturnType<typeof createTraderReviewJobEngine> | null = null
+  let cronListener: ReturnType<typeof createCronListener> | null = null
+  let traderListener: ReturnType<typeof createTraderListener> | null = null
+  let traderReviewListener: ReturnType<typeof createTraderReviewListener> | null = null
+  let heartbeat: ReturnType<typeof createHeartbeat> | null = null
 
   const runCleanup = async () => {
     if (cleanupStarted) return
@@ -71,6 +78,32 @@ async function main() {
     ohlcvStore,
   } = services
 
+  cleanupResources = async () => {
+    const cleanupErrors: string[] = []
+
+    await runCleanupStep(cleanupErrors, 'news collector stop', () => newsCollector?.stop())
+    await runCleanupStep(cleanupErrors, 'heartbeat stop', () => heartbeat?.stop())
+    await runCleanupStep(cleanupErrors, 'cron listener stop', () => cronListener?.stop())
+    await runCleanupStep(cleanupErrors, 'cron engine stop', () => cronEngine.stop())
+    await runCleanupStep(cleanupErrors, 'trader listener stop', () => traderListener?.stop())
+    await runCleanupStep(cleanupErrors, 'trader stop', () => trader?.stop())
+    await runCleanupStep(cleanupErrors, 'trader review listener stop', () => traderReviewListener?.stop())
+    await runCleanupStep(cleanupErrors, 'trader review stop', () => traderReview?.stop())
+    if (pluginsStarted) {
+      await runCleanupStep(cleanupErrors, 'plugin shutdown', () => stopPlugins(getConnectors()))
+    }
+    for (const [accountId, setup] of accountSetups.entries()) {
+      await runCleanupStep(cleanupErrors, `account ${accountId} dispatcher dispose`, () => setup.disposeDispatcher())
+    }
+    await runCleanupStep(cleanupErrors, 'news store close', () => newsStore.close())
+    await runCleanupStep(cleanupErrors, 'event log close', () => eventLog.close())
+    await runCleanupStep(cleanupErrors, 'account manager closeAll', () => accountManager.closeAll())
+
+    if (cleanupErrors.length > 0) {
+      throw new Error(cleanupErrors.join('; '))
+    }
+  }
+
   // ---- Tool Center ----
   const toolCenter = await registerAllTools({ config, accountManager, accountSetups, services, brain })
 
@@ -78,7 +111,6 @@ async function main() {
   // ---- Connector Center ----
   const connectorCenter = new ConnectorCenter(eventLog)
   const getAccountGit = (id: string) => accountSetups.get(id)?.git
-  let newsCollector: NewsCollector | null = null
   let coreConnectors: Plugin[] = []
   const optionalConnectors = new Map<string, Plugin>()
   const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
@@ -96,15 +128,15 @@ async function main() {
 
   // ---- Cron Lifecycle ----
   await cronEngine.start()
-  const trader = createTraderJobEngine({ eventLog })
+  trader = createTraderJobEngine({ eventLog })
   await trader.start()
-  const traderReview = createTraderReviewJobEngine({ eventLog })
+  traderReview = createTraderReviewJobEngine({ eventLog })
   await traderReview.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
-  const cronListener = createCronListener({ connectorCenter, eventLog, engine, session: cronSession })
+  cronListener = createCronListener({ connectorCenter, eventLog, engine, session: cronSession })
   cronListener.start()
-  const traderListener = createTraderListener({
+  traderListener = createTraderListener({
     config,
     engine,
     eventLog,
@@ -116,7 +148,7 @@ async function main() {
     getAccountGit: (id) => accountSetups.get(id)?.git,
   })
   traderListener.start()
-  const traderReviewListener = createTraderReviewListener({
+  traderReviewListener = createTraderReviewListener({
     config,
     engine,
     eventLog,
@@ -130,39 +162,13 @@ async function main() {
   traderReviewListener.start()
   console.log('cron: engine + listener started')
   // ---- Heartbeat ----
-  const heartbeat = createHeartbeat({
+  heartbeat = createHeartbeat({
     config: config.heartbeat,
     connectorCenter, cronEngine, eventLog, engine,
   })
   await heartbeat.start()
   if (config.heartbeat.enabled) {
     console.log(`heartbeat: enabled (every ${config.heartbeat.every})`)
-  }
-
-  cleanupResources = async () => {
-    const cleanupErrors: string[] = []
-
-    await runCleanupStep(cleanupErrors, 'news collector stop', () => newsCollector?.stop())
-    await runCleanupStep(cleanupErrors, 'heartbeat stop', () => heartbeat.stop())
-    await runCleanupStep(cleanupErrors, 'cron listener stop', () => cronListener.stop())
-    await runCleanupStep(cleanupErrors, 'cron engine stop', () => cronEngine.stop())
-    await runCleanupStep(cleanupErrors, 'trader listener stop', () => traderListener.stop())
-    await runCleanupStep(cleanupErrors, 'trader stop', () => trader.stop())
-    await runCleanupStep(cleanupErrors, 'trader review listener stop', () => traderReviewListener.stop())
-    await runCleanupStep(cleanupErrors, 'trader review stop', () => traderReview.stop())
-    if (pluginsStarted) {
-      await runCleanupStep(cleanupErrors, 'plugin shutdown', () => stopPlugins(getConnectors()))
-    }
-    for (const [accountId, setup] of accountSetups.entries()) {
-      await runCleanupStep(cleanupErrors, `account ${accountId} dispatcher dispose`, () => setup.disposeDispatcher())
-    }
-    await runCleanupStep(cleanupErrors, 'news store close', () => newsStore.close())
-    await runCleanupStep(cleanupErrors, 'event log close', () => eventLog.close())
-    await runCleanupStep(cleanupErrors, 'account manager closeAll', () => accountManager.closeAll())
-
-    if (cleanupErrors.length > 0) {
-      throw new Error(cleanupErrors.join('; '))
-    }
   }
 
   // ---- News Collector ----

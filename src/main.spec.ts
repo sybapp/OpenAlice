@@ -139,6 +139,29 @@ describe('main startup cleanup', () => {
     errorSpy.mockRestore()
   })
 
+  it('cleans up initialized resources when cron startup fails before cleanup wiring previously existed', async () => {
+    const startupError = new Error('cron start failed')
+    cronEngine.start.mockRejectedValueOnce(startupError)
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await import('./main.ts')
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+
+    expect(cronEngine.stop).toHaveBeenCalledOnce()
+    expect(trader.stop).not.toHaveBeenCalled()
+    expect(traderReview.stop).not.toHaveBeenCalled()
+    expect(stopPlugins).not.toHaveBeenCalled()
+    expect(newsStore.close).toHaveBeenCalledOnce()
+    expect(eventLog.close).toHaveBeenCalledOnce()
+    expect(accountManager.closeAll).toHaveBeenCalledOnce()
+    expect(disposeDispatcher).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledWith('fatal:', startupError)
+
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
   it('cleans up started runtime resources when news collector startup fails', async () => {
     loadConfig.mockResolvedValueOnce({
       heartbeat: { enabled: false, every: '1m' },
