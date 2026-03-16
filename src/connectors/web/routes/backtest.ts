@@ -84,7 +84,7 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
   app.get('/runs/:id/equity', async (c) => {
     try {
       const runId = parseRunId(c.req.param('id'))
-      const limit = Number(c.req.query('limit')) || undefined
+      const limit = parseOptionalPositiveIntegerQuery(c.req.query('limit'), 'limit')
       const points = await backtest.getEquityCurve(runId, { limit })
       return c.json({ points })
     } catch (err) {
@@ -95,8 +95,8 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
   app.get('/runs/:id/events', async (c) => {
     try {
       const runId = parseRunId(c.req.param('id'))
-      const afterSeq = Number(c.req.query('afterSeq')) || 0
-      const limit = Number(c.req.query('limit')) || undefined
+      const afterSeq = parseOptionalNonNegativeIntegerQuery(c.req.query('afterSeq'), 'afterSeq') ?? 0
+      const limit = parseOptionalPositiveIntegerQuery(c.req.query('limit'), 'limit')
       const type = c.req.query('type') || undefined
       const entries = await backtest.getEvents(runId, { afterSeq, limit, type })
       return c.json({ entries })
@@ -142,6 +142,28 @@ function parseBarsQuery(c: Context): BacktestBarsQuery {
   })
 }
 
+function parseOptionalPositiveIntegerQuery(value: string | undefined, name: string): number | undefined {
+  if (value == null || value.trim() === '') return undefined
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${name}: expected a positive integer`)
+  }
+
+  return parsed
+}
+
+function parseOptionalNonNegativeIntegerQuery(value: string | undefined, name: string): number | undefined {
+  if (value == null || value.trim() === '') return undefined
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${name}: expected a non-negative integer`)
+  }
+
+  return parsed
+}
+
 function toBacktestErrorResponse(c: Context, err: unknown) {
   const validationError = getValidationErrorPayload(err)
   if (validationError) {
@@ -149,6 +171,8 @@ function toBacktestErrorResponse(c: Context, err: unknown) {
   }
   const message = err instanceof Error ? err.message : String(err)
   const status = message.startsWith('Invalid backtest runId:')
+    || message.startsWith('Invalid limit:')
+    || message.startsWith('Invalid afterSeq:')
     ? 400
     : message.startsWith('Backtest run not found:')
       ? 404

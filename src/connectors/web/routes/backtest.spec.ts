@@ -196,6 +196,30 @@ describe('createBacktestRoutes', () => {
     expect(await sessionRes.json()).toEqual({ error: 'Backtest run not found: missing-run' })
   })
 
+  it('rejects invalid event and equity pagination query params', async () => {
+    const getEquityCurve = vi.fn()
+    const getEvents = vi.fn()
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({ getEquityCurve, getEvents }),
+      marketData: makeMarketData(),
+    })
+
+    const [equityRes, eventsLimitRes, eventsAfterSeqRes] = await Promise.all([
+      app.request('/runs/run-1/equity?limit=-1'),
+      app.request('/runs/run-1/events?limit=abc'),
+      app.request('/runs/run-1/events?afterSeq=-2'),
+    ])
+
+    expect(equityRes.status).toBe(400)
+    expect(await equityRes.json()).toEqual({ error: 'Invalid limit: expected a positive integer' })
+    expect(eventsLimitRes.status).toBe(400)
+    expect(await eventsLimitRes.json()).toEqual({ error: 'Invalid limit: expected a positive integer' })
+    expect(eventsAfterSeqRes.status).toBe(400)
+    expect(await eventsAfterSeqRes.json()).toEqual({ error: 'Invalid afterSeq: expected a non-negative integer' })
+    expect(getEquityCurve).not.toHaveBeenCalled()
+    expect(getEvents).not.toHaveBeenCalled()
+  })
+
   it('returns normalized bars for valid queries', async () => {
     const getBacktestBars = vi.fn().mockResolvedValue([
       { ts: '2025-01-01T00:00:00.000Z', symbol: 'BTC/USDT', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
