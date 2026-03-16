@@ -3,7 +3,7 @@ import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createBacktestStorage } from './storage.js'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, utimes } from 'node:fs/promises'
 
 function tempDir(name: string) {
   return join(tmpdir(), `backtest-storage-${name}-${randomUUID()}`)
@@ -246,6 +246,34 @@ describe('createBacktestStorage', () => {
     expect(runs[0]).toMatchObject({ runId: 'indexed', status: 'completed', currentStep: 1 })
   })
 
+  it('rebuilds the run index from manifests when runs-index.json is corrupted', async () => {
+    const rootDir = tempDir('run-index-corrupted')
+    const storage = createBacktestStorage({ rootDir })
+
+    await storage.createRun({
+      runId: 'healthy-run',
+      status: 'completed',
+      mode: 'scripted',
+      createdAt: '2025-01-03T00:00:00.000Z',
+      artifactDir: storage.getRunPaths('healthy-run').runDir,
+      barCount: 1,
+      currentStep: 1,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+
+    await writeFile(join(rootDir, 'runs-index.json'), '{"runId":', 'utf-8')
+
+    await expect(storage.listRuns()).resolves.toEqual([
+      expect.objectContaining({ runId: 'healthy-run', status: 'completed' }),
+    ])
+
+    const rebuiltIndex = JSON.parse(await readFile(join(rootDir, 'runs-index.json'), 'utf-8')) as Array<{ runId: string }>
+    expect(rebuiltIndex).toEqual([expect.objectContaining({ runId: 'healthy-run' })])
+  })
+
   it('cleans stale JSONL artifacts when reusing a runId', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('collision') })
     const runId = 'reused-run'
@@ -306,5 +334,33 @@ describe('createBacktestStorage', () => {
     const manifest = await storage.getManifest(runId)
     expect(manifest?.initialCash).toBe(20_000)
     expect(manifest?.status).toBe('queued')
+  })
+
+  it('reclaims an invalid stale .run.lock left behind before metadata was fully written', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('invalid-claim') })
+    const runId = 'stale-claim'
+    const paths = storage.getRunPaths(runId)
+    const claimPath = join(paths.runDir, '.run.lock')
+
+    await mkdir(paths.runDir, { recursive: true })
+    await writeFile(claimPath, '', 'utf-8')
+
+    const staleTime = new Date(Date.now() - 10_000)
+    await utimes(claimPath, staleTime, staleTime)
+
+    await expect(storage.claimRunId(runId)).resolves.toBeUndefined()
+    await expect(storage.releaseRunId(runId)).resolves.toBeUndefined()
+  })
+
+  it('does not steal a freshly created invalid .run.lock while another claimant may still be writing metadata', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('fresh-invalid-claim') })
+    const runId = 'fresh-claim'
+    const paths = storage.getRunPaths(runId)
+    const claimPath = join(paths.runDir, '.run.lock')
+
+    await mkdir(paths.runDir, { recursive: true })
+    await writeFile(claimPath, '', 'utf-8')
+
+    await expect(storage.claimRunId(runId)).rejects.toThrow('Backtest run already in progress: fresh-claim')
   })
 })

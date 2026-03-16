@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, writeFile, appendFile, unlink, rename } from 'node:fs/promises'
+import { mkdir, open, readFile, writeFile, appendFile, unlink, rename, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { RUNTIME_SESSIONS_DIR } from '../../../core/paths.js'
@@ -16,6 +16,7 @@ export interface BacktestStorageOptions {
 
 const BACKTEST_RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 const RUN_INDEX_FILENAME = 'runs-index.json'
+const INVALID_RUN_CLAIM_STALE_MS = 5_000
 
 export function normalizeBacktestRunId(runId: string): string {
   if (typeof runId !== 'string') {
@@ -234,7 +235,12 @@ async function readAllRunManifests(rootDir: string): Promise<BacktestRunManifest
 }
 
 async function readRunIndex(rootDir: string, runIndexPath: string): Promise<BacktestRunManifest[]> {
-  const indexed = await readJson<BacktestRunManifest[]>(runIndexPath)
+  let indexed: BacktestRunManifest[] | null = null
+  try {
+    indexed = await readJson<BacktestRunManifest[]>(runIndexPath)
+  } catch (err) {
+    console.warn(`backtest-storage: failed to read run index, rebuilding from manifests: ${err instanceof Error ? err.message : String(err)}`)
+  }
   if (indexed) return sortRunManifests(indexed)
 
   const rebuilt = await readAllRunManifests(rootDir)
@@ -333,6 +339,13 @@ async function acquireRunClaim(claimPath: string, metadata: string, runId: strin
       return handle
     }
 
+    if (!staleClaim && await isInvalidClaimStale(claimPath)) {
+      await unlink(claimPath).catch(ignoreENOENT)
+      const handle = await open(claimPath, 'wx')
+      await handle.writeFile(metadata, 'utf-8')
+      return handle
+    }
+
     throw new Error(`Backtest run already in progress: ${runId}`)
   }
 }
@@ -358,6 +371,16 @@ function isProcessAlive(pid: number): boolean {
     return true
   } catch (err) {
     return !(err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ESRCH')
+  }
+}
+
+async function isInvalidClaimStale(claimPath: string): Promise<boolean> {
+  try {
+    const info = await stat(claimPath)
+    return Date.now() - info.mtimeMs >= INVALID_RUN_CLAIM_STALE_MS
+  } catch (err) {
+    if (isENOENT(err)) return false
+    throw err
   }
 }
 
