@@ -195,6 +195,68 @@ describe('createBacktestRunManager', () => {
     await expect(storage.listRuns()).resolves.toContainEqual(expect.objectContaining({ runId, status: 'failed' }))
   })
 
+  it('does not leak a stale queued manifest through waitForRun when failed-state persistence also fails', async () => {
+    const releaseRunId = vi.fn().mockResolvedValue(undefined)
+    const storage = {
+      claimRunId: vi.fn().mockResolvedValue(undefined),
+      releaseRunId,
+      createRun: vi.fn().mockResolvedValue(undefined),
+      updateManifest: vi.fn()
+        .mockResolvedValueOnce({ runId: 'stale-failure', status: 'running' })
+        .mockRejectedValueOnce(new Error('manifest disk offline')),
+      getManifest: vi.fn().mockResolvedValue({
+        runId: 'stale-failure',
+        status: 'queued',
+        mode: 'ai',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        artifactDir: '/tmp/stale-failure',
+        barCount: 3,
+        currentStep: 0,
+        accountId: 'paper-1',
+        accountLabel: 'Paper 1',
+        initialCash: 10_000,
+        guards: [],
+      }),
+      listRuns: vi.fn(),
+      writeSummary: vi.fn(),
+      readSummary: vi.fn(),
+      appendEquityPoint: vi.fn(),
+      readEquityCurve: vi.fn(),
+      writeGitState: vi.fn(),
+      readGitState: vi.fn(),
+      readEventEntries: vi.fn(),
+      readSessionEntries: vi.fn(),
+      getRunPaths: vi.fn((runId: string) => ({
+        runDir: `/tmp/${runId}`,
+        manifestPath: `/tmp/${runId}/manifest.json`,
+        summaryPath: `/tmp/${runId}/summary.json`,
+        equityCurvePath: `/tmp/${runId}/equity-curve.jsonl`,
+        eventLogPath: `/tmp/${runId}/events.jsonl`,
+        gitStatePath: `/tmp/${runId}/git-state.json`,
+      })),
+    } satisfies BacktestStorage
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockRejectedValue(new Error('model offline')),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.startRun({
+      runId: 'stale-failure',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })).resolves.toEqual({ runId: 'stale-failure' })
+
+    await expect(manager.waitForRun('stale-failure')).rejects.toThrow('model offline')
+    expect(storage.getManifest).toHaveBeenCalledWith('stale-failure')
+    expect(releaseRunId).toHaveBeenCalledWith('stale-failure')
+  })
+
   it('fails startRun immediately when the initial manifest cannot be persisted', async () => {
     const releaseRunId = vi.fn().mockResolvedValue(undefined)
     const storage = {

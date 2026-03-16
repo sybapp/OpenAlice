@@ -143,7 +143,7 @@ export class McpAskPlugin implements Plugin {
     })
 
     // Register as connector for outbound delivery (heartbeat/cron)
-    this.unregisterConnector = ctx.connectorCenter.register({
+    const unregisterConnector = ctx.connectorCenter.register({
       channel: 'mcp-ask',
       to: 'default',
       capabilities: { push: false, media: false },
@@ -153,13 +153,21 @@ export class McpAskPlugin implements Plugin {
       },
     })
 
-    this.server = serve({ fetch: app.fetch, port: this.config.port }, (info) => {
-      console.log(`mcp-ask connector listening on http://localhost:${info.port}/mcp`)
-    })
+    try {
+      this.server = serve({ fetch: app.fetch, port: this.config.port }, (info) => {
+        console.log(`mcp-ask connector listening on http://localhost:${info.port}/mcp`)
+      })
+      this.unregisterConnector = unregisterConnector
+    } catch (err) {
+      unregisterConnector()
+      throw err
+    }
   }
 
   async stop() {
     this.unregisterConnector?.()
+    this.unregisterConnector = undefined
     this.server?.close()
+    this.server = null
   }
 }

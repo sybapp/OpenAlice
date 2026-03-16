@@ -239,7 +239,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
           return await current
         } catch (err) {
           const manifest = await options.storage.getManifest(runId)
-          if (manifest) return manifest
+          if (manifest?.status === 'failed' || manifest?.status === 'completed') return manifest
           throw err
         }
       }
