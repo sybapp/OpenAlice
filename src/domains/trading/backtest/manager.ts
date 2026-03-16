@@ -375,12 +375,12 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     },
 
     async getEquityCurve(runId, opts) {
-      await requireManifest(runId)
+      await resolveVisibleRun(runId)
       return options.storage.readEquityCurve(runId, opts)
     },
 
     async getEvents(runId, opts) {
-      await requireManifest(runId)
+      await resolveVisibleRun(runId)
       return options.storage.readEventEntries(runId, opts)
     },
 
@@ -390,7 +390,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     },
 
     async getSessionEntries(runId) {
-      await requireManifest(runId)
+      await resolveVisibleRun(runId)
       return options.storage.readSessionEntries(runId)
     },
   }

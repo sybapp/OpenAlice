@@ -818,6 +818,45 @@ describe('createBacktestRunManager', () => {
     }))
   })
 
+  it('downgrades an orphaned queued run when events are read directly', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('orphaned-events-direct') })
+    await storage.createRun({
+      runId: 'orphaned-events-direct',
+      status: 'queued',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: storage.getRunPaths('orphaned-events-direct').runDir,
+      barCount: 3,
+      currentStep: 0,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+
+    await expect(manager.getEvents('orphaned-events-direct')).resolves.toContainEqual(expect.objectContaining({
+      type: 'backtest.run.failed',
+      payload: expect.objectContaining({
+        runId: 'orphaned-events-direct',
+        error: 'Backtest run became orphaned while still queued.',
+      }),
+    }))
+
+    await expect(manager.getRun('orphaned-events-direct')).resolves.toMatchObject({
+      manifest: expect.objectContaining({
+        runId: 'orphaned-events-direct',
+        status: 'failed',
+        error: 'Backtest run became orphaned while still queued.',
+      }),
+    })
+  })
+
   it('rejects artifact reads for unknown runIds instead of returning empty data', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('missing-artifacts') })
     const engine = {
