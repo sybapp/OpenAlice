@@ -5,7 +5,7 @@ import { runTraderJob } from './runner.js'
 
 export interface TraderListener {
   start(): void
-  stop(): void
+  stop(): Promise<void>
 }
 
 interface TraderListenerOpts extends TraderRunnerDeps {
@@ -16,6 +16,7 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
   const sessions = new Map<string, SessionStore>()
   let unsubscribe: (() => void) | null = null
   let processing = false
+  const inFlight = new Set<Promise<void>>()
 
   async function getSession(jobId: string): Promise<SessionStore> {
     const existing = sessions.get(jobId)
@@ -73,15 +74,20 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
     start() {
       if (unsubscribe) return
       unsubscribe = opts.eventLog.subscribeType('trader.fire', (entry) => {
-        handleFire(entry).catch((err) => {
+        const task = handleFire(entry).catch((err) => {
           console.error('trader-listener: unhandled error:', err)
+        }).finally(() => {
+          inFlight.delete(task)
         })
+        inFlight.add(task)
       })
     },
 
-    stop() {
+    async stop() {
       unsubscribe?.()
       unsubscribe = null
+      if (inFlight.size === 0) return
+      await Promise.allSettled([...inFlight])
     },
   }
 }

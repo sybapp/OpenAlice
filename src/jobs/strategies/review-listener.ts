@@ -4,7 +4,7 @@ import type { TraderReviewFirePayload, TraderRunnerDeps } from './types.js'
 
 export interface TraderReviewListener {
   start(): void
-  stop(): void
+  stop(): Promise<void>
 }
 
 interface TraderReviewListenerOpts extends Pick<TraderRunnerDeps, 'config' | 'engine' | 'brain' | 'accountManager' | 'marketData' | 'ohlcvStore' | 'newsStore' | 'getAccountGit' | 'eventLog'> {}
@@ -12,6 +12,7 @@ interface TraderReviewListenerOpts extends Pick<TraderRunnerDeps, 'config' | 'en
 export function createTraderReviewListener(opts: TraderReviewListenerOpts): TraderReviewListener {
   let unsubscribe: (() => void) | null = null
   let processing = false
+  const inFlight = new Set<Promise<void>>()
 
   async function handleFire(entry: EventLogEntry): Promise<void> {
     const payload = entry.payload as TraderReviewFirePayload
@@ -48,15 +49,20 @@ export function createTraderReviewListener(opts: TraderReviewListenerOpts): Trad
     start() {
       if (unsubscribe) return
       unsubscribe = opts.eventLog.subscribeType('trader.review.fire', (entry) => {
-        handleFire(entry).catch((err) => {
+        const task = handleFire(entry).catch((err) => {
           console.error('trader-review-listener: unhandled error:', err)
+        }).finally(() => {
+          inFlight.delete(task)
         })
+        inFlight.add(task)
       })
     },
 
-    stop() {
+    async stop() {
       unsubscribe?.()
       unsubscribe = null
+      if (inFlight.size === 0) return
+      await Promise.allSettled([...inFlight])
     },
   }
 }
