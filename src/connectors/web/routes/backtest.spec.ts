@@ -60,6 +60,54 @@ describe('createBacktestRoutes', () => {
     expect(await res.json()).toEqual({ runId: 'run-2' })
   })
 
+  it('accepts zero initialCash on create', async () => {
+    const startRun = vi.fn().mockResolvedValue({ runId: 'run-3' })
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({ startRun }),
+      marketData: makeMarketData(),
+    })
+
+    const res = await app.request('/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        initialCash: 0,
+        bars: [
+          { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        ],
+        strategy: { mode: 'scripted', decisions: [] },
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(startRun).toHaveBeenCalledOnce()
+    expect(await res.json()).toEqual({ runId: 'run-3' })
+  })
+
+  it('rejects negative initialCash on create', async () => {
+    const startRun = vi.fn()
+    const app = createBacktestRoutes({
+      backtest: makeBacktestManager({ startRun }),
+      marketData: makeMarketData(),
+    })
+
+    const res = await app.request('/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        initialCash: -1,
+        bars: [
+          { ts: '2025-01-01T09:30:00.000Z', symbol: 'AAPL', open: 100, high: 101, low: 99, close: 100, volume: 1_000 },
+        ],
+        strategy: { mode: 'scripted', decisions: [] },
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(startRun).not.toHaveBeenCalled()
+    expect(await res.json()).toEqual({ error: 'initialCash, bars, and strategy are required' })
+  })
+
   it('rejects invalid runId on create', async () => {
     const startRun = vi.fn()
     const app = createBacktestRoutes({

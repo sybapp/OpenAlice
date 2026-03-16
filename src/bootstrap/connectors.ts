@@ -28,12 +28,14 @@ interface OptionalConnectorReconcileArgs {
   ctx: EngineContext
   changes: string[]
   name: string
-  wanted: boolean
+  enabled: boolean
+  configured: boolean
   create: () => Plugin
   changed: (plugin: Plugin) => boolean
   startedMessage: string
   stoppedMessage: string
   restartedMessage: string
+  incompleteMessage: string
 }
 
 function createMcpAskConnector(config: Config['connectors']['mcpAsk']): McpAskConnector {
@@ -56,17 +58,37 @@ function setOptionalConnector(optionalConnectors: Map<string, Plugin>, name: str
 }
 
 async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs): Promise<void> {
-  const { optionalConnectors, ctx, changes, name, wanted, create, changed, startedMessage, stoppedMessage, restartedMessage } = args
+  const {
+    optionalConnectors,
+    ctx,
+    changes,
+    name,
+    enabled,
+    configured,
+    create,
+    changed,
+    startedMessage,
+    stoppedMessage,
+    restartedMessage,
+    incompleteMessage,
+  } = args
   const current = optionalConnectors.get(name)
 
-  if (current && !wanted) {
+  if (current && !enabled) {
     await current.stop()
     optionalConnectors.delete(name)
     changes.push(stoppedMessage)
     return
   }
 
-  if (!current && wanted) {
+  if (!enabled) return
+
+  if (!configured) {
+    console.warn(`reconnect: ${name} ${incompleteMessage}`)
+    return
+  }
+
+  if (!current) {
     const plugin = create()
     await plugin.start(ctx)
     optionalConnectors.set(name, plugin)
@@ -74,13 +96,26 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     return
   }
 
-  if (!current || !wanted || !changed(current)) return
+  if (!changed(current)) return
 
-  await current.stop()
   const plugin = create()
-  await plugin.start(ctx)
-  optionalConnectors.set(name, plugin)
-  changes.push(restartedMessage)
+  await current.stop()
+  try {
+    await plugin.start(ctx)
+    optionalConnectors.set(name, plugin)
+    changes.push(restartedMessage)
+  } catch (err) {
+    try {
+      await current.start(ctx)
+      optionalConnectors.set(name, current)
+    } catch (rollbackErr) {
+      optionalConnectors.delete(name)
+      const restartMessage = err instanceof Error ? err.message : String(err)
+      const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+      throw new Error(`${name} restart failed: ${restartMessage}; rollback failed: ${rollbackMessage}`)
+    }
+    throw err
+  }
 }
 
 export function initConnectors(config: Config, toolCenter: ToolCenter): ConnectorsResult {
@@ -159,13 +194,15 @@ export function createConnectorReconnector(args: {
       }
 
       // --- MCP Ask ---
-      const mcpAskWanted = fresh.connectors.mcpAsk.enabled && !!fresh.connectors.mcpAsk.port
+      const mcpAskEnabled = fresh.connectors.mcpAsk.enabled
+      const mcpAskConfigured = !!fresh.connectors.mcpAsk.port
       await reconcileOptionalConnector({
         optionalConnectors,
         ctx,
         changes,
         name: 'mcp-ask',
-        wanted: mcpAskWanted,
+        enabled: mcpAskEnabled,
+        configured: mcpAskConfigured,
         create: () => createMcpAskConnector(fresh.connectors.mcpAsk),
         changed: (plugin) => {
           const currentConfig = plugin instanceof McpAskConnector
@@ -180,16 +217,19 @@ export function createConnectorReconnector(args: {
         startedMessage: 'mcp-ask started',
         stoppedMessage: 'mcp-ask stopped',
         restartedMessage: 'mcp-ask restarted',
+        incompleteMessage: 'config is incomplete; keeping current connector',
       })
 
       // --- Telegram ---
-      const telegramWanted = fresh.connectors.telegram.enabled && !!fresh.connectors.telegram.botToken
+      const telegramEnabled = fresh.connectors.telegram.enabled
+      const telegramConfigured = !!fresh.connectors.telegram.botToken
       await reconcileOptionalConnector({
         optionalConnectors,
         ctx,
         changes,
         name: 'telegram',
-        wanted: telegramWanted,
+        enabled: telegramEnabled,
+        configured: telegramConfigured,
         create: () => createTelegramConnector(fresh.connectors.telegram),
         changed: (plugin) => {
           const currentConfig = plugin instanceof TelegramConnector
@@ -204,6 +244,7 @@ export function createConnectorReconnector(args: {
         startedMessage: 'telegram started',
         stoppedMessage: 'telegram stopped',
         restartedMessage: 'telegram restarted',
+        incompleteMessage: 'config is incomplete; keeping current connector',
       })
 
       if (changes.length > 0) {

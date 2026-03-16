@@ -109,4 +109,29 @@ describe('createBacktestRunManager', () => {
     expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'user')).toHaveLength(3)
     expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
   })
+
+  it('returns the persisted failed manifest from waitForRun when execution crashes', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('failed-run') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockRejectedValue(new Error('model offline')),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })
+
+    const manifest = await manager.waitForRun(runId)
+    const events = await manager.getEvents(runId)
+
+    expect(manifest.status).toBe('failed')
+    expect(manifest.error).toBe('model offline')
+    expect(events.some((entry) => entry.type === 'backtest.run.failed')).toBe(true)
+  })
 })

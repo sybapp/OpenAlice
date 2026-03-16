@@ -37,7 +37,7 @@ export function createBacktestRoutes({ backtest, marketData }: BacktestRoutesDep
     try {
       const body = await c.req.json<BacktestRunConfig>()
 
-      if (!body.initialCash || !Array.isArray(body.bars) || body.bars.length === 0 || !body.strategy) {
+      if (!isValidInitialCash(body.initialCash) || !Array.isArray(body.bars) || body.bars.length === 0 || !body.strategy) {
         return c.json({ error: 'initialCash, bars, and strategy are required' }, 400)
       }
       if (body.runId != null) {
@@ -154,6 +154,10 @@ function parseBarsQuery(c: Context): BacktestBarsQuery {
     endDate,
     ...(interval ? { interval } : {}),
   }
+}
+
+function isValidInitialCash(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
 function toBacktestErrorResponse(c: Context, err: unknown) {

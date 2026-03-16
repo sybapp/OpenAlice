@@ -76,6 +76,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     await storage.createRun(manifest)
 
     const eventLog = await createEventLog({ logPath: storage.getRunPaths(runId).eventLogPath })
+    let account: BacktestAccount | null = null
 
     try {
       await storage.updateManifest(runId, {
@@ -89,7 +90,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       })
       await replay.init()
 
-      const account = new BacktestAccount({
+      account = new BacktestAccount({
         id: accountId,
         label: accountLabel,
         replay,
@@ -163,23 +164,29 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         status: 'completed',
         completedAt: new Date().toISOString(),
       })
-      await eventLog.close()
-      await account.close()
       return finalManifest
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      await storage.updateManifest(runId, {
-        status: 'failed',
-        completedAt: new Date().toISOString(),
-        error: message,
-      })
+      try {
+        await storage.updateManifest(runId, {
+          status: 'failed',
+          completedAt: new Date().toISOString(),
+          error: message,
+        })
+      } catch {
+        // ignore secondary manifest persistence failures
+      }
       try {
         await eventLog.append('backtest.run.failed', { runId, error: message })
       } catch {
         // ignore secondary logging failures
       }
-      await eventLog.close()
       throw err
+    } finally {
+      await Promise.allSettled([
+        eventLog.close(),
+        account?.close() ?? Promise.resolve(),
+      ])
     }
   }
 
@@ -196,7 +203,15 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
 
     async waitForRun(runId) {
       const current = running.get(runId)
-      if (current) return current
+      if (current) {
+        try {
+          return await current
+        } catch (err) {
+          const manifest = await options.storage.getManifest(runId)
+          if (manifest) return manifest
+          throw err
+        }
+      }
       const manifest = await options.storage.getManifest(runId)
       if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
       return manifest
