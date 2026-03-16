@@ -205,4 +205,42 @@ describe('createBacktestRunManager', () => {
     reply.resolve({ text: JSON.stringify({ text: 'hold', operations: [] }), media: [] })
     await expect(manager.waitForRun('same-run')).resolves.toMatchObject({ status: 'completed' })
   })
+
+  it('rejects the same runId across manager instances while the first run is active', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('cross-manager-runid') })
+    const reply = deferred<{ text: string; media: [] }>()
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        return reply.promise
+      }),
+    } as unknown as Engine
+
+    const managerA = createBacktestRunManager({ storage, engine })
+    const managerB = createBacktestRunManager({ storage, engine })
+
+    await expect(managerA.startRun({
+      runId: 'shared-run',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })).resolves.toEqual({ runId: 'shared-run' })
+
+    await expect(managerB.startRun({
+      runId: 'shared-run',
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay.',
+      },
+    })).rejects.toThrow('Backtest run already in progress: shared-run')
+
+    reply.resolve({ text: JSON.stringify({ text: 'hold', operations: [] }), media: [] })
+    await expect(managerA.waitForRun('shared-run')).resolves.toMatchObject({ status: 'completed' })
+  })
 })

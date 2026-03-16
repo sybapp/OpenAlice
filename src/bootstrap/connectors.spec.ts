@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   mcpAskInstances: [] as FakeMcpAskPlugin[],
   telegramInstances: [] as FakeTelegramPlugin[],
   mcpAskStartErrors: [] as unknown[],
+  mcpAskStopErrors: [] as unknown[],
   telegramStartErrors: [] as unknown[],
+  telegramStopErrors: [] as unknown[],
 }))
 
 class FakeMcpPlugin {
@@ -45,7 +47,10 @@ class FakeMcpAskPlugin {
     const error = mocks.mcpAskStartErrors.shift()
     if (error) throw error
   })
-  stop = vi.fn(async () => undefined)
+  stop = vi.fn(async () => {
+    const error = mocks.mcpAskStopErrors.shift()
+    if (error) throw error
+  })
 
   constructor(private config: { port: number; authToken?: string }) {
     mocks.mcpAskInstances.push(this)
@@ -61,7 +66,10 @@ class FakeTelegramPlugin {
     const error = mocks.telegramStartErrors.shift()
     if (error) throw error
   })
-  stop = vi.fn(async () => undefined)
+  stop = vi.fn(async () => {
+    const error = mocks.telegramStopErrors.shift()
+    if (error) throw error
+  })
 
   constructor(private config: { token: string; allowedChatIds: number[] }) {
     mocks.telegramInstances.push(this)
@@ -101,7 +109,9 @@ describe('bootstrap connectors', () => {
     mocks.mcpAskInstances.length = 0
     mocks.telegramInstances.length = 0
     mocks.mcpAskStartErrors.length = 0
+    mocks.mcpAskStopErrors.length = 0
     mocks.telegramStartErrors.length = 0
+    mocks.telegramStopErrors.length = 0
   })
 
   it('initializes core and optional connectors from connector config', () => {
@@ -243,5 +253,70 @@ describe('bootstrap connectors', () => {
     expect(web.reconfigure).toHaveBeenNthCalledWith(1, { host: '127.0.0.1', port: 3002, authToken: 'new-token' })
     expect(web.reconfigure).toHaveBeenNthCalledWith(2, { host: '127.0.0.1', port: 3002, authToken: 'old-token' })
     expect(optionalConnectors.get('telegram')).toBe(telegram)
+  })
+
+  it('removes an optional connector from the live set when rollback stops the replacement but cannot restart the previous instance', async () => {
+    const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'old-token' })
+    web.reconfigure
+      .mockResolvedValueOnce('updated')
+      .mockResolvedValueOnce('updated')
+
+    const mcpAsk = new FakeMcpAskPlugin({ port: 3001, authToken: 'old-token' })
+    mcpAsk.start.mockRejectedValueOnce(new Error('rollback restart failed'))
+    const optionalConnectors = new Map<string, any>([['mcp-ask', mcpAsk]])
+    mocks.telegramStartErrors.push(new Error('bad token'))
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 3002, authToken: 'new-token' },
+        mcp: { host: '127.0.0.1', port: 3001 },
+        mcpAsk: { enabled: true, port: 3003, authToken: 'new-token' },
+        telegram: { enabled: true, botToken: 'new-tg-token', chatIds: [123] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [web as never],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({
+      success: false,
+      error: 'bad token; batch rollback failed: rollback restart failed',
+    })
+    expect(optionalConnectors.has('mcp-ask')).toBe(false)
+  })
+
+  it('keeps a newly started optional connector in the live set when rollback cannot stop it', async () => {
+    const web = new FakeWebPlugin({ host: '127.0.0.1', port: 3002, authToken: 'old-token' })
+    web.reconfigure
+      .mockResolvedValueOnce('updated')
+      .mockResolvedValueOnce('updated')
+
+    mocks.mcpAskStopErrors.push(new Error('stop failed'))
+    mocks.telegramStartErrors.push(new Error('bad token'))
+
+    mocks.loadConfig.mockResolvedValue({
+      connectors: {
+        web: { host: '127.0.0.1', port: 3002, authToken: 'new-token' },
+        mcp: { host: '127.0.0.1', port: 3001 },
+        mcpAsk: { enabled: true, port: 3003, authToken: 'ask-token' },
+        telegram: { enabled: true, botToken: 'new-tg-token', chatIds: [123] },
+      },
+    })
+
+    const optionalConnectors = new Map<string, any>()
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [web as never],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({
+      success: false,
+      error: 'bad token; batch rollback failed: stop failed',
+    })
+    expect(optionalConnectors.get('mcp-ask')).toBeInstanceOf(FakeMcpAskPlugin)
   })
 })

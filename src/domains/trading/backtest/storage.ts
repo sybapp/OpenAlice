@@ -1,5 +1,5 @@
-import { createInterface } from 'node:readline'
 import { mkdir, open, readFile, writeFile, appendFile, unlink, rename } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { RUNTIME_SESSIONS_DIR } from '../../../core/paths.js'
 import type { GitExportState } from '../git/types.js'
@@ -46,6 +46,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   const rootDir = resolve(options?.rootDir ?? 'runtime/backtest')
   const runIndexPath = resolve(rootDir, RUN_INDEX_FILENAME)
   let runIndexWriteQueue: Promise<void> = Promise.resolve()
+  const runClaims = new Map<string, FileHandle>()
 
   function getRunPaths(runId: string) {
     const safeRunId = normalizeBacktestRunId(runId)
@@ -58,6 +59,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
       equityCurvePath: resolve(runDir, 'equity-curve.jsonl'),
       eventLogPath: resolve(runDir, 'events.jsonl'),
       gitStatePath: resolve(runDir, 'git-state.json'),
+      claimPath: resolve(runDir, '.run.lock'),
     }
   }
 
@@ -100,6 +102,30 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
   }
 
   return {
+    async claimRunId(runId) {
+      const paths = getRunPaths(runId)
+      const safeRunId = normalizeBacktestRunId(runId)
+      if (runClaims.has(safeRunId)) {
+        throw new Error(`Backtest run already in progress: ${safeRunId}`)
+      }
+
+      await mkdir(paths.runDir, { recursive: true })
+      const metadata = JSON.stringify({ pid: process.pid, claimedAt: new Date().toISOString() }) + '\n'
+      const handle = await acquireRunClaim(paths.claimPath, metadata, safeRunId)
+      runClaims.set(safeRunId, handle)
+    },
+
+    async releaseRunId(runId) {
+      const safeRunId = normalizeBacktestRunId(runId)
+      const handle = runClaims.get(safeRunId)
+      runClaims.delete(safeRunId)
+      if (!handle) return
+
+      const { claimPath } = getRunPaths(safeRunId)
+      await handle.close().catch(() => {})
+      await unlink(claimPath).catch(ignoreENOENT)
+    },
+
     async createRun(manifest) {
       await queueManifestCreate(manifest)
     },
@@ -260,15 +286,28 @@ async function streamJsonLines<T = unknown>(
   try {
     const fileHandle = await open(filePath, 'r')
     const stream = fileHandle.createReadStream({ encoding: 'utf-8', autoClose: false })
-    const reader = createInterface({ input: stream, crlfDelay: Infinity })
+    let remainder = ''
 
     try {
-      for await (const line of reader) {
-        if (!line.trim()) continue
-        if (onEntry(JSON.parse(line) as T) === false) break
+      for await (const chunk of stream) {
+        remainder += chunk
+        const lines = remainder.split('\n')
+        remainder = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          if (onEntry(JSON.parse(line) as T) === false) return
+        }
+      }
+
+      if (remainder.trim()) {
+        try {
+          if (onEntry(JSON.parse(remainder) as T) === false) return
+        } catch (err) {
+          if (!isRecoverableJsonLineTailError(err, remainder)) throw err
+        }
       }
     } finally {
-      reader.close()
       stream.destroy()
       await fileHandle.close()
     }
@@ -278,12 +317,64 @@ async function streamJsonLines<T = unknown>(
   }
 }
 
+async function acquireRunClaim(claimPath: string, metadata: string, runId: string): Promise<FileHandle> {
+  try {
+    const handle = await open(claimPath, 'wx')
+    await handle.writeFile(metadata, 'utf-8')
+    return handle
+  } catch (err) {
+    if (!isEEXIST(err)) throw err
+
+    const staleClaim = await readClaimMetadata(claimPath)
+    if (staleClaim?.pid && !isProcessAlive(staleClaim.pid)) {
+      await unlink(claimPath).catch(ignoreENOENT)
+      const handle = await open(claimPath, 'wx')
+      await handle.writeFile(metadata, 'utf-8')
+      return handle
+    }
+
+    throw new Error(`Backtest run already in progress: ${runId}`)
+  }
+}
+
+async function readClaimMetadata(claimPath: string): Promise<{ pid?: number } | null> {
+  const raw = await readFile(claimPath, 'utf-8').catch((err: unknown) => {
+    if (isENOENT(err)) return null
+    throw err
+  })
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as { pid?: number }
+  } catch {
+    return null
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return !(err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ESRCH')
+  }
+}
+
+function isRecoverableJsonLineTailError(err: unknown, line: string): boolean {
+  return err instanceof SyntaxError && line.trim().length > 0
+}
+
 function sortRunManifests(entries: BacktestRunManifest[]): BacktestRunManifest[] {
   return [...entries].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
 }
 
 function isENOENT(err: unknown): boolean {
   return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function isEEXIST(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EEXIST'
 }
 
 function ignoreENOENT(err: unknown): void {

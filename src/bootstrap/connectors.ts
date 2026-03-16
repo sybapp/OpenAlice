@@ -42,6 +42,14 @@ interface RollbackAction {
   run: () => Promise<void>
 }
 
+function setConnectorAlive(optionalConnectors: Map<string, Plugin>, name: string, plugin: Plugin): void {
+  optionalConnectors.set(name, plugin)
+}
+
+function setConnectorUnknown(optionalConnectors: Map<string, Plugin>, name: string): void {
+  optionalConnectors.delete(name)
+}
+
 function createMcpAskConnector(config: Config['connectors']['mcpAsk']): McpAskConnector {
   return new McpAskConnector({
     port: config.port!,
@@ -104,8 +112,13 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     changes.push(startedMessage)
     return {
       run: async () => {
-        optionalConnectors.delete(name)
-        await plugin.stop()
+        try {
+          await plugin.stop()
+          setConnectorUnknown(optionalConnectors, name)
+        } catch (err) {
+          setConnectorAlive(optionalConnectors, name, plugin)
+          throw err
+        }
       },
     }
   }
@@ -120,9 +133,20 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
     changes.push(restartedMessage)
     return {
       run: async () => {
-        await plugin.stop()
-        await current.start(ctx)
-        optionalConnectors.set(name, current)
+        try {
+          await plugin.stop()
+        } catch (err) {
+          setConnectorAlive(optionalConnectors, name, plugin)
+          throw err
+        }
+
+        try {
+          await current.start(ctx)
+          setConnectorAlive(optionalConnectors, name, current)
+        } catch (err) {
+          setConnectorUnknown(optionalConnectors, name)
+          throw err
+        }
       },
     }
   } catch (err) {

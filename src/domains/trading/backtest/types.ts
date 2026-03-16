@@ -211,6 +211,8 @@ export interface BacktestRunRecord {
 }
 
 export interface BacktestStorage {
+  claimRunId(runId: string): Promise<void>
+  releaseRunId(runId: string): Promise<void>
   createRun(manifest: BacktestRunManifest): Promise<void>
   updateManifest(runId: string, patch: Partial<BacktestRunManifest>): Promise<BacktestRunManifest>
   getManifest(runId: string): Promise<BacktestRunManifest | null>

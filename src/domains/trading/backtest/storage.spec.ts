@@ -180,6 +180,44 @@ describe('createBacktestStorage', () => {
     ])
   })
 
+  it('ignores a truncated trailing JSONL line while still reading completed entries', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('truncated-tail') })
+    const runId = 'run-tail-truncated'
+    const paths = storage.getRunPaths(runId)
+
+    await storage.createRun({
+      runId,
+      status: 'running',
+      mode: 'scripted',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      artifactDir: paths.runDir,
+      barCount: 3,
+      currentStep: 2,
+      accountId: 'paper-1',
+      accountLabel: 'Paper 1',
+      initialCash: 10_000,
+      guards: [],
+    })
+
+    await writeFile(
+      paths.eventLogPath,
+      `${JSON.stringify({ seq: 1, ts: 1, type: 'backtest.run.started', payload: { step: 0 } })}\n{"seq":2`,
+      'utf-8',
+    )
+    await writeFile(
+      paths.equityCurvePath,
+      `${JSON.stringify({ step: 1, ts: '2025-01-01T09:31:00.000Z', equity: 10_001, realizedPnL: 1, unrealizedPnL: 0 })}\n{"step":2`,
+      'utf-8',
+    )
+
+    await expect(storage.readEventEntries(runId)).resolves.toEqual([
+      { seq: 1, ts: 1, type: 'backtest.run.started', payload: { step: 0 } },
+    ])
+    await expect(storage.readEquityCurve(runId)).resolves.toEqual([
+      { step: 1, ts: '2025-01-01T09:31:00.000Z', equity: 10_001, realizedPnL: 1, unrealizedPnL: 0 },
+    ])
+  })
+
   it('maintains a run index so listRuns does not need to rebuild from directories every time', async () => {
     const rootDir = tempDir('run-index')
     const storage = createBacktestStorage({ rootDir })

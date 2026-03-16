@@ -198,9 +198,11 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       if (running.has(runId)) {
         throw new Error(`Backtest run already in progress: ${runId}`)
       }
+      await options.storage.claimRunId(runId)
       const promise = executeRun({ ...validated, runId })
         .finally(() => {
           running.delete(runId)
+          return options.storage.releaseRunId(runId)
         })
       running.set(runId, promise)
       return { runId }
