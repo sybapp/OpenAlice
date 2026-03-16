@@ -26,6 +26,7 @@ import {
   type BacktestRunConfig,
   type BacktestRunManifest,
   type BacktestRunRecord,
+  type BacktestRunSummary,
   type BacktestStrategyContext,
 } from './types.js'
 import type { Operation } from '../git/types.js'
@@ -53,24 +54,56 @@ const INVALID_RUN_CLAIM_STALE_MS = 5_000
 export function createBacktestRunManager(options: BacktestRunManagerOptions): BacktestRunManager {
   const running = new Map<string, Promise<BacktestRunManifest>>()
 
-  async function resolveVisibleManifest(runId: string): Promise<BacktestRunManifest> {
-    const manifest = await options.storage.getManifest(runId)
-    if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
-    if (manifest.status === 'completed' || manifest.status === 'failed') return manifest
-    if (await hasActiveRunClaim(join(options.storage.getRunPaths(runId).runDir, '.run.lock'))) {
-      return manifest
-    }
-
+  async function persistFailedManifest(runId: string, manifest: BacktestRunManifest, error: string): Promise<BacktestRunManifest> {
     const patch: Partial<BacktestRunManifest> = {
       status: 'failed',
       completedAt: manifest.completedAt ?? new Date().toISOString(),
-      error: manifest.error ?? `Backtest run became orphaned while still ${manifest.status}.`,
+      error,
     }
 
     try {
       return await options.storage.updateManifest(runId, patch)
     } catch {
       return { ...manifest, ...patch }
+    }
+  }
+
+  async function resolveVisibleRun(runId: string, existingManifest?: BacktestRunManifest): Promise<{
+    manifest: BacktestRunManifest
+    summary?: BacktestRunSummary
+  }> {
+    const manifest = existingManifest ?? await options.storage.getManifest(runId)
+    if (!manifest) throw new Error(`Backtest run not found: ${runId}`)
+
+    if (manifest.status === 'completed') {
+      try {
+        const summary = await options.storage.readSummary(runId)
+        if (summary) return { manifest, summary }
+        return {
+          manifest: await persistFailedManifest(runId, manifest, 'Completed backtest run is missing its summary artifact.'),
+        }
+      } catch (err) {
+        return {
+          manifest: await persistFailedManifest(
+            runId,
+            manifest,
+            `Completed backtest run summary is unreadable: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        }
+      }
+    }
+
+    if (manifest.status === 'failed') return { manifest }
+    if (await hasActiveRunClaim(join(options.storage.getRunPaths(runId).runDir, '.run.lock'))) {
+      return { manifest }
+    }
+
+    return {
+      manifest: await persistFailedManifest(
+        runId,
+        manifest,
+        manifest.error ?? `Backtest run became orphaned while still ${manifest.status}.`,
+      ),
     }
   }
 
@@ -268,19 +301,18 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
         try {
           return await current
         } catch (err) {
-          const manifest = await resolveVisibleManifest(runId)
+          const { manifest } = await resolveVisibleRun(runId)
           if (manifest?.status === 'failed' || manifest?.status === 'completed') return manifest
           throw err
         }
       }
-      return resolveVisibleManifest(runId)
+      return (await resolveVisibleRun(runId)).manifest
     },
 
     async listRuns() {
       const manifests = await options.storage.listRuns()
       const resolved = await Promise.all(manifests.map(async (manifest) => {
-        if (manifest.status === 'completed' || manifest.status === 'failed') return manifest
-        return resolveVisibleManifest(manifest.runId)
+        return (await resolveVisibleRun(manifest.runId, manifest)).manifest
       }))
       return resolved.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     },
@@ -288,16 +320,14 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     async getRun(runId) {
       const existing = await options.storage.getManifest(runId)
       if (!existing) return null
-      const manifest = existing.status === 'completed' || existing.status === 'failed'
-        ? existing
-        : await resolveVisibleManifest(runId)
-      const summary = await options.storage.readSummary(runId) ?? undefined
+      const { manifest, summary } = await resolveVisibleRun(runId, existing)
       const record: BacktestRunRecord = { manifest, summary }
       return record
     },
 
     async getSummary(runId) {
-      return options.storage.readSummary(runId)
+      const { manifest, summary } = await resolveVisibleRun(runId)
+      return manifest.status === 'completed' ? summary ?? null : null
     },
 
     async getEquityCurve(runId, opts) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { unlink, writeFile } from 'node:fs/promises'
 import { createBacktestStorage } from './storage.js'
 
 const mocks = vi.hoisted(() => ({
@@ -267,6 +268,77 @@ describe('createBacktestRunManager', () => {
     expect(events).toHaveLength(50)
     expect(events.at(-1)?.type).toBe('backtest.run.completed')
     expect(events.some((entry) => entry.type === 'backtest.run.completed')).toBe(true)
+  })
+
+  it('downgrades a completed run to failed when its persisted summary becomes unreadable', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('corrupted-summary') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    await writeFile(storage.getRunPaths(runId).summaryPath, '{"runId":', 'utf-8')
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({
+      runId,
+      status: 'failed',
+      error: expect.stringContaining('summary is unreadable'),
+    })
+    await expect(manager.getRun(runId)).resolves.toEqual({
+      manifest: expect.objectContaining({
+        runId,
+        status: 'failed',
+        error: expect.stringContaining('summary is unreadable'),
+      }),
+      summary: undefined,
+    })
+    await expect(manager.getSummary(runId)).resolves.toBeNull()
+    await expect(manager.listRuns()).resolves.toContainEqual(expect.objectContaining({
+      runId,
+      status: 'failed',
+      error: expect.stringContaining('summary is unreadable'),
+    }))
+  })
+
+  it('downgrades a completed run to failed when its persisted summary goes missing', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('missing-summary') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn(),
+    } as unknown as Engine
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const { runId } = await manager.startRun({
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'scripted',
+        decisions: [],
+      },
+    })
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    await unlink(storage.getRunPaths(runId).summaryPath)
+
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({
+      runId,
+      status: 'failed',
+      error: 'Completed backtest run is missing its summary artifact.',
+    })
+    await expect(manager.getSummary(runId)).resolves.toBeNull()
   })
 
   it('persists a failed manifest when startup crashes before the run reaches running state', async () => {
