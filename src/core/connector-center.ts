@@ -99,7 +99,11 @@ export class ConnectorCenter {
   /** Register a Connector instance. Replaces any existing registration for this channel. */
   register(connector: Connector): () => void {
     this.connectors.set(connector.channel, connector)
-    return () => { this.connectors.delete(connector.channel) }
+    return () => {
+      if (this.connectors.get(connector.channel) === connector) {
+        this.connectors.delete(connector.channel)
+      }
+    }
   }
 
   /** Record that the user just interacted via this channel. */

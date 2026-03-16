@@ -59,6 +59,20 @@ describe('ConnectorCenter', () => {
         expect(cc.hasConnectors()).toBe(false)
       })
 
+      it('should not let a stale unregister remove a newer connector for the same channel', () => {
+        const first = makeConnector({ channel: 'telegram', to: '123' })
+        const second = makeConnector({ channel: 'telegram', to: '456' })
+
+        const unregisterFirst = cc.register(first)
+        cc.register(second)
+
+        unregisterFirst()
+
+        expect(cc.hasConnectors()).toBe(true)
+        expect(cc.list()).toHaveLength(1)
+        expect(cc.get('telegram')).toBe(second)
+      })
+
       it('should expose capabilities', () => {
         cc.register(makeConnector({
           channel: 'telegram',
