@@ -154,7 +154,22 @@ async function reconcileOptionalConnector(args: OptionalConnectorReconcileArgs):
   if (!changed(current) && isPluginHealthy(current)) return undefined
 
   const plugin = create()
-  await current.stop()
+  try {
+    await current.stop()
+  } catch (err) {
+    if (!isPluginHealthy(current)) {
+      try {
+        await current.start(ctx)
+        setConnectorAlive(optionalConnectors, name, current)
+      } catch (rollbackErr) {
+        setConnectorUnknown(optionalConnectors, name)
+        const stopMessage = err instanceof Error ? err.message : String(err)
+        const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+        throw new Error(`${name} stop failed: ${stopMessage}; rollback failed: ${rollbackMessage}`)
+      }
+    }
+    throw err
+  }
   try {
     await plugin.start(ctx)
     optionalConnectors.set(name, plugin)

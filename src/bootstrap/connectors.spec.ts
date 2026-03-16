@@ -476,7 +476,7 @@ describe('bootstrap connectors', () => {
     expect(optionalConnectors.get('mcp-ask')).toBeInstanceOf(FakeMcpAskPlugin)
   })
 
-  it('retries an unchanged mcp-ask connector after a failed stop marked it unhealthy', async () => {
+  it('keeps an mcp-ask connector healthy after a failed stop so unchanged reconnects do not restart it', async () => {
     const mcpAsk = new FakeMcpAskPlugin({ port: 3003, authToken: 'ask-token' })
     const optionalConnectors = new Map<string, any>([['mcp-ask', mcpAsk]])
 
@@ -497,7 +497,7 @@ describe('bootstrap connectors', () => {
     })
 
     await expect(reconnect()).resolves.toEqual({ success: false, error: 'close failed' })
-    expect(mcpAsk.isHealthy()).toBe(false)
+    expect(mcpAsk.isHealthy()).toBe(true)
     expect(optionalConnectors.get('mcp-ask')).toBe(mcpAsk)
 
     mocks.loadConfig.mockResolvedValueOnce({
@@ -509,11 +509,36 @@ describe('bootstrap connectors', () => {
       },
     })
 
-    await expect(reconnect()).resolves.toEqual({ success: true, message: 'mcp-ask restarted' })
-    expect(mcpAsk.stop).toHaveBeenCalledTimes(2)
-    const replacement = optionalConnectors.get('mcp-ask')
-    expect(replacement).toBeInstanceOf(FakeMcpAskPlugin)
-    expect(replacement).not.toBe(mcpAsk)
-    expect(replacement.start).toHaveBeenCalledTimes(1)
+    await expect(reconnect()).resolves.toEqual({ success: true, message: 'no changes' })
+    expect(mcpAsk.stop).toHaveBeenCalledTimes(1)
+    expect(mcpAsk.start).toHaveBeenCalledTimes(1)
+    expect(optionalConnectors.get('mcp-ask')).toBe(mcpAsk)
+  })
+
+  it('restores the current optional connector when its stop fails after taking it unhealthy', async () => {
+    const mcpAsk = new FakeMcpAskPlugin({ port: 3003, authToken: 'ask-token' })
+    const optionalConnectors = new Map<string, any>([['mcp-ask', mcpAsk]])
+
+    mocks.mcpAskStopErrors.push(new Error('close failed'))
+    mocks.loadConfig.mockResolvedValueOnce({
+      connectors: {
+        web: { host: '127.0.0.1' },
+        mcp: { host: '127.0.0.1' },
+        mcpAsk: { enabled: true, port: 3004, authToken: 'new-token' },
+        telegram: { enabled: false, chatIds: [] },
+      },
+    })
+
+    const reconnect = createConnectorReconnector({
+      coreConnectors: [],
+      optionalConnectors,
+      getCtx: () => ({ ctx: 'engine' } as never),
+    })
+
+    await expect(reconnect()).resolves.toEqual({ success: false, error: 'close failed' })
+    expect(mcpAsk.stop).toHaveBeenCalledOnce()
+    expect(mcpAsk.start).toHaveBeenCalledOnce()
+    expect(mcpAsk.isHealthy()).toBe(true)
+    expect(optionalConnectors.get('mcp-ask')).toBe(mcpAsk)
   })
 })
