@@ -808,6 +808,14 @@ describe('createBacktestRunManager', () => {
       status: 'failed',
       error: 'Backtest run became orphaned while still queued.',
     })
+
+    await expect(manager.getEvents('orphaned-wait')).resolves.toContainEqual(expect.objectContaining({
+      type: 'backtest.run.failed',
+      payload: expect.objectContaining({
+        runId: 'orphaned-wait',
+        error: 'Backtest run became orphaned while still queued.',
+      }),
+    }))
   })
 
   it('rejects artifact reads for unknown runIds instead of returning empty data', async () => {

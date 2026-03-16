@@ -76,7 +76,17 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     }
 
     try {
-      return await options.storage.updateManifest(runId, patch)
+      const next = await options.storage.updateManifest(runId, patch)
+      try {
+        const eventLog = await createEventLog({ logPath: options.storage.getRunPaths(runId).eventLogPath })
+        try {
+          await eventLog.append('backtest.run.failed', { runId, error })
+        } finally {
+          await eventLog.close()
+        }
+      } catch {
+      }
+      return next
     } catch {
       return { ...manifest, ...patch }
     }
