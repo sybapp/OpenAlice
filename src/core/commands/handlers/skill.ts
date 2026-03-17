@@ -20,7 +20,7 @@ export const skillCommandHandler: LocalCommandHandler = {
     }
 
     if (subcommand === 'list') {
-      const packs = await listSkillPacks()
+      const packs = (await listSkillPacks()).filter((pack) => pack.userInvocable !== false)
       const text = packs.length === 0
         ? 'No skill packs available.'
         : ['Available skills:', ...packs.map((pack) => `- ${pack.id}: ${pack.label}`)].join('\n')
@@ -35,6 +35,9 @@ export const skillCommandHandler: LocalCommandHandler = {
     const pack = await getSkillPack(subcommand)
     if (!pack) {
       return handledLocalCommand(`Unknown skill: ${subcommand}`)
+    }
+    if (pack.userInvocable === false) {
+      return handledLocalCommand(`Skill ${pack.id} is pipeline-only and cannot be enabled manually.`)
     }
 
     await setSessionSkill(context.session, pack.id)

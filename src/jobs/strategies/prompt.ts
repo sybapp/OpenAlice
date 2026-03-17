@@ -87,14 +87,11 @@ export function buildMarketScanPrompt(strategy: TraderStrategy, snapshot: Trader
     JSON.stringify(snapshot, null, 2),
     '',
     'Goal: identify the best candidate symbols to study next. Use scripts, not OpenAlice tools.',
-    'Respond with JSON only using this shape:',
+    'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        candidates: [{ source: strategy.sources[0] ?? 'source-id', symbol: strategy.universe.symbols[0] ?? 'BTC/USDT', reason: 'short reason' }],
-        summary: 'short overview',
-      } satisfies TraderMarketScanResult,
-    }, null, 2),
+      candidates: [{ source: strategy.sources[0] ?? 'source-id', symbol: strategy.universe.symbols[0] ?? 'BTC/USDT', reason: 'short reason' }],
+      summary: 'short overview',
+    } satisfies TraderMarketScanResult, null, 2),
   ].join('\n')
 }
 
@@ -109,22 +106,19 @@ export function buildTradeThesisPrompt(strategy: TraderStrategy, candidate: { so
     JSON.stringify(snapshot, null, 2),
     '',
     'Goal: request whatever scripts you need, then produce a thesis for exactly one symbol.',
-    'Respond with JSON only using this shape:',
+    'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        status: 'thesis_ready',
-        source: candidate.source,
-        symbol: candidate.symbol,
-        bias: 'long',
-        chosenScenario: 'primary',
-        alternateScenario: 'alternate',
-        rationale: 'short rationale',
-        invalidation: ['one invalidation'],
-        confidence: 0.5,
-        contextNotes: ['optional note'],
-      } satisfies TraderTradeThesisResult,
-    }, null, 2),
+      status: 'thesis_ready',
+      source: candidate.source,
+      symbol: candidate.symbol,
+      bias: 'long',
+      chosenScenario: 'primary',
+      alternateScenario: 'alternate',
+      rationale: 'short rationale',
+      invalidation: ['one invalidation'],
+      confidence: 0.5,
+      contextNotes: ['optional note'],
+    } satisfies TraderTradeThesisResult, null, 2),
   ].join('\n')
 }
 
@@ -142,17 +136,14 @@ export function buildRiskCheckPrompt(strategy: TraderStrategy, thesis: TraderTra
     JSON.stringify(snapshot.sourceSnapshots.filter((entry) => entry.source === thesis.source), null, 2),
     '',
     'Goal: decide whether the thesis can proceed under current strategy limits.',
-    'Respond with JSON only using this shape:',
+    'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        verdict: 'pass',
-        source: thesis.source,
-        symbol: thesis.symbol,
-        rationale: 'risk budget is available',
-        maxRiskPercent: strategy.riskBudget.perTradeRiskPercent,
-      } satisfies TraderRiskCheckResult,
-    }, null, 2),
+      verdict: 'pass',
+      source: thesis.source,
+      symbol: thesis.symbol,
+      rationale: 'risk budget is available',
+      maxRiskPercent: strategy.riskBudget.perTradeRiskPercent,
+    } satisfies TraderRiskCheckResult, null, 2),
   ].join('\n')
 }
 
@@ -169,21 +160,27 @@ export function buildTradePlanPrompt(strategy: TraderStrategy, thesis: TraderTra
     'Risk verdict:',
     JSON.stringify(risk, null, 2),
     '',
-    'Goal: either skip or produce a deterministic execution plan. If status is plan_ready, include at least one staged order and a commit message.',
-    'Respond with JSON only using this shape:',
+    'Goal: either skip or produce a deterministic execution plan. If status is plan_ready, include at least one staged order and a commit message. If status is skip, omit commitMessage and orders.',
+    'When you send the final complete envelope, its output field must match one of these shapes exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        status: 'plan_ready',
-        source: thesis.source,
-        symbol: thesis.symbol,
-        chosenScenario: thesis.chosenScenario,
-        rationale: thesis.rationale,
-        invalidation: thesis.invalidation,
-        commitMessage: `${strategy.id}: ${thesis.chosenScenario} ${thesis.symbol}`,
-        brainUpdate: 'short frontal-lobe update',
-        orders: [],
-      } satisfies TraderTradePlanResult,
+      status: 'plan_ready',
+      source: thesis.source,
+      symbol: thesis.symbol,
+      chosenScenario: thesis.chosenScenario,
+      rationale: thesis.rationale,
+      invalidation: thesis.invalidation,
+      commitMessage: `${strategy.id}: ${thesis.chosenScenario} ${thesis.symbol}`,
+      brainUpdate: 'short frontal-lobe update',
+      orders: [],
+    }, null, 2),
+    JSON.stringify({
+      status: 'skip',
+      source: thesis.source,
+      symbol: thesis.symbol,
+      chosenScenario: thesis.chosenScenario,
+      rationale: 'why execution must be skipped',
+      invalidation: thesis.invalidation,
+      brainUpdate: 'short frontal-lobe update',
     }, null, 2),
   ].join('\n')
 }
@@ -199,16 +196,13 @@ export function buildTradeExecutePrompt(strategy: TraderStrategy, plan: TraderTr
     JSON.stringify(plan, null, 2),
     '',
     'Goal: confirm whether the deterministic execution plan should run exactly as written.',
-    'Respond with JSON only using this shape:',
+    'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        status: 'execute',
-        source: plan.source,
-        symbol: plan.symbol,
-        rationale: 'confirm execution',
-        brainUpdate: plan.brainUpdate || 'executing approved trade plan',
-      },
+      status: 'execute',
+      source: plan.source,
+      symbol: plan.symbol,
+      rationale: 'confirm execution',
+      brainUpdate: plan.brainUpdate || 'executing approved trade plan',
     }, null, 2),
   ].join('\n')
 }
@@ -223,14 +217,11 @@ export function buildTraderReviewPrompt(strategy: TraderStrategy | null, sources
     `Sources: ${sources.join(', ')}`,
     '',
     'Goal: summarize recent trading outcomes, highlight discipline wins/failures, and return a Brain update.',
-    'Respond with JSON only using this shape:',
+    'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
-      type: 'complete',
-      output: {
-        summary: 'short review summary',
-        brainUpdate: 'frontal lobe update text',
-      } satisfies TraderTradeReviewSummary,
-    }, null, 2),
+      summary: 'short review summary',
+      brainUpdate: 'frontal lobe update text',
+    } satisfies TraderTradeReviewSummary, null, 2),
   ].join('\n')
 }
 

@@ -159,17 +159,26 @@ export interface TraderPlannedOrder {
   }
 }
 
-export interface TraderTradePlanResult {
-  status: 'plan_ready' | 'skip'
+interface TraderTradePlanBase {
   source: string
   symbol: string
   chosenScenario: string
   rationale: string
   invalidation: string[]
-  commitMessage: string
   brainUpdate: string
+}
+
+export interface TraderTradePlanReadyResult extends TraderTradePlanBase {
+  status: 'plan_ready'
+  commitMessage: string
   orders: TraderPlannedOrder[]
 }
+
+export interface TraderTradePlanSkipResult extends TraderTradePlanBase {
+  status: 'skip'
+}
+
+export type TraderTradePlanResult = TraderTradePlanReadyResult | TraderTradePlanSkipResult
 
 export interface TraderTradeExecuteResult {
   status: 'execute' | 'abort'

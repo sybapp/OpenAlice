@@ -114,6 +114,19 @@ describe('TelegramPlugin', () => {
     expect(prompt).toContain('[document: notes.txt: text/plain]')
   })
 
+  it('preserves slash commands so local command routing can match them', () => {
+    const plugin = new TelegramPlugin({ token: 'secret', allowedChatIds: [123] })
+
+    const prompt = (plugin as any).buildPrompt({
+      chatId: 123,
+      text: '/skill ta-brooks BTCUSDT',
+      from: { id: 1, firstName: 'Alice', username: 'alice' },
+      media: [],
+    })
+
+    expect(prompt).toBe('/skill ta-brooks BTCUSDT')
+  })
+
   it('sends media, edits the placeholder, and chunks remaining text replies', async () => {
     const plugin = new TelegramPlugin({ token: 'secret', allowedChatIds: [123] })
     mocks.readFile.mockResolvedValue(Buffer.from('image-bytes'))
@@ -215,6 +228,47 @@ describe('TelegramPlugin', () => {
     expect(getSession).toHaveBeenCalledWith(5)
     expect(sendReply).toHaveBeenNthCalledWith(1, 123, '> Compacting session...')
     expect(sendReply).toHaveBeenNthCalledWith(2, 123, 'Compacted.')
+  })
+
+  it('runs the skill command through the unified engine session flow', async () => {
+    const plugin = new TelegramPlugin({ token: 'secret', allowedChatIds: [123] })
+    const session = { restore: vi.fn(), id: 'telegram/5' }
+    const sendReply = vi.spyOn(plugin as any, 'sendReply').mockResolvedValue(undefined)
+    const getSession = vi.spyOn(plugin as any, 'getSession').mockResolvedValue(session)
+    const askWithSession = vi.fn(async () => ({ text: 'Active skill set to ta-brooks.', media: [] }))
+
+    await (plugin as any).handleSkillCommand(123, 5, '/skill ta-brooks', {
+      engine: { askWithSession },
+      heartbeat: {},
+      connectorCenter: {},
+      eventLog: {},
+      cronEngine: {},
+      trader: {},
+      traderReview: {},
+      accountManager: {},
+      backtest: {},
+      marketData: {},
+      getAccountGit: vi.fn(),
+      reconnectAccount: vi.fn(),
+      removeTradingAccountRuntime: vi.fn(),
+      runTraderReview: vi.fn(),
+      toolCenter: {},
+      config: {},
+    } as never)
+
+    expect(getSession).toHaveBeenCalledWith(5)
+    expect(askWithSession).toHaveBeenCalledWith(
+      '/skill ta-brooks',
+      session,
+      expect.objectContaining({
+        commandContext: expect.objectContaining({
+          actorId: '5',
+          source: 'telegram',
+          surface: 'telegram-command',
+        }),
+      }),
+    )
+    expect(sendReply).toHaveBeenCalledWith(123, 'Active skill set to ta-brooks.')
   })
 
   it('unregisters outbound delivery after polling hits an async fatal error', async () => {
@@ -375,6 +429,7 @@ describe('TelegramPlugin', () => {
       { command: 'settings', description: 'Choose default AI provider' },
       { command: 'heartbeat', description: 'Toggle heartbeat self-check' },
       { command: 'compact', description: 'Force compact session context' },
+      { command: 'skill', description: 'List or enable a session skill' },
     ])
     expect(register).toHaveBeenCalledTimes(1)
     expect(bot.start).toHaveBeenCalledWith({

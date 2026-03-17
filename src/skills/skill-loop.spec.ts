@@ -4,7 +4,11 @@ import type { SkillPack } from './registry.js'
 import type { SessionEntry, SessionStore } from '../core/session.js'
 
 vi.mock('./script-registry.js', () => ({
-  listSkillScripts: vi.fn(() => [{ id: 'analysis-brooks', description: 'Brooks analysis' }]),
+  listSkillScripts: vi.fn(() => [{
+    id: 'analysis-brooks',
+    description: 'Brooks analysis',
+    inputGuide: 'Use an object like {"asset":"crypto","symbol":"BTC/USDT:USDT","timeframes":{"context":"1h","structure":"15m","execution":"5m"}}. timeframes must be a named object, never an array.',
+  }]),
   getSkillScript: vi.fn(() => ({
     id: 'analysis-brooks',
     description: 'Brooks analysis',
@@ -79,7 +83,7 @@ describe('SkillLoopRunner', () => {
         text: JSON.stringify({
           complete: {
             type: 'complete',
-            output: 'done',
+            output: { text: 'done' },
           },
         }),
         media: [],
@@ -127,6 +131,9 @@ describe('SkillLoopRunner', () => {
 
     expect(result).toEqual({ text: 'done', media: [] })
     expect(askWithSession).toHaveBeenCalledTimes(2)
+    expect(String(askWithSession.mock.calls[0][0])).toContain('Never use positional arrays as a shortcut for named objects.')
+    expect(String(askWithSession.mock.calls[0][0])).toContain('timeframes must be a named object, never an array.')
+    expect(String(askWithSession.mock.calls[0][0])).toContain('{"context":"1h","structure":"15m","execution":"5m"}')
     expect(session.appendUser).toHaveBeenCalledWith('analyze BTC', 'human')
     expect(session.appendAssistant).toHaveBeenCalledWith('done', 'engine', {
       kind: 'skill_loop',

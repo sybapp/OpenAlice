@@ -151,6 +151,7 @@ function buildSkillLoopPrompt(params: {
   const availableScripts = listSkillScripts(params.allowedScripts).map((script) => ({
     id: script.id,
     description: script.description,
+    ...(script.inputGuide ? { inputGuide: script.inputGuide } : {}),
   }))
   const availableResources = params.skill.resources.map((resource) => resource.id)
 
@@ -171,13 +172,14 @@ function buildSkillLoopPrompt(params: {
     params.scriptResults.length > 0
       ? `Script results so far:\n${params.scriptResults.map((result, index) => `#${index + 1} ${result.id}\nInput:\n${JSON.stringify(result.input, null, 2)}\nOutput:\n${JSON.stringify(result.output, null, 2)}`).join('\n\n')}`
       : '',
+    'Script input rules:\n- Every script call input must be a JSON object that matches the script schema exactly.\n- Never use positional arrays as a shortcut for named objects.\n- For timeframe-style inputs, always send named keys (for example: {"context":"1h","structure":"15m","execution":"5m"}), never ["1h","15m","5m"].\n- If the task already fixes a literal field such as asset=crypto, reuse that exact literal value.',
     'Respond with JSON only. Use exactly one of these envelopes:',
     JSON.stringify(skillLoopEnvelope, null, 2),
   ].filter(Boolean).join('\n\n')
 }
 
 function renderCompletion(skill: SkillPack, output: unknown): EngineResult {
-  if (skill.completionSchema === 'ChatResponse' && output && typeof output === 'object' && 'text' in (output as Record<string, unknown>)) {
+  if (skill.outputSchema === 'ChatResponse' && output && typeof output === 'object' && 'text' in (output as Record<string, unknown>)) {
     return { text: String((output as Record<string, unknown>).text ?? ''), media: [] }
   }
   if (typeof output === 'string') {
@@ -205,7 +207,7 @@ export class SkillLoopRunner {
       throw new Error('No active script-loop skill')
     }
 
-    const completionSchema = getCompletionSchema(skill.completionSchema)
+    const completionSchema = getCompletionSchema(skill.outputSchema)
     const baseEntries = await session.readActive()
     const workingSession = new MemorySessionStore(session.id, [...baseEntries])
     const loadedResources: Array<{ id: string; content: string }> = []

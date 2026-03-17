@@ -284,6 +284,131 @@ describe('runTraderJob', () => {
     expect(result.reason).toBe('Breakout context is too noisy.')
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Wait for cleaner structure.')
   })
+
+  it('accepts trade-plan skip payloads without commitMessage or orders', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+            summary: 'one good candidate',
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            status: 'thesis_ready',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            bias: 'long',
+            chosenScenario: 'primary breakout continuation',
+            alternateScenario: 'range failure',
+            rationale: 'Trend and pullback context align.',
+            invalidation: ['loss of breakout level'],
+            confidence: 0.74,
+            contextNotes: [],
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          type: 'complete',
+          output: {
+            verdict: 'pass',
+            source: 'ccxt-main',
+            symbol: 'BTC/USDT:USDT',
+            rationale: 'Risk budget is available.',
+            maxRiskPercent: 0.5,
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          text: {
+            type: 'complete',
+            output: {
+              status: 'skip',
+              source: 'ccxt-main',
+              symbol: 'BTC/USDT:USDT',
+              chosenScenario: 'primary breakout continuation',
+              rationale: 'Trigger is not confirmed yet.',
+              invalidation: ['loss of breakout level'],
+              brainUpdate: 'Wait for confirmation.',
+            },
+          },
+        }),
+        media: [],
+      })
+
+    const result = await runTraderJob({
+      jobId: 'job-4b',
+      strategyId: 'momentum',
+      session: { id: 'session-4b' } as SessionStore,
+    }, deps)
+
+    expect(result.status).toBe('skip')
+    expect(result.reason).toBe('Trigger is not confirmed yet.')
+    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Wait for confirmation.')
+    expect(mocks.getSkillScript).not.toHaveBeenCalled()
+  })
+
+  it('parses skill-loop responses wrapped under text.complete output', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          text: {
+            type: 'complete',
+            output: {
+              candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+              summary: 'one good candidate',
+            },
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          text: {
+            type: 'complete',
+            output: {
+              status: 'no_trade',
+              source: 'ccxt-main',
+              symbol: 'BTC/USDT:USDT',
+              bias: 'flat',
+              chosenScenario: 'stand aside',
+              rationale: 'Wrapped completion parsed correctly.',
+              invalidation: ['n/a'],
+              confidence: 0.2,
+              contextNotes: [],
+            },
+          },
+        }),
+        media: [],
+      })
+
+    const result = await runTraderJob({
+      jobId: 'job-5',
+      strategyId: 'momentum',
+      session: { id: 'session-5' } as SessionStore,
+    }, deps)
+
+    expect(result.status).toBe('skip')
+    expect(result.reason).toBe('Wrapped completion parsed correctly.')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'session-5' }), 'trader-market-scan')
+    expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'session-5' }), 'trader-trade-thesis')
+  })
 })
 
 describe('runTraderReview', () => {

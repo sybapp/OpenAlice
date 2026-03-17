@@ -140,6 +140,7 @@ async function main() {
     config,
     engine,
     eventLog,
+    connectorCenter,
     brain,
     accountManager,
     marketData,

@@ -60,17 +60,28 @@ export const traderPlannedOrderSchema = z.object({
   }).optional(),
 })
 
-export const traderTradePlanSchema = z.object({
-  status: z.enum(['plan_ready', 'skip']),
-  source: z.string().min(1),
-  symbol: z.string().min(1),
-  chosenScenario: z.string().min(1),
-  rationale: z.string().min(1),
-  invalidation: z.array(z.string()).default([]),
-  commitMessage: z.string().min(1),
-  brainUpdate: z.string().default(''),
-  orders: z.array(traderPlannedOrderSchema).default([]),
-})
+export const traderTradePlanSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('plan_ready'),
+    source: z.string().min(1),
+    symbol: z.string().min(1),
+    chosenScenario: z.string().min(1),
+    rationale: z.string().min(1),
+    invalidation: z.array(z.string()).default([]),
+    commitMessage: z.string().min(1),
+    brainUpdate: z.string().default(''),
+    orders: z.array(traderPlannedOrderSchema).default([]),
+  }),
+  z.object({
+    status: z.literal('skip'),
+    source: z.string().min(1),
+    symbol: z.string().min(1),
+    chosenScenario: z.string().min(1),
+    rationale: z.string().min(1),
+    invalidation: z.array(z.string()).default([]),
+    brainUpdate: z.string().default(''),
+  }),
+])
 
 export const traderTradeExecuteSchema = z.object({
   status: z.enum(['execute', 'abort']),

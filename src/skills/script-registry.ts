@@ -32,6 +32,7 @@ export interface SkillScriptModule<TInput = unknown, TOutput = unknown> {
   id: string
   description: string
   inputSchema: z.ZodType<TInput>
+  inputGuide?: string
   outputSchema?: z.ZodType<TOutput>
   run: (ctx: SkillScriptContext, input: TInput) => Promise<TOutput>
 }
@@ -264,6 +265,14 @@ async function getArchiveNews(
   }))
 }
 
+const cryptoAssetSchema = z.literal('crypto').default('crypto')
+
+const brooksTimeframesSchema = z.object({
+  context: z.string().optional(),
+  structure: z.string().optional(),
+  execution: z.string().optional(),
+}).optional()
+
 const scripts = [
   {
     id: 'research-market-search',
@@ -279,14 +288,11 @@ const scripts = [
   {
     id: 'analysis-brooks',
     description: 'Run deterministic Brooks-style price action analysis.',
+    inputGuide: 'Use an object like {"asset":"crypto","symbol":"BTC/USDT:USDT","timeframes":{"context":"1h","structure":"15m","execution":"5m"}}. timeframes must be a named object, never an array.',
     inputSchema: z.object({
-      asset: z.literal('crypto'),
+      asset: cryptoAssetSchema,
       symbol: z.string().min(1),
-      timeframes: z.object({
-        context: z.string().optional(),
-        structure: z.string().optional(),
-        execution: z.string().optional(),
-      }).optional(),
+      timeframes: brooksTimeframesSchema,
       lookbackBars: z.number().int().positive().optional(),
       recentBars: z.number().int().positive().optional(),
       midpointAvoidance: z.object({
@@ -362,8 +368,9 @@ const scripts = [
   {
     id: 'analysis-ict-smc',
     description: 'Run deterministic ICT/SMC structure analysis.',
+    inputGuide: 'Use an object like {"asset":"crypto","symbol":"BTC/USDT:USDT","timeframe":"15m"}. asset must stay the literal string "crypto".',
     inputSchema: z.object({
-      asset: z.literal('crypto'),
+      asset: cryptoAssetSchema,
       symbol: z.string().min(1),
       timeframe: z.string().optional(),
       lookbackBars: z.number().int().positive().optional(),
@@ -412,8 +419,9 @@ const scripts = [
   {
     id: 'analysis-indicator',
     description: 'Calculate a technical indicator formula for a symbol.',
+    inputGuide: 'Use an object like {"asset":"crypto","formula":"close(\"BTC/USDT:USDT\", \"5m\")"}. asset must stay the literal string "crypto".',
     inputSchema: z.object({
-      asset: z.literal('crypto'),
+      asset: cryptoAssetSchema,
       formula: z.string().min(1),
       precision: z.number().int().min(0).max(10).optional(),
       dropUnclosed: z.boolean().optional(),

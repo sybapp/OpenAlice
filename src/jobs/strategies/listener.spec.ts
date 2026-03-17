@@ -49,6 +49,7 @@ describe('trader listener', () => {
       config: {} as never,
       engine: {} as never,
       eventLog,
+      connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
       accountManager: {} as never,
       marketData: {} as never,
@@ -83,6 +84,105 @@ describe('trader listener', () => {
       jobName: 'Momentum',
       strategyId: 'momentum',
       reason: 'completed cleanly',
+    })
+  })
+
+  it('notifies through connectorCenter when a trader job completes a trade plan', async () => {
+    const doneEvents: EventLogEntry[] = []
+    const notify = vi.fn(async () => ({ delivered: true, channel: 'telegram' as const }))
+    runTraderJob.mockResolvedValue({
+      status: 'done',
+      reason: 'Execution confirmed.',
+      decision: {
+        status: 'trade',
+        strategyId: 'btcusdt-auto-execution',
+        source: 'binance-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'short breakdown continuation',
+        rationale: 'Execution confirmed.',
+        invalidation: ['reclaim 75134.8'],
+        actionsTaken: ['SELL stop BTC/USDT:USDT qty=0.02 stop=75134.8 | protection: SL 75471.03 / TP 74880'],
+        brainUpdate: '',
+      },
+      rawText: '{"ok":true}',
+    })
+    eventLog.subscribeType('trader.done', (entry) => doneEvents.push(entry))
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-done',
+      jobName: 'BTCUSDT Auto Execution',
+      strategyId: 'btcusdt-auto-execution',
+    })
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(doneEvents).toHaveLength(1))
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('OpenAlice 策略任务执行'),
+      { source: 'trader-done' },
+    )
+    expect(doneEvents[0].payload).toMatchObject({
+      jobId: 'job-done',
+      strategyId: 'btcusdt-auto-execution',
+      notified: true,
+      channel: 'telegram',
+    })
+  })
+
+  it('notifies through connectorCenter when a trader job errors', async () => {
+    const errorEvents: EventLogEntry[] = []
+    const notify = vi.fn(async () => ({ delivered: true, channel: 'telegram' as const }))
+    runTraderJob.mockRejectedValue(new Error('market scan exploded'))
+    eventLog.subscribeType('trader.error', (entry) => errorEvents.push(entry))
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-err',
+      jobName: 'BTCUSDT Auto Execution',
+      strategyId: 'btcusdt-auto-execution',
+    })
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(errorEvents).toHaveLength(1))
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('OpenAlice 策略任务报错'),
+      { source: 'trader-error' },
+    )
+    expect(errorEvents[0].payload).toMatchObject({
+      jobId: 'job-err',
+      jobName: 'BTCUSDT Auto Execution',
+      strategyId: 'btcusdt-auto-execution',
+      error: 'market scan exploded',
+      notified: true,
+      channel: 'telegram',
     })
   })
 })

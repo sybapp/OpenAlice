@@ -100,6 +100,13 @@ export class TelegramPlugin implements Plugin {
       await this.handleCompactCommand(ctx.chat.id, userId, engineCtx)
     })
 
+    bot.command('skill', async (ctx) => {
+      const userId = ctx.from?.id
+      if (!userId) return
+      const prompt = (ctx.message?.text ?? '/skill').replace(/^\/skill(?:@\w+)?/, '/skill').trim()
+      await this.handleSkillCommand(ctx.chat.id, userId, prompt || '/skill', engineCtx)
+    })
+
     // ── Callback queries (inline keyboard presses) ──
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data
@@ -167,6 +174,7 @@ export class TelegramPlugin implements Plugin {
       { command: 'settings', description: 'Choose default AI provider' },
       { command: 'heartbeat', description: 'Toggle heartbeat self-check' },
       { command: 'compact', description: 'Force compact session context' },
+      { command: 'skill', description: 'List or enable a session skill' },
     ])
 
     // ── Initialize and get bot info ──
@@ -332,6 +340,14 @@ export class TelegramPlugin implements Plugin {
     await this.sendReply(chatId, result.text)
   }
 
+  private async handleSkillCommand(chatId: number, userId: number, prompt: string, engineCtx: EngineContext) {
+    const session = await this.getSession(userId)
+    const result = await engineCtx.engine.askWithSession(prompt, session, {
+      commandContext: this.buildCommandContext(engineCtx, userId, 'telegram-command'),
+    })
+    await this.sendReply(chatId, result.text)
+  }
+
   private async sendSettingsMenu(chatId: number) {
     const aiConfig = await readAIConfig()
     const ccLabel = aiConfig.backend === 'claude-code' ? '> Claude Code' : 'Claude Code'
@@ -369,6 +385,11 @@ export class TelegramPlugin implements Plugin {
 
   private buildPrompt(message: ParsedMessage): string | null {
     const parts: string[] = []
+
+    // Preserve slash commands exactly so local command routing still matches.
+    if (message.text?.trim().startsWith('/')) {
+      return message.text.trim()
+    }
 
     if (message.from.firstName) {
       parts.push(`[From: ${message.from.firstName}${message.from.username ? ` (@${message.from.username})` : ''}]`)

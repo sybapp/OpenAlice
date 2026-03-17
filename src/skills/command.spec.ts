@@ -5,12 +5,14 @@ import type { SessionEntry, SessionStore } from '../core/session.js'
 
 vi.mock('./registry.js', () => ({
   listSkillPacks: vi.fn(async () => [
-    { id: 'ta-brooks', label: 'Brooks Price Action' },
-    { id: 'ta-ict-smc', label: 'ICT / SMC' },
+    { id: 'ta-brooks', label: 'Brooks Price Action', userInvocable: true },
+    { id: 'ta-ict-smc', label: 'ICT / SMC', userInvocable: true },
+    { id: 'trader-risk-check', label: 'Trader Risk Check', userInvocable: false },
   ]),
   getSkillPack: vi.fn(async (id: string) => {
-    if (id === 'ta-brooks') return { id: 'ta-brooks', label: 'Brooks Price Action' }
-    if (id === 'ta-ict-smc') return { id: 'ta-ict-smc', label: 'ICT / SMC' }
+    if (id === 'ta-brooks') return { id: 'ta-brooks', label: 'Brooks Price Action', userInvocable: true }
+    if (id === 'ta-ict-smc') return { id: 'ta-ict-smc', label: 'ICT / SMC', userInvocable: true }
+    if (id === 'trader-risk-check') return { id: 'trader-risk-check', label: 'Trader Risk Check', userInvocable: false }
     return null
   }),
 }))
@@ -55,12 +57,14 @@ function makeSession(entries: SessionEntry[] = []): SessionStore {
 }
 
 describe('skill command', () => {
-  it('lists bundled skills', async () => {
+  it('lists only user-invocable skills', async () => {
     const session = makeSession()
     const result = await handleSkillCommand('/skill list', session)
 
     expect(result.handled).toBe(true)
     expect(result.text).toContain('Available skills:')
+    expect(result.text).toContain('ta-brooks')
+    expect(result.text).not.toContain('trader-risk-check')
   })
 
   it('persists and clears the active skill through session markers', async () => {
@@ -71,5 +75,15 @@ describe('skill command', () => {
     await handleSkillCommand('/skill ta-ict-smc', session)
 
     expect(getSessionSkillIdFromEntries(await session.readAll())).toBe('ta-ict-smc')
+  })
+
+  it('rejects pipeline-only skills from manual activation', async () => {
+    const session = makeSession()
+
+    const result = await handleSkillCommand('/skill trader-risk-check', session)
+
+    expect(result.handled).toBe(true)
+    expect(result.text).toContain('pipeline-only')
+    expect(getSessionSkillIdFromEntries(await session.readAll())).toBeNull()
   })
 })

@@ -21,6 +21,7 @@ import {
 import { getTraderStrategy } from './strategy.js'
 import type {
   TraderDecision,
+  TraderPlannedOrder,
   TraderReviewResult,
   TraderRunnerDeps,
   TraderRunnerResult,
@@ -59,7 +60,12 @@ function parseStageOutput<T>(text: string, schema: { parse: (value: unknown) => 
 
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>
-    const output = parsed.type === 'complete' && 'output' in parsed ? parsed.output : parsed
+    const wrappedText = parsed.text
+    const output = parsed.type === 'complete' && 'output' in parsed
+      ? parsed.output
+      : wrappedText && typeof wrappedText === 'object' && (wrappedText as Record<string, unknown>).type === 'complete' && 'output' in (wrappedText as Record<string, unknown>)
+        ? (wrappedText as Record<string, unknown>).output
+        : parsed
     return schema.parse(output)
   } catch {
     return null
@@ -161,6 +167,24 @@ function buildSkipResult(reason: string, rawText: string): TraderRunnerResult {
     reason,
     rawText,
   }
+}
+
+function summarizePlannedOrder(order: TraderPlannedOrder): string {
+  const size = order.qty !== undefined
+    ? `qty=${order.qty}`
+    : order.notional !== undefined
+      ? `notional=${order.notional}`
+      : 'size=broker-default'
+  const trigger = order.stopPrice !== undefined
+    ? ` stop=${order.stopPrice}`
+    : order.price !== undefined
+      ? ` price=${order.price}`
+      : ''
+  const reduceOnly = order.reduceOnly ? ' reduceOnly' : ''
+  const protection = order.protection
+    ? ` | protection: SL ${order.protection.stopLossPrice ?? order.protection.stopLossPct ?? '-'} / TP ${order.protection.takeProfitPrice ?? order.protection.takeProfitPct ?? '-'}${order.protection.takeProfitSizeRatio !== undefined ? ` (ratio=${order.protection.takeProfitSizeRatio})` : ''}`
+    : ''
+  return `${order.side.toUpperCase()} ${order.type} ${order.symbol} ${size}${trigger}${reduceOnly}${protection}`.trim()
 }
 
 export async function runTraderJob(
@@ -287,7 +311,10 @@ export async function runTraderJob(
     chosenScenario: plan.output.chosenScenario,
     rationale: execute.output.rationale,
     invalidation: plan.output.invalidation,
-    actionsTaken: [`Executed deterministic trade plan: ${plan.output.commitMessage}`],
+    actionsTaken: [
+      `Executed deterministic trade plan: ${plan.output.commitMessage}`,
+      ...plan.output.orders.map((order) => summarizePlannedOrder(order)),
+    ],
     brainUpdate,
   }
 
