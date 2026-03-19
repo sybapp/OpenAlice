@@ -228,6 +228,50 @@ describe('trader listener', () => {
     })
   })
 
+  it('does not notify or emit trader.done when the runner skips an all-rejected execution', async () => {
+    const doneEvents: EventLogEntry[] = []
+    const skipEvents: EventLogEntry[] = []
+    const notify = vi.fn(async () => ({ delivered: true, channel: 'telegram' as const }))
+    runTraderJob.mockResolvedValue({
+      status: 'skip',
+      reason: 'Execution failed: 2 order(s) were rejected.',
+      rawText: '{"ok":false}',
+    })
+    eventLog.subscribeType('trader.done', (entry) => doneEvents.push(entry))
+    eventLog.subscribeType('trader.skip', (entry) => skipEvents.push(entry))
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-skip',
+      jobName: 'BTCUSDT Auto Execution',
+      strategyId: 'btcusdt-auto-execution',
+    })
+
+    await vi.waitFor(() => expect(skipEvents).toHaveLength(1))
+
+    expect(notify).not.toHaveBeenCalled()
+    expect(doneEvents).toHaveLength(0)
+    expect(skipEvents[0].payload).toMatchObject({
+      jobId: 'job-skip',
+      strategyId: 'btcusdt-auto-execution',
+      reason: 'Execution failed: 2 order(s) were rejected.',
+      notified: false,
+    })
+  })
+
   it('notifies through connectorCenter when a trader job errors', async () => {
     const errorEvents: EventLogEntry[] = []
     const notify = vi.fn(async () => ({ delivered: true, channel: 'telegram' as const }))

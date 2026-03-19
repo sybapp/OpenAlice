@@ -613,6 +613,106 @@ describe('runTraderJob', () => {
     ])
   })
 
+  it('returns skip when deterministic execution rejects every order', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({
+        commit: { hash: 'abc12345' },
+        pushed: {
+          filled: [],
+          pending: [],
+          rejected: [
+            { status: 'rejected', orderId: 'ord-1', error: 'post only would cross' },
+            { status: 'rejected', orderId: 'ord-2', error: 'insufficient margin' },
+          ],
+        },
+        commitDetails: {
+          results: [
+            { status: 'rejected', orderId: 'ord-1', error: 'post only would cross' },
+            { status: 'rejected', orderId: 'ord-2', error: 'insufficient margin' },
+          ],
+        },
+      })),
+    })
+
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount({ positions: [] }))
+    deps.engine.askWithSession
+      .mockResolvedValueOnce(complete({
+        candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        summary: 'one good candidate',
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'thesis_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'long',
+        chosenScenario: 'ladder breakout',
+        alternateScenario: 'range failure',
+        rationale: 'Trend and pullback context align.',
+        invalidation: ['loss of breakout level'],
+        confidence: 0.74,
+        contextNotes: [],
+      }))
+      .mockResolvedValueOnce(complete({
+        verdict: 'pass',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Risk budget is available.',
+        maxRiskPercent: 0.5,
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'plan_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'ladder breakout',
+        rationale: 'Trend and pullback context align.',
+        invalidation: ['loss of breakout level'],
+        commitMessage: 'momentum: ladder breakout BTC/USDT:USDT',
+        brainUpdate: 'Stagger entries only.',
+        orders: [
+          {
+            aliceId: 'bybit-BTCUSDT-entry-1',
+            symbol: 'BTC/USDT:USDT',
+            side: 'buy',
+            type: 'stop',
+            qty: 1,
+            stopPrice: 100,
+            timeInForce: 'day',
+          },
+          {
+            aliceId: 'bybit-BTCUSDT-entry-2',
+            symbol: 'BTC/USDT:USDT',
+            side: 'buy',
+            type: 'stop',
+            qty: 1,
+            stopPrice: 101,
+            timeInForce: 'day',
+          },
+        ],
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'execute',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Confirm execution.',
+        brainUpdate: 'Execute if both ladder levels still make sense.',
+      }))
+
+    const result = await runTraderJob({
+      jobId: 'job-all-rejected',
+      strategyId: 'momentum',
+      session: { id: 'session-all-rejected' } as SessionStore,
+    }, deps)
+
+    expect(result).toMatchObject({
+      status: 'skip',
+      reason: 'Execution failed: 2 order(s) were rejected.',
+    })
+    expect(result.decision).toBeUndefined()
+    expect(result.rawText).toContain('insufficient margin')
+  })
+
   it('returns skip when the thesis stage rejects the setup', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()

@@ -308,6 +308,8 @@ function buildExecutionOutcome(plan: TraderTradePlanReadyResult, executionResult
   return {
     rationale,
     actionsTaken,
+    filledCount: filled,
+    pendingCount: pending,
     rejectedCount: rejected,
   }
 }
@@ -416,6 +418,14 @@ async function runCandidatePipeline(params: {
   })
 
   const executionOutcome = buildExecutionOutcome(plan.output, executionResult, execute.output.rationale)
+  if (executionOutcome.rejectedCount > 0 && executionOutcome.filledCount === 0 && executionOutcome.pendingCount === 0) {
+    return {
+      status: 'skip' as const,
+      reason: executionOutcome.rationale,
+      rawText: JSON.stringify(executionResult, null, 2),
+    }
+  }
+
   const decision: TraderDecision = {
     status: 'trade',
     strategyId: strategy.id,
