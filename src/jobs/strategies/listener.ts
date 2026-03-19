@@ -47,7 +47,7 @@ function formatTraderDoneNotification(payload: TraderFirePayload, decision: Trad
 export function createTraderListener(opts: TraderListenerOpts): TraderListener {
   const sessions = new Map<string, SessionStore>()
   let unsubscribe: (() => void) | null = null
-  let processing = false
+  const processingStrategies = new Set<string>()
   const inFlight = new Set<Promise<void>>()
 
   async function getSession(jobId: string): Promise<SessionStore> {
@@ -61,16 +61,16 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
 
   async function handleFire(entry: EventLogEntry): Promise<void> {
     const payload = entry.payload as TraderFirePayload
-    if (processing) {
+    if (processingStrategies.has(payload.strategyId)) {
       await opts.eventLog.append('trader.skip', {
         jobId: payload.jobId,
         strategyId: payload.strategyId,
-        reason: 'overlap — previous trader job still processing',
+        reason: 'overlap — same strategy is already processing',
       })
       return
     }
 
-    processing = true
+    processingStrategies.add(payload.strategyId)
     const startMs = Date.now()
     try {
       const session = await getSession(payload.jobId)
@@ -110,7 +110,7 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
         channel: delivered.channel,
       })
     } finally {
-      processing = false
+      processingStrategies.delete(payload.strategyId)
     }
   }
 

@@ -87,6 +87,91 @@ describe('trader listener', () => {
     })
   })
 
+  it('allows different strategies to run concurrently', async () => {
+    const gateA = deferred<{ status: 'done'; reason: string }>()
+    const gateB = deferred<{ status: 'done'; reason: string }>()
+    runTraderJob
+      .mockReturnValueOnce(gateA.promise)
+      .mockReturnValueOnce(gateB.promise)
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify: vi.fn() } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await Promise.all([
+      eventLog.append('trader.fire', {
+        jobId: 'job-a',
+        jobName: 'Momentum',
+        strategyId: 'momentum',
+      }),
+      eventLog.append('trader.fire', {
+        jobId: 'job-b',
+        jobName: 'Mean Reversion',
+        strategyId: 'mean-reversion',
+      }),
+    ])
+
+    await vi.waitFor(() => expect(runTraderJob).toHaveBeenCalledTimes(2))
+
+    gateA.resolve({ status: 'done', reason: 'momentum done' })
+    gateB.resolve({ status: 'done', reason: 'mean reversion done' })
+    await listener.stop()
+  })
+
+  it('skips overlapping fires for the same strategy only', async () => {
+    const gate = deferred<{ status: 'done'; reason: string }>()
+    const skipEvents: EventLogEntry[] = []
+    runTraderJob.mockReturnValue(gate.promise)
+    eventLog.subscribeType('trader.skip', (entry) => skipEvents.push(entry))
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify: vi.fn() } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-a',
+      jobName: 'Momentum',
+      strategyId: 'momentum',
+    })
+    await vi.waitFor(() => expect(runTraderJob).toHaveBeenCalledOnce())
+
+    await eventLog.append('trader.fire', {
+      jobId: 'job-b',
+      jobName: 'Momentum backup',
+      strategyId: 'momentum',
+    })
+
+    await vi.waitFor(() => expect(skipEvents).toHaveLength(1))
+    expect(skipEvents[0].payload).toMatchObject({
+      jobId: 'job-b',
+      strategyId: 'momentum',
+      reason: 'overlap — same strategy is already processing',
+    })
+
+    gate.resolve({ status: 'done', reason: 'completed cleanly' })
+    await listener.stop()
+  })
+
   it('notifies through connectorCenter when a trader job completes a trade plan', async () => {
     const doneEvents: EventLogEntry[] = []
     const notify = vi.fn(async () => ({ delivered: true, channel: 'telegram' as const }))
@@ -101,7 +186,7 @@ describe('trader listener', () => {
         chosenScenario: 'short breakdown continuation',
         rationale: 'Execution confirmed.',
         invalidation: ['reclaim 75134.8'],
-        actionsTaken: ['SELL stop BTC/USDT:USDT qty=0.02 stop=75134.8 | protection: SL 75471.03 / TP 74880'],
+        actionsTaken: ['SELL stop BTC/USDT:USDT qty=0.02 stop=75134.8 -> pending (ord-1)'],
         brainUpdate: '',
       },
       rawText: '{"ok":true}',

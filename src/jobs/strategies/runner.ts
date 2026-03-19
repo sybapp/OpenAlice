@@ -9,7 +9,7 @@ import {
   traderTradeThesisSchema,
 } from '../../skills/completion-schemas.js'
 import { getSkillScript } from '../../skills/script-registry.js'
-import { computeTradingStats } from '../../domains/trading/stats.js'
+import type { AccountInfo, MarketClock, Order, Position } from '../../domains/trading/interfaces.js'
 import {
   buildMarketScanPrompt,
   buildRiskCheckPrompt,
@@ -21,11 +21,13 @@ import {
 import { getTraderStrategy } from './strategy.js'
 import type {
   TraderDecision,
+  TraderMarketCandidate,
   TraderPlannedOrder,
   TraderReviewResult,
   TraderRunnerDeps,
   TraderRunnerResult,
   TraderStrategy,
+  TraderTradePlanReadyResult,
 } from './types.js'
 
 const TRADER_SKILLS = {
@@ -36,6 +38,22 @@ const TRADER_SKILLS = {
   tradeExecute: 'trader-trade-execute',
   tradeReview: 'trader-trade-review',
 } as const
+
+interface TraderSourceSnapshot {
+  source: string
+  account: AccountInfo | null
+  positions: Position[]
+  orders: Order[]
+  marketClock?: MarketClock
+}
+
+interface TraderPreflightSnapshot {
+  frontalLobe: string
+  warnings: string[]
+  exposurePercent: number
+  totalPositions: number
+  sourceSnapshots: TraderSourceSnapshot[]
+}
 
 function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(10_000, value)) : 0
@@ -72,7 +90,7 @@ function parseStageOutput<T>(text: string, schema: { parse: (value: unknown) => 
   }
 }
 
-async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunnerDeps) {
+async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunnerDeps): Promise<TraderPreflightSnapshot> {
   const frontalLobe = deps.brain.getFrontalLobe()
   const warnings: string[] = []
   let totalExposurePercent = 0
@@ -187,6 +205,237 @@ function summarizePlannedOrder(order: TraderPlannedOrder): string {
   return `${order.side.toUpperCase()} ${order.type} ${order.symbol} ${size}${trigger}${reduceOnly}${protection}`.trim()
 }
 
+function getSourceSnapshot(snapshot: TraderPreflightSnapshot, source: string): TraderSourceSnapshot | undefined {
+  return snapshot.sourceSnapshots.find((entry) => entry.source === source)
+}
+
+function getPositionKey(position: Position): string {
+  return position.contract.symbol ?? position.contract.aliceId ?? ''
+}
+
+function estimateOrderExposurePercent(order: TraderPlannedOrder, sourceSnapshot: TraderSourceSnapshot | undefined): number | null {
+  const equity = sourceSnapshot?.account?.equity ?? 0
+  if (equity <= 0 || order.reduceOnly) return null
+
+  const referencePrice = order.price
+    ?? order.stopPrice
+    ?? sourceSnapshot?.positions.find((position) => getPositionKey(position) === order.symbol)?.currentPrice
+  const notional = order.notional ?? (order.qty !== undefined && referencePrice !== undefined ? order.qty * referencePrice : undefined)
+  if (notional === undefined) return null
+
+  return clampPercent(notional / equity * 100)
+}
+
+function getHardRiskBudgetViolation(
+  strategy: TraderStrategy,
+  snapshot: TraderPreflightSnapshot,
+  plan: TraderTradePlanReadyResult,
+): string | null {
+  const additiveOrders = plan.orders.filter((order) => !order.reduceOnly)
+  if (additiveOrders.length === 0) return null
+
+  const sourceSnapshot = getSourceSnapshot(snapshot, plan.source)
+  const heldSymbolsOnSource = new Set(
+    (sourceSnapshot?.positions ?? []).map((position) => getPositionKey(position)).filter(Boolean),
+  )
+  const opensNewPosition = additiveOrders.some((order) => !heldSymbolsOnSource.has(order.symbol))
+
+  if (opensNewPosition && snapshot.totalPositions >= strategy.riskBudget.maxPositions) {
+    return `Hard risk gate blocked execution: current positions ${snapshot.totalPositions} already meet/exceed maxPositions ${strategy.riskBudget.maxPositions}.`
+  }
+
+  if (snapshot.exposurePercent >= strategy.riskBudget.maxGrossExposurePercent) {
+    return `Hard risk gate blocked execution: current gross exposure ${snapshot.exposurePercent.toFixed(2)}% already meets/exceeds maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`
+  }
+
+  const estimatedAddedExposure = additiveOrders.reduce((sum, order) => {
+    const estimate = estimateOrderExposurePercent(order, sourceSnapshot)
+    return sum + (estimate ?? 0)
+  }, 0)
+
+  if (estimatedAddedExposure > 0 && snapshot.exposurePercent + estimatedAddedExposure > strategy.riskBudget.maxGrossExposurePercent) {
+    return `Hard risk gate blocked execution: projected gross exposure ${(snapshot.exposurePercent + estimatedAddedExposure).toFixed(2)}% would exceed maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`
+  }
+
+  return null
+}
+
+function summarizeExecutionAction(order: TraderPlannedOrder, result: Record<string, unknown> | undefined): string {
+  const summary = summarizePlannedOrder(order)
+  if (!result) return `${summary} -> submitted`
+
+  const status = typeof result.status === 'string' ? result.status : 'unknown'
+  const orderId = typeof result.orderId === 'string' ? result.orderId : undefined
+  const error = typeof result.error === 'string' ? result.error : undefined
+  const filledPrice = typeof result.filledPrice === 'number' ? result.filledPrice : undefined
+
+  if (status === 'filled') {
+    return `${summary} -> filled${filledPrice !== undefined ? ` @${filledPrice}` : ''}${orderId ? ` (${orderId})` : ''}`
+  }
+  if (status === 'pending') {
+    return `${summary} -> pending${orderId ? ` (${orderId})` : ''}`
+  }
+  if (status === 'rejected') {
+    return `${summary} -> rejected${error ? `: ${error}` : ''}`
+  }
+  return `${summary} -> ${status}${orderId ? ` (${orderId})` : ''}`
+}
+
+function buildExecutionOutcome(plan: TraderTradePlanReadyResult, executionResult: unknown, fallbackRationale: string) {
+  const executionRecord = executionResult as Record<string, unknown>
+  const pushed = (executionRecord.pushed ?? {}) as Record<string, unknown>
+  const commit = (executionRecord.commit ?? {}) as Record<string, unknown>
+  const commitDetails = executionRecord.commitDetails as Record<string, unknown> | null | undefined
+  const commitHash = typeof commit.hash === 'string' ? commit.hash : undefined
+  const commitResults = Array.isArray(commitDetails?.results) ? commitDetails.results as Array<Record<string, unknown>> : []
+  const filled = Array.isArray(pushed.filled) ? pushed.filled.length : 0
+  const pending = Array.isArray(pushed.pending) ? pushed.pending.length : 0
+  const rejected = Array.isArray(pushed.rejected) ? pushed.rejected.length : 0
+
+  const rationale = rejected > 0
+    ? filled === 0 && pending === 0
+      ? `Execution failed: ${rejected} order(s) were rejected.`
+      : `Execution completed with issues: ${filled} filled, ${pending} pending, ${rejected} rejected.`
+    : pending > 0
+      ? `Execution confirmed: ${filled} filled, ${pending} pending.`
+      : fallbackRationale
+
+  const actionsTaken = [
+    `Executed deterministic trade plan: ${plan.commitMessage}${commitHash ? ` (${commitHash})` : ''}`,
+    ...plan.orders.map((order, index) => summarizeExecutionAction(order, commitResults[index])),
+  ]
+
+  return {
+    rationale,
+    actionsTaken,
+    rejectedCount: rejected,
+  }
+}
+
+async function runCandidatePipeline(params: {
+  strategy: TraderStrategy
+  candidate: TraderMarketCandidate
+  preflightSnapshot: TraderPreflightSnapshot
+  session: SessionStore
+  deps: TraderRunnerDeps
+}) {
+  const { strategy, candidate, preflightSnapshot, session, deps } = params
+
+  const thesis = await runSkillStage({
+    session,
+    skillId: TRADER_SKILLS.tradeThesis,
+    prompt: buildTradeThesisPrompt(strategy, candidate, preflightSnapshot),
+    schema: traderTradeThesisSchema,
+    deps,
+    skillContext: { strategy, candidate, snapshot: preflightSnapshot, stage: 'trade-thesis' },
+  })
+
+  if (thesis.output.status === 'no_trade') {
+    updateBrainIfPresent(deps, ...thesis.output.contextNotes)
+    return buildSkipResult(thesis.output.rationale, thesis.rawText)
+  }
+
+  // Risk review must use a fresh account snapshot because the earlier AI stages may take minutes.
+  const riskSnapshot = await buildPreflightSnapshot(strategy, deps)
+  if (riskSnapshot.warnings.some((warning) => warning.includes('not available'))) {
+    return { fatal: buildSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText) }
+  }
+
+  const risk = await runSkillStage({
+    session,
+    skillId: TRADER_SKILLS.riskCheck,
+    prompt: buildRiskCheckPrompt(strategy, thesis.output, riskSnapshot),
+    schema: traderRiskCheckSchema,
+    deps,
+    skillContext: { strategy, thesis: thesis.output, snapshot: riskSnapshot, stage: 'risk-check' },
+  })
+
+  if (risk.output.verdict !== 'pass') {
+    return buildSkipResult(risk.output.rationale, risk.rawText)
+  }
+
+  const plan = await runSkillStage({
+    session,
+    skillId: TRADER_SKILLS.tradePlan,
+    prompt: buildTradePlanPrompt(strategy, thesis.output, risk.output),
+    schema: traderTradePlanSchema,
+    deps,
+    skillContext: { strategy, thesis: thesis.output, risk: risk.output, stage: 'trade-plan' },
+  })
+
+  if (plan.output.status !== 'plan_ready' || plan.output.orders.length === 0) {
+    updateBrainIfPresent(deps, plan.output.brainUpdate)
+    return buildSkipResult(plan.output.rationale, plan.rawText)
+  }
+
+  const hardRiskBlock = getHardRiskBudgetViolation(strategy, riskSnapshot, plan.output)
+  if (hardRiskBlock) {
+    updateBrainIfPresent(deps, plan.output.brainUpdate)
+    return buildSkipResult(hardRiskBlock, plan.rawText)
+  }
+
+  const execute = await runSkillStage({
+    session,
+    skillId: TRADER_SKILLS.tradeExecute,
+    prompt: buildTradeExecutePrompt(strategy, plan.output),
+    schema: traderTradeExecuteSchema,
+    deps,
+    skillContext: { strategy, plan: plan.output, stage: 'trade-execute' },
+  })
+
+  if (execute.output.status !== 'execute') {
+    updateBrainIfPresent(deps, execute.output.brainUpdate)
+    return buildSkipResult(execute.output.rationale, execute.rawText)
+  }
+
+  const executeScript = getSkillScript('trader-execute-plan')
+  if (!executeScript) {
+    throw new Error('Missing trader-execute-plan script')
+  }
+
+  const brainUpdate = updateBrainIfPresent(deps, plan.output.brainUpdate, execute.output.brainUpdate)
+
+  const executionResult = await executeScript.run({
+    config: deps.config,
+    eventLog: deps.eventLog,
+    brain: deps.brain,
+    accountManager: deps.accountManager,
+    marketData: deps.marketData,
+    ohlcvStore: deps.ohlcvStore,
+    newsStore: deps.newsStore,
+    getAccountGit: deps.getAccountGit,
+    invocation: {
+      strategy,
+      plan: plan.output,
+      stage: 'trade-execute-script',
+    },
+  }, {
+    source: plan.output.source,
+    commitMessage: plan.output.commitMessage,
+    orders: plan.output.orders,
+  })
+
+  const executionOutcome = buildExecutionOutcome(plan.output, executionResult, execute.output.rationale)
+  const decision: TraderDecision = {
+    status: 'trade',
+    strategyId: strategy.id,
+    source: plan.output.source,
+    symbol: plan.output.symbol,
+    chosenScenario: plan.output.chosenScenario,
+    rationale: executionOutcome.rationale,
+    invalidation: plan.output.invalidation,
+    actionsTaken: executionOutcome.actionsTaken,
+    brainUpdate,
+  }
+
+  return {
+    status: 'done' as const,
+    reason: decision.rationale,
+    decision,
+    rawText: JSON.stringify(executionResult, null, 2),
+  }
+}
+
 export async function runTraderJob(
   params: { jobId: string; strategyId: string; session: SessionStore },
   deps: TraderRunnerDeps,
@@ -213,8 +462,7 @@ export async function runTraderJob(
     skillContext: { strategy, snapshot, stage: 'market-scan' },
   })
 
-  const candidate = scan.output.candidates[0]
-  if (!candidate) {
+  if (scan.output.candidates.length === 0) {
     return {
       status: 'skip',
       reason: scan.output.summary || 'No tradable candidate found.',
@@ -222,108 +470,31 @@ export async function runTraderJob(
     }
   }
 
-  const thesis = await runSkillStage({
-    session: params.session,
-    skillId: TRADER_SKILLS.tradeThesis,
-    prompt: buildTradeThesisPrompt(strategy, candidate, snapshot),
-    schema: traderTradeThesisSchema,
-    deps,
-    skillContext: { strategy, candidate, snapshot, stage: 'trade-thesis' },
-  })
-
-  if (thesis.output.status === 'no_trade') {
-    updateBrainIfPresent(deps, ...thesis.output.contextNotes)
-    return buildSkipResult(thesis.output.rationale, thesis.rawText)
+  let lastSkip: TraderRunnerResult = {
+    status: 'skip',
+    reason: scan.output.summary || 'No tradable candidate survived the pipeline.',
+    rawText: scan.rawText,
   }
 
-  const risk = await runSkillStage({
-    session: params.session,
-    skillId: TRADER_SKILLS.riskCheck,
-    prompt: buildRiskCheckPrompt(strategy, thesis.output, snapshot),
-    schema: traderRiskCheckSchema,
-    deps,
-    skillContext: { strategy, thesis: thesis.output, snapshot, stage: 'risk-check' },
-  })
-
-  if (risk.output.verdict !== 'pass') {
-    return buildSkipResult(risk.output.rationale, risk.rawText)
-  }
-
-  const plan = await runSkillStage({
-    session: params.session,
-    skillId: TRADER_SKILLS.tradePlan,
-    prompt: buildTradePlanPrompt(strategy, thesis.output, risk.output),
-    schema: traderTradePlanSchema,
-    deps,
-    skillContext: { strategy, thesis: thesis.output, risk: risk.output, stage: 'trade-plan' },
-  })
-
-  if (plan.output.status !== 'plan_ready' || plan.output.orders.length === 0) {
-    updateBrainIfPresent(deps, plan.output.brainUpdate)
-    return buildSkipResult(plan.output.rationale, plan.rawText)
-  }
-
-  const execute = await runSkillStage({
-    session: params.session,
-    skillId: TRADER_SKILLS.tradeExecute,
-    prompt: buildTradeExecutePrompt(strategy, plan.output),
-    schema: traderTradeExecuteSchema,
-    deps,
-    skillContext: { strategy, plan: plan.output, stage: 'trade-execute' },
-  })
-
-  if (execute.output.status !== 'execute') {
-    updateBrainIfPresent(deps, execute.output.brainUpdate)
-    return buildSkipResult(execute.output.rationale, execute.rawText)
-  }
-
-  const executeScript = getSkillScript('trader-execute-plan')
-  if (!executeScript) {
-    throw new Error('Missing trader-execute-plan script')
-  }
-  const executionResult = await executeScript.run({
-    config: deps.config,
-    eventLog: deps.eventLog,
-    brain: deps.brain,
-    accountManager: deps.accountManager,
-    marketData: deps.marketData,
-    ohlcvStore: deps.ohlcvStore,
-    newsStore: deps.newsStore,
-    getAccountGit: deps.getAccountGit,
-    invocation: {
+  for (const candidate of scan.output.candidates) {
+    const result = await runCandidatePipeline({
       strategy,
-      plan: plan.output,
-      stage: 'trade-execute-script',
-    },
-  }, {
-    source: plan.output.source,
-    commitMessage: plan.output.commitMessage,
-    orders: plan.output.orders,
-  })
+      candidate,
+      preflightSnapshot: snapshot,
+      session: params.session,
+      deps,
+    })
 
-  const brainUpdate = updateBrainIfPresent(deps, plan.output.brainUpdate, execute.output.brainUpdate)
-
-  const decision: TraderDecision = {
-    status: 'trade',
-    strategyId: strategy.id,
-    source: plan.output.source,
-    symbol: plan.output.symbol,
-    chosenScenario: plan.output.chosenScenario,
-    rationale: execute.output.rationale,
-    invalidation: plan.output.invalidation,
-    actionsTaken: [
-      `Executed deterministic trade plan: ${plan.output.commitMessage}`,
-      ...plan.output.orders.map((order) => summarizePlannedOrder(order)),
-    ],
-    brainUpdate,
+    if ('fatal' in result) {
+      return result.fatal
+    }
+    if (result.status === 'done') {
+      return result
+    }
+    lastSkip = result
   }
 
-  return {
-    status: 'done',
-    reason: decision.rationale,
-    decision,
-    rawText: JSON.stringify(executionResult, null, 2),
-  }
+  return lastSkip
 }
 
 export async function runTraderReview(

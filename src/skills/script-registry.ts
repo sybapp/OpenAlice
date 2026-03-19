@@ -613,8 +613,9 @@ const scripts = [
 
       const commit = git.commit(input.commitMessage)
       const pushed = await git.push({ mode: 'best-effort' })
+      const commitDetails = git.show(commit.hash)
 
-      return { staged, commit, pushed }
+      return { staged, commit, pushed, commitDetails }
     },
   },
 ] satisfies SkillScriptModule[]
