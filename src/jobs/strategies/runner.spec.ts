@@ -412,6 +412,81 @@ describe('runTraderJob', () => {
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not overtrade a full book.')
   })
 
+  it('treats the same symbol on another source as a new position for maxPositions', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      sources: ['ccxt-main', 'ccxt-hedge'],
+      riskBudget: { ...baseStrategy.riskBudget, maxPositions: 1 },
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockImplementation((source: string) => {
+      if (source === 'ccxt-main') {
+        return makeAccount({
+          positions: [{ symbol: 'BTC/USDT:USDT', marketValue: 200, currentPrice: 200 }],
+        })
+      }
+      if (source === 'ccxt-hedge') {
+        return makeAccount({ positions: [] })
+      }
+      return undefined
+    })
+    deps.engine.askWithSession
+      .mockResolvedValueOnce(complete({
+        candidates: [{ source: 'ccxt-hedge', symbol: 'BTC/USDT:USDT', reason: 'hedge venue has the setup' }],
+        summary: 'one good candidate',
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'thesis_ready',
+        source: 'ccxt-hedge',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'long',
+        chosenScenario: 'secondary venue breakout',
+        alternateScenario: 'range failure',
+        rationale: 'Setup is valid on the hedge venue.',
+        invalidation: ['loss of breakout level'],
+        confidence: 0.74,
+        contextNotes: [],
+      }))
+      .mockResolvedValueOnce(complete({
+        verdict: 'pass',
+        source: 'ccxt-hedge',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Risk budget is available.',
+        maxRiskPercent: 0.5,
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'plan_ready',
+        source: 'ccxt-hedge',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'secondary venue breakout',
+        rationale: 'Setup is valid on the hedge venue.',
+        invalidation: ['loss of breakout level'],
+        commitMessage: 'momentum: secondary venue breakout BTC/USDT:USDT',
+        brainUpdate: 'Do not bypass the max position cap across venues.',
+        orders: [{
+          aliceId: 'hedge-BTCUSDT',
+          symbol: 'BTC/USDT:USDT',
+          side: 'buy',
+          type: 'stop',
+          qty: 1,
+          stopPrice: 100,
+          timeInForce: 'day',
+        }],
+      }))
+
+    const result = await runTraderJob({
+      jobId: 'job-cross-source-max-positions',
+      strategyId: 'momentum',
+      session: { id: 'session-cross-source-max-positions' } as SessionStore,
+    }, deps)
+
+    expect(result.status).toBe('skip')
+    expect(result.reason).toContain('Hard risk gate blocked execution: current positions 1 already meet/exceed maxPositions 1.')
+    expect(deps.engine.askWithSession).toHaveBeenCalledTimes(4)
+    expect(mocks.getSkillScript).not.toHaveBeenCalled()
+    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not bypass the max position cap across venues.')
+  })
+
   it('persists the combined brain update before the execution script runs', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     mocks.getSkillScript.mockReturnValue({
