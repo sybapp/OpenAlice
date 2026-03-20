@@ -217,10 +217,20 @@ export function buildTraderReviewPrompt(strategy: TraderStrategy | null, sources
     `Sources: ${sources.join(', ')}`,
     '',
     'Goal: summarize recent trading outcomes, highlight discipline wins/failures, and return a Brain update.',
+    strategy
+      ? 'If the strategy rules should be refreshed, you may return a strategyPatch. Only update behaviorRules.preferences and behaviorRules.prohibitions. Put any refreshed price levels inside those text rules. Do not modify riskBudget, executionPolicy, sources, universe, or timeframes.'
+      : 'For global reviews, do not return a strategyPatch.',
     'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
       summary: 'short review summary',
       brainUpdate: 'frontal lobe update text',
+      strategyPatch: strategy ? {
+        behaviorRules: {
+          preferences: ['long only after a 5m close above the breakout level and hold above it on the next candle'],
+          prohibitions: ['do not keep the breakout if price returns to the decision zone within 30 minutes'],
+        },
+      } : undefined,
+      patchSummary: strategy ? 'Refreshed breakout and false-breakout discipline levels in behavior rules.' : undefined,
     } satisfies TraderTradeReviewSummary, null, 2),
   ].join('\n')
 }

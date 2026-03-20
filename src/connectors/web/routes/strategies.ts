@@ -2,7 +2,15 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { EngineContext } from '../../../core/types.js'
 import type { CronSchedule } from '../../../jobs/cron/engine.js'
-import { listTraderStrategySummaries, getTraderStrategy } from '../../../jobs/strategies/index.js'
+import {
+  createTraderStrategy,
+  generateTraderStrategyDraft,
+  getTraderStrategy,
+  listTraderStrategySummaries,
+  listTraderStrategyTemplates,
+  updateTraderStrategy,
+} from '../../../jobs/strategies/index.js'
+import type { TraderStrategy, TraderStrategyGenerateInput } from '../../../jobs/strategies/index.js'
 
 type ScheduleInput = { kind: string; at?: string; every?: string; cron?: string }
 type TraderJobInput = {
@@ -11,6 +19,7 @@ type TraderJobInput = {
   schedule?: ScheduleInput
   enabled?: boolean
 }
+type TraderStrategyCreateInput = TraderStrategy
 
 function jsonError(c: Context, err: unknown, status = 500) {
   return c.json({ error: String(err) }, status as any)
@@ -34,6 +43,10 @@ function asSchedule(schedule?: ScheduleInput): CronSchedule | undefined {
 export function createStrategiesRoutes(ctx: EngineContext) {
   const app = new Hono()
 
+  app.get('/templates', (c) => {
+    return c.json({ templates: listTraderStrategyTemplates() })
+  })
+
   app.get('/strategies', async (c) => {
     try {
       return c.json({ strategies: await listTraderStrategySummaries() })
@@ -51,6 +64,47 @@ export function createStrategiesRoutes(ctx: EngineContext) {
       return c.json(strategy)
     } catch (err) {
       return jsonError(c, err)
+    }
+  })
+
+  app.post('/strategies', async (c) => {
+    try {
+      const body = await c.req.json<TraderStrategyCreateInput>()
+      return c.json(await createTraderStrategy(body))
+    } catch (err) {
+      return jsonError(c, err, 400)
+    }
+  })
+
+  app.put('/strategies/:id', async (c) => {
+    try {
+      const body = await c.req.json<TraderStrategyCreateInput>()
+      const result = await updateTraderStrategy(c.req.param('id'), body)
+      await ctx.eventLog.append('strategy.updated', {
+        strategyId: result.strategy.id,
+        source: 'manual',
+        summary: result.changeReport.summary,
+        changedFields: result.changeReport.changedFields,
+        yamlDiff: result.changeReport.yamlDiff,
+      })
+      return c.json(result)
+    } catch (err) {
+      return jsonError(c, err, 400)
+    }
+  })
+
+  app.post('/generate', async (c) => {
+    try {
+      const body = await c.req.json<TraderStrategyGenerateInput>()
+      if (!body.templateId) {
+        return c.json({ error: 'templateId is required' }, { status: 400 })
+      }
+      return c.json(await generateTraderStrategyDraft(ctx.engine, {
+        templateId: body.templateId,
+        request: body.request ?? '',
+      }))
+    } catch (err) {
+      return jsonError(c, err, 400)
     }
   })
 

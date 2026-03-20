@@ -252,6 +252,63 @@ export interface TraderStrategyDetail extends TraderStrategySummary {
   }
 }
 
+export type TraderStrategyTemplateId = 'breakout' | 'trend-follow' | 'mean-revert'
+
+export interface TraderStrategyDraft {
+  id: string
+  label: string
+  enabled: boolean
+  sources: string[]
+  universe: {
+    asset: 'crypto'
+    symbols: string[]
+  }
+  timeframes: {
+    context: string
+    structure: string
+    execution: string
+  }
+  riskBudget: {
+    perTradeRiskPercent: number
+    maxGrossExposurePercent: number
+    maxPositions: number
+    maxDailyLossPercent?: number
+  }
+  behaviorRules: {
+    preferences: string[]
+    prohibitions: string[]
+  }
+  executionPolicy: {
+    allowedOrderTypes: Array<'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'>
+    requireProtection: boolean
+    allowMarketOrders: boolean
+    allowOvernight: boolean
+  }
+}
+
+export interface TraderStrategyTemplate {
+  id: TraderStrategyTemplateId
+  label: string
+  description: string
+  defaults: TraderStrategyDraft
+}
+
+export interface TraderStrategyGenerateResult {
+  draft: TraderStrategyDraft
+  yamlPreview: string
+}
+
+export interface TraderStrategyChangeReport {
+  changedFields: string[]
+  summary: string
+  yamlDiff: string
+}
+
+export interface TraderStrategyUpdateResult {
+  strategy: TraderStrategyDraft
+  changeReport: TraderStrategyChangeReport
+}
+
 export interface TraderJob {
   id: string
   name: string
@@ -276,6 +333,9 @@ export interface TraderReviewResult {
   updated: boolean
   summary: string
   strategyId?: string
+  patchApplied?: boolean
+  patchSummary?: string
+  yamlDiff?: string
 }
 
 export type TraderReviewJobState = TraderJobState

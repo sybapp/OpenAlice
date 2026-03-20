@@ -10,6 +10,7 @@ import type { OhlcvStore } from '../../domains/technical-analysis/indicator-kit/
 
 export type TraderAssetClass = 'crypto'
 export type TraderAllowedOrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'
+export type TraderStrategyTemplateId = 'breakout' | 'trend-follow' | 'mean-revert'
 
 export interface TraderStrategy {
   id: string
@@ -40,6 +41,41 @@ export interface TraderStrategy {
     requireProtection: boolean
     allowMarketOrders: boolean
     allowOvernight: boolean
+  }
+}
+
+export interface TraderStrategyTemplate {
+  id: TraderStrategyTemplateId
+  label: string
+  description: string
+  defaults: TraderStrategy
+}
+
+export interface TraderStrategyGenerateInput {
+  templateId: TraderStrategyTemplateId
+  request: string
+}
+
+export interface TraderStrategyGenerateResult {
+  draft: TraderStrategy
+  yamlPreview: string
+}
+
+export interface TraderStrategyChangeReport {
+  changedFields: string[]
+  summary: string
+  yamlDiff: string
+}
+
+export interface TraderStrategyUpdateResult {
+  strategy: TraderStrategy
+  changeReport: TraderStrategyChangeReport
+}
+
+export interface TraderStrategyPatch {
+  behaviorRules?: {
+    preferences?: string[]
+    prohibitions?: string[]
   }
 }
 
@@ -191,6 +227,8 @@ export interface TraderTradeExecuteResult {
 export interface TraderTradeReviewSummary {
   summary: string
   brainUpdate: string
+  strategyPatch?: TraderStrategyPatch
+  patchSummary?: string
 }
 
 export interface TraderJobEngine {
@@ -227,6 +265,9 @@ export interface TraderReviewResult {
   updated: boolean
   summary: string
   strategyId?: string
+  patchApplied?: boolean
+  patchSummary?: string
+  yamlDiff?: string
 }
 
 export type TraderReviewJobState = TraderJobState

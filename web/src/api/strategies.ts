@@ -4,17 +4,53 @@ import type {
   TraderJob,
   TraderReviewJob,
   TraderReviewResult,
+  TraderStrategyDraft,
   TraderStrategyDetail,
+  TraderStrategyGenerateResult,
   TraderStrategySummary,
+  TraderStrategyTemplate,
+  TraderStrategyTemplateId,
+  TraderStrategyUpdateResult,
 } from './types'
 
 export const strategiesApi = {
+  async listTemplates(): Promise<{ templates: TraderStrategyTemplate[] }> {
+    return fetchJson('/api/strategies/templates')
+  },
+
   async listStrategies(): Promise<{ strategies: TraderStrategySummary[] }> {
     return fetchJson('/api/strategies/strategies')
   },
 
   async getStrategy(id: string): Promise<TraderStrategyDetail> {
     return fetchJson(`/api/strategies/strategies/${id}`)
+  },
+
+  async createStrategy(strategy: TraderStrategyDraft): Promise<TraderStrategyDraft> {
+    return fetchJsonOrThrow('/api/strategies/strategies', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(strategy),
+    }, 'Create failed')
+  },
+
+  async updateStrategy(id: string, strategy: TraderStrategyDraft): Promise<TraderStrategyUpdateResult> {
+    return fetchJsonOrThrow(`/api/strategies/strategies/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(strategy),
+    }, 'Update failed')
+  },
+
+  async generateStrategy(params: {
+    templateId: TraderStrategyTemplateId
+    request: string
+  }): Promise<TraderStrategyGenerateResult> {
+    return fetchJsonOrThrow('/api/strategies/generate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    }, 'Generate failed')
   },
 
   async listJobs(): Promise<{ jobs: TraderJob[] }> {

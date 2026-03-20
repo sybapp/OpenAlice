@@ -25,7 +25,7 @@ import {
   buildTraderReviewPrompt,
   buildTradeThesisPrompt,
 } from './prompt.js'
-import { getTraderStrategy } from './strategy.js'
+import { applyTraderStrategyPatch, getTraderStrategy } from './strategy.js'
 import type {
   TraderDecision,
   TraderMarketCandidate,
@@ -723,18 +723,48 @@ export async function runTraderReview(
     ),
   )
 
+  let updated = true
+  let patchApplied = false
+  let patchSummary = reviewOutput.patchSummary
+  let summary = reviewOutput.summary
+  let yamlDiff: string | undefined
+
+  if (strategyId && reviewOutput.strategyPatch) {
+    try {
+      const patchResult = await applyTraderStrategyPatch(strategyId, reviewOutput.strategyPatch)
+      patchApplied = patchResult.patchApplied
+      yamlDiff = patchResult.patchApplied ? patchResult.changeReport.yamlDiff : undefined
+      patchSummary = patchSummary ?? patchResult.changeReport.summary
+      if (!patchApplied && !patchSummary) {
+        patchSummary = 'Review suggested no effective YAML change.'
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      updated = false
+      patchApplied = false
+      patchSummary = `Automatic strategy update failed: ${message}`
+      summary = `${summary}\n\nStrategy update failed: ${message}`
+    }
+  }
+
   deps.brain.updateFrontalLobe(reviewOutput.brainUpdate)
   await deps.eventLog.append('trader.review.done', {
     strategyId,
     trigger: meta?.trigger ?? 'manual',
     jobId: meta?.jobId,
     jobName: meta?.jobName,
-    updated: true,
-    summary: reviewOutput.summary,
+    updated,
+    summary,
+    patchApplied,
+    patchSummary,
+    yamlDiff,
   })
   return {
-    updated: true,
-    summary: reviewOutput.summary,
+    updated,
+    summary,
     strategyId,
+    patchApplied,
+    patchSummary,
+    yamlDiff,
   }
 }

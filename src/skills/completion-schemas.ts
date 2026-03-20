@@ -94,6 +94,13 @@ export const traderTradeExecuteSchema = z.object({
 export const traderTradeReviewSchema = z.object({
   summary: z.string().min(1),
   brainUpdate: z.string().min(1),
+  strategyPatch: z.object({
+    behaviorRules: z.object({
+      preferences: z.array(z.string()).optional(),
+      prohibitions: z.array(z.string()).optional(),
+    }).optional(),
+  }).optional(),
+  patchSummary: z.string().min(1).optional(),
 })
 
 const completionSchemas = {
@@ -111,4 +118,3 @@ export type CompletionSchemaName = keyof typeof completionSchemas
 export function getCompletionSchema(name: string) {
   return completionSchemas[name as CompletionSchemaName] ?? null
 }
-

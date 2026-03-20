@@ -4,6 +4,7 @@ import type { SessionStore } from '../../core/session.js'
 const mocks = vi.hoisted(() => ({
   setSessionSkill: vi.fn(),
   getTraderStrategy: vi.fn(),
+  applyTraderStrategyPatch: vi.fn(),
   getSkillScript: vi.fn(),
 }))
 
@@ -16,6 +17,7 @@ vi.mock('../../skills/script-registry.js', () => ({
 }))
 
 vi.mock('./strategy.js', () => ({
+  applyTraderStrategyPatch: mocks.applyTraderStrategyPatch,
   getTraderStrategy: mocks.getTraderStrategy,
 }))
 
@@ -165,6 +167,15 @@ function queueHappyPath(deps: ReturnType<typeof makeDeps>, symbol = 'BTC/USDT:US
 describe('runTraderJob', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.applyTraderStrategyPatch.mockResolvedValue({
+      strategy: baseStrategy,
+      patchApplied: true,
+      changeReport: {
+        changedFields: ['preferences'],
+        summary: 'Review updated preferences.',
+        yamlDiff: '- behaviorRules:\n+ behaviorRules:',
+      },
+    })
   })
 
   it('skips when the strategy does not exist', async () => {
@@ -987,11 +998,65 @@ describe('runTraderReview', () => {
       jobName: 'Nightly Review',
       updated: true,
       summary: 'Review summary for Paper Alpha',
+      patchApplied: false,
+      patchSummary: undefined,
+      yamlDiff: undefined,
     })
     expect(result).toEqual({
       updated: true,
       summary: 'Review summary for Paper Alpha',
       strategyId: undefined,
+      patchApplied: false,
+      patchSummary: undefined,
+      yamlDiff: undefined,
+    })
+  })
+
+  it('applies a single-strategy behavior patch after review', async () => {
+    const deps = makeDeps()
+    mocks.getTraderStrategy.mockResolvedValueOnce({
+      ...baseStrategy,
+      sources: ['paper-1'],
+    })
+    deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
+    deps.engine.askWithSession.mockResolvedValue(complete({
+      summary: 'Review summary for source-1',
+      brainUpdate: 'Stay selective on source-1.',
+      strategyPatch: {
+        behaviorRules: {
+          preferences: ['Long only after a 5m close above 75471.03.'],
+          prohibitions: ['Do not keep the breakout if price returns to 75134.8-75471.03 within 30 minutes.'],
+        },
+      },
+      patchSummary: 'Refreshed breakout levels in behavior rules.',
+    }))
+
+    const result = await runTraderReview('momentum', deps)
+
+    expect(mocks.applyTraderStrategyPatch).toHaveBeenCalledWith('momentum', {
+      behaviorRules: {
+        preferences: ['Long only after a 5m close above 75471.03.'],
+        prohibitions: ['Do not keep the breakout if price returns to 75134.8-75471.03 within 30 minutes.'],
+      },
+    })
+    expect(deps.eventLog.append).toHaveBeenCalledWith('trader.review.done', {
+      strategyId: 'momentum',
+      trigger: 'manual',
+      jobId: undefined,
+      jobName: undefined,
+      updated: true,
+      summary: 'Review summary for Paper Alpha',
+      patchApplied: true,
+      patchSummary: 'Refreshed breakout levels in behavior rules.',
+      yamlDiff: '- behaviorRules:\n+ behaviorRules:',
+    })
+    expect(result).toEqual({
+      updated: true,
+      summary: 'Review summary for Paper Alpha',
+      strategyId: 'momentum',
+      patchApplied: true,
+      patchSummary: 'Refreshed breakout levels in behavior rules.',
+      yamlDiff: '- behaviorRules:\n+ behaviorRules:',
     })
   })
 })

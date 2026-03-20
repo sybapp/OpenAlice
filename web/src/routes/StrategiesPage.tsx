@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type CronSchedule, type EventLogEntry, type TraderJob, type TraderReviewJob, type TraderReviewResult, type TraderStrategyDetail, type TraderStrategySummary } from '../api'
+import {
+  api,
+  type CronSchedule,
+  type EventLogEntry,
+  type TraderJob,
+  type TraderReviewJob,
+  type TraderReviewResult,
+  type TraderStrategyDetail,
+  type TraderStrategyDraft,
+  type TraderStrategySummary,
+  type TraderStrategyUpdateResult,
+  type TraderStrategyTemplate,
+} from '../api'
 import { Toggle } from '../components/Toggle'
 
 type TraderMode = 'trade' | 'review'
@@ -8,6 +20,16 @@ type TraderJobPatch = {
   name: string
   strategyId?: string
   schedule: CronSchedule
+}
+
+const ORDER_TYPE_OPTIONS = ['market', 'limit', 'stop', 'stop_limit', 'take_profit'] as const
+
+type StrategyChangeActivity = {
+  strategyId: string
+  source: 'manual' | 'review'
+  summary: string
+  yamlDiff?: string
+  ts: number
 }
 
 function formatDateTime(ts: number): string {
@@ -102,9 +124,441 @@ function useTraderEvents() {
   return { entries, reload: load }
 }
 
+function useStrategyChangeActivity() {
+  const [timelineByStrategyId, setTimelineByStrategyId] = useState<Record<string, StrategyChangeActivity[]>>({})
+
+  const load = useCallback(async () => {
+    try {
+      const result = await api.events.recent({ limit: 120 })
+      const next: Record<string, StrategyChangeActivity[]> = {}
+
+      for (const entry of result.entries) {
+        const payload = entry.payload as Record<string, unknown>
+        const strategyId = typeof payload.strategyId === 'string' ? payload.strategyId : undefined
+        if (!strategyId) {
+          continue
+        }
+
+        let activity: StrategyChangeActivity | null = null
+        if (entry.type === 'strategy.updated') {
+          activity = {
+            strategyId,
+            source: 'manual',
+            summary: typeof payload.summary === 'string' ? payload.summary : 'Manual strategy update.',
+            yamlDiff: typeof payload.yamlDiff === 'string' ? payload.yamlDiff : undefined,
+            ts: entry.ts,
+          }
+        } else if (entry.type === 'trader.review.done' && typeof payload.patchSummary === 'string') {
+          activity = {
+            strategyId,
+            source: 'review',
+            summary: payload.patchSummary,
+            yamlDiff: typeof payload.yamlDiff === 'string' ? payload.yamlDiff : undefined,
+            ts: entry.ts,
+          }
+        }
+
+        if (!activity) {
+          continue
+        }
+
+        const current = next[strategyId] ?? []
+        next[strategyId] = [...current, activity]
+      }
+
+      for (const strategyId of Object.keys(next)) {
+        next[strategyId] = next[strategyId]
+          .sort((a, b) => b.ts - a.ts)
+          .slice(0, 5)
+      }
+
+      setTimelineByStrategyId(next)
+    } catch (err) {
+      console.warn('Failed to load strategy change activity:', err)
+    }
+  }, [])
+
+  usePolling(load, 'Failed to refresh strategy change activity')
+
+  return { timelineByStrategyId, reload: load }
+}
+
+function useTraderTemplates() {
+  const [templates, setTemplates] = useState<TraderStrategyTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await api.strategies.listTemplates()
+      setTemplates(result.templates)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load strategy templates')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load().catch((err) => console.warn('Failed to load strategy templates:', err))
+  }, [load])
+
+  return { templates, loading, error, reload: load }
+}
+
+function cloneDraft(draft: TraderStrategyDraft): TraderStrategyDraft {
+  return {
+    ...draft,
+    sources: [...draft.sources],
+    universe: {
+      ...draft.universe,
+      symbols: [...draft.universe.symbols],
+    },
+    timeframes: { ...draft.timeframes },
+    riskBudget: { ...draft.riskBudget },
+    behaviorRules: {
+      preferences: [...draft.behaviorRules.preferences],
+      prohibitions: [...draft.behaviorRules.prohibitions],
+    },
+    executionPolicy: {
+      ...draft.executionPolicy,
+      allowedOrderTypes: [...draft.executionPolicy.allowedOrderTypes],
+    },
+  }
+}
+
+function detailToDraft(detail: TraderStrategyDetail): TraderStrategyDraft {
+  return cloneDraft({
+    id: detail.id,
+    label: detail.label,
+    enabled: detail.enabled,
+    sources: detail.sources,
+    universe: {
+      asset: detail.asset,
+      symbols: detail.symbols,
+    },
+    timeframes: detail.timeframes,
+    riskBudget: detail.riskBudget,
+    behaviorRules: detail.behaviorRules,
+    executionPolicy: detail.executionPolicy,
+  })
+}
+
+function draftToDetail(draft: TraderStrategyDraft): TraderStrategyDetail {
+  return {
+    id: draft.id,
+    label: draft.label,
+    enabled: draft.enabled,
+    sources: [...draft.sources],
+    asset: draft.universe.asset,
+    symbols: [...draft.universe.symbols],
+    timeframes: { ...draft.timeframes },
+    riskBudget: { ...draft.riskBudget },
+    behaviorRules: {
+      preferences: [...draft.behaviorRules.preferences],
+      prohibitions: [...draft.behaviorRules.prohibitions],
+    },
+    executionPolicy: {
+      ...draft.executionPolicy,
+      allowedOrderTypes: [...draft.executionPolicy.allowedOrderTypes],
+    },
+  }
+}
+
+function toMultiline(items: string[]): string {
+  return items.join('\n')
+}
+
+function parseMultiline(value: string): string[] {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function StrategyDraftFields({
+  draft,
+  onChange,
+  idEditable,
+}: {
+  draft: TraderStrategyDraft
+  onChange: (next: TraderStrategyDraft) => void
+  idEditable: boolean
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Strategy ID</span>
+          <input
+            aria-label="Strategy ID"
+            type="text"
+            value={draft.id}
+            readOnly={!idEditable}
+            onChange={(e) => onChange({ ...draft, id: e.target.value })}
+            className={`w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none ${idEditable ? 'focus:border-accent' : 'cursor-not-allowed opacity-70'}`}
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Label</span>
+          <input
+            aria-label="Strategy label"
+            type="text"
+            value={draft.label}
+            onChange={(e) => onChange({ ...draft, label: e.target.value })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Sources</span>
+          <input
+            aria-label="Strategy sources"
+            type="text"
+            value={draft.sources.join(', ')}
+            onChange={(e) => onChange({
+              ...draft,
+              sources: e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Symbols</span>
+          <input
+            aria-label="Strategy symbols"
+            type="text"
+            value={draft.universe.symbols.join(', ')}
+            onChange={(e) => onChange({
+              ...draft,
+              universe: {
+                ...draft.universe,
+                symbols: e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+              },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Context TF</span>
+          <input
+            aria-label="Context timeframe"
+            type="text"
+            value={draft.timeframes.context}
+            onChange={(e) => onChange({ ...draft, timeframes: { ...draft.timeframes, context: e.target.value } })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Structure TF</span>
+          <input
+            aria-label="Structure timeframe"
+            type="text"
+            value={draft.timeframes.structure}
+            onChange={(e) => onChange({ ...draft, timeframes: { ...draft.timeframes, structure: e.target.value } })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Execution TF</span>
+          <input
+            aria-label="Execution timeframe"
+            type="text"
+            value={draft.timeframes.execution}
+            onChange={(e) => onChange({ ...draft, timeframes: { ...draft.timeframes, execution: e.target.value } })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Risk %</span>
+          <input
+            aria-label="Per-trade risk percent"
+            type="number"
+            min="0"
+            step="0.01"
+            value={draft.riskBudget.perTradeRiskPercent}
+            onChange={(e) => onChange({
+              ...draft,
+              riskBudget: { ...draft.riskBudget, perTradeRiskPercent: Number(e.target.value) || 0 },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Gross %</span>
+          <input
+            aria-label="Max gross exposure percent"
+            type="number"
+            min="0"
+            step="0.01"
+            value={draft.riskBudget.maxGrossExposurePercent}
+            onChange={(e) => onChange({
+              ...draft,
+              riskBudget: { ...draft.riskBudget, maxGrossExposurePercent: Number(e.target.value) || 0 },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Max Positions</span>
+          <input
+            aria-label="Max positions"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.riskBudget.maxPositions}
+            onChange={(e) => onChange({
+              ...draft,
+              riskBudget: { ...draft.riskBudget, maxPositions: Number(e.target.value) || 1 },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Daily Loss %</span>
+          <input
+            aria-label="Max daily loss percent"
+            type="number"
+            min="0"
+            step="0.01"
+            value={draft.riskBudget.maxDailyLossPercent ?? ''}
+            onChange={(e) => onChange({
+              ...draft,
+              riskBudget: {
+                ...draft.riskBudget,
+                maxDailyLossPercent: e.target.value === '' ? undefined : Number(e.target.value),
+              },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-xs font-medium uppercase tracking-wide text-text-muted">Execution Policy</div>
+        <div className="flex flex-wrap gap-2">
+          {ORDER_TYPE_OPTIONS.map((orderType) => {
+            const checked = draft.executionPolicy.allowedOrderTypes.includes(orderType)
+            return (
+              <label key={orderType} className="flex items-center gap-2 rounded-md border border-border bg-bg-tertiary px-3 py-2 text-xs text-text-muted">
+                <input
+                  aria-label={`Order type ${orderType}`}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...draft.executionPolicy.allowedOrderTypes, orderType]
+                      : draft.executionPolicy.allowedOrderTypes.filter((value) => value !== orderType)
+                    onChange({
+                      ...draft,
+                      executionPolicy: {
+                        ...draft.executionPolicy,
+                        allowedOrderTypes: [...new Set(next)],
+                      },
+                    })
+                  }}
+                />
+                <span>{orderType}</span>
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap gap-4 text-xs text-text-muted">
+          <label className="flex items-center gap-2">
+            <input
+              aria-label="Require protection"
+              type="checkbox"
+              checked={draft.executionPolicy.requireProtection}
+              onChange={(e) => onChange({
+                ...draft,
+                executionPolicy: { ...draft.executionPolicy, requireProtection: e.target.checked },
+              })}
+            />
+            Require protection
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              aria-label="Allow market orders"
+              type="checkbox"
+              checked={draft.executionPolicy.allowMarketOrders}
+              onChange={(e) => onChange({
+                ...draft,
+                executionPolicy: { ...draft.executionPolicy, allowMarketOrders: e.target.checked },
+              })}
+            />
+            Allow market orders
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              aria-label="Allow overnight"
+              type="checkbox"
+              checked={draft.executionPolicy.allowOvernight}
+              onChange={(e) => onChange({
+                ...draft,
+                executionPolicy: { ...draft.executionPolicy, allowOvernight: e.target.checked },
+              })}
+            />
+            Allow overnight
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              aria-label="Strategy enabled"
+              type="checkbox"
+              checked={draft.enabled}
+              onChange={(e) => onChange({ ...draft, enabled: e.target.checked })}
+            />
+            Enabled
+          </label>
+        </div>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Preferences</span>
+          <textarea
+            aria-label="Strategy preferences"
+            rows={8}
+            value={toMultiline(draft.behaviorRules.preferences)}
+            onChange={(e) => onChange({
+              ...draft,
+              behaviorRules: { ...draft.behaviorRules, preferences: parseMultiline(e.target.value) },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-text-muted">
+          <span className="font-medium uppercase tracking-wide">Prohibitions</span>
+          <textarea
+            aria-label="Strategy prohibitions"
+            rows={8}
+            value={toMultiline(draft.behaviorRules.prohibitions)}
+            onChange={(e) => onChange({
+              ...draft,
+              behaviorRules: { ...draft.behaviorRules, prohibitions: parseMultiline(e.target.value) },
+            })}
+            className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
 export function StrategiesPage() {
   const { strategies, jobs, reviewJobs, loading, reload } = useTraderData()
+  const { templates, loading: templatesLoading, error: templatesError, reload: reloadTemplates } = useTraderTemplates()
   const { entries: traderEvents, reload: reloadEvents } = useTraderEvents()
+  const { timelineByStrategyId, reload: reloadStrategyActivity } = useStrategyChangeActivity()
   const [showAddJob, setShowAddJob] = useState(false)
   const [showAddReviewJob, setShowAddReviewJob] = useState(false)
   const [strategyDetails, setStrategyDetails] = useState<Record<string, TraderStrategyDetail | null>>({})
@@ -122,7 +576,8 @@ export function StrategiesPage() {
   const reloadRuntime = useCallback(async () => {
     await reload()
     await reloadEvents()
-  }, [reload, reloadEvents])
+    await reloadStrategyActivity()
+  }, [reload, reloadEvents, reloadStrategyActivity])
 
   const runManualReview = useCallback(async (strategyId?: string) => {
     setReviewState({ running: true, result: null, error: null })
@@ -152,6 +607,14 @@ export function StrategiesPage() {
     }
   }, [strategyDetails])
 
+  const handleStrategyUpdated = useCallback(async (result: TraderStrategyUpdateResult) => {
+    setStrategyDetails((prev) => ({
+      ...prev,
+      [result.strategy.id]: draftToDetail(result.strategy),
+    }))
+    await reloadRuntime()
+  }, [reloadRuntime])
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 text-sm text-text-muted">
@@ -177,10 +640,22 @@ export function StrategiesPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-6">
+        <StrategyComposerSection
+          templates={templates}
+          loading={templatesLoading}
+          error={templatesError}
+          onCreated={async () => {
+            await reloadTemplates()
+            await reloadRuntime()
+          }}
+        />
+
         <StrategySection
           strategies={strategies}
           strategyDetails={strategyDetails}
+          activityTimeline={timelineByStrategyId}
           onExpand={loadStrategyDetail}
+          onUpdated={handleStrategyUpdated}
           onReview={runManualReview}
           reviewRunning={reviewState.running}
         />
@@ -192,7 +667,39 @@ export function StrategiesPage() {
         )}
         {reviewState.result && (
           <div className="rounded-lg border border-accent/30 bg-accent/5 px-4 py-3">
-            <div className="text-sm font-medium text-text">Latest Review Summary</div>
+            <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-text">
+              <span>Latest Review Summary</span>
+              <span className={`text-[11px] px-2 py-0.5 rounded-full border ${reviewState.result.updated ? 'border-green/30 text-green' : 'border-amber/30 text-amber'}`}>
+                {reviewState.result.updated ? 'Brain updated' : 'Update skipped'}
+              </span>
+              {reviewState.result.patchApplied === true && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full border border-accent/30 text-accent">
+                  YAML patched
+                </span>
+              )}
+              {reviewState.result.patchApplied === false && reviewState.result.strategyId && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full border border-border text-text-muted">
+                  No YAML patch
+                </span>
+              )}
+            </div>
+            {reviewState.result.strategyId && (
+              <div className="mt-2 text-xs text-text-muted">
+                Strategy: {reviewState.result.strategyId}
+              </div>
+            )}
+            {reviewState.result.patchSummary && (
+              <div className="mt-2 rounded-md border border-border/70 bg-bg px-3 py-2 text-xs text-text-muted">
+                <div className="text-[11px] uppercase tracking-wide text-text-muted/80">Auto Update</div>
+                <div className="mt-1 whitespace-pre-wrap break-words">{reviewState.result.patchSummary}</div>
+              </div>
+            )}
+            {reviewState.result.yamlDiff && (
+              <div className="mt-2 rounded-md border border-border/70 bg-bg px-3 py-2 text-xs text-text-muted">
+                <div className="text-[11px] uppercase tracking-wide text-text-muted/80">YAML Diff</div>
+                <pre className="mt-1 whitespace-pre-wrap break-words font-mono">{reviewState.result.yamlDiff}</pre>
+              </div>
+            )}
             <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-text-muted font-mono">{reviewState.result.summary}</pre>
           </div>
         )}
@@ -274,16 +781,257 @@ export function StrategiesPage() {
   )
 }
 
+function StrategyComposerSection({
+  templates,
+  loading,
+  error,
+  onCreated,
+}: {
+  templates: TraderStrategyTemplate[]
+  loading: boolean
+  error: string | null
+  onCreated: () => Promise<void>
+}) {
+  const [mode, setMode] = useState<'manual' | 'ai'>('manual')
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
+  const [draft, setDraft] = useState<TraderStrategyDraft | null>(null)
+  const [aiRequest, setAiRequest] = useState('')
+  const [yamlPreview, setYamlPreview] = useState('')
+  const [status, setStatus] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
+
+  useEffect(() => {
+    if (!templates.length || selectedTemplateId) {
+      return
+    }
+    const template = templates[0]
+    setSelectedTemplateId(template.id)
+    setDraft(cloneDraft(template.defaults))
+  }, [templates, selectedTemplateId])
+
+  const applyTemplate = useCallback((templateId: string) => {
+    const template = templates.find((entry) => entry.id === templateId)
+    if (!template) {
+      return
+    }
+    setSelectedTemplateId(templateId)
+    setDraft(cloneDraft(template.defaults))
+    setYamlPreview('')
+    setStatus(null)
+    setSubmitError(null)
+  }, [templates])
+
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null
+
+  const saveDraft = useCallback(async () => {
+    if (!draft) {
+      setSubmitError('Choose a template first')
+      return
+    }
+    setSaving(true)
+    setSubmitError(null)
+    setStatus(null)
+    try {
+      const created = await api.strategies.createStrategy(draft)
+      setDraft(cloneDraft(created))
+      setStatus(`Saved strategy ${created.label} (${created.id}) to runtime/strategies.`)
+      setYamlPreview('')
+      await onCreated()
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Create failed')
+    } finally {
+      setSaving(false)
+    }
+  }, [draft, onCreated])
+
+  const generateDraft = useCallback(async () => {
+    if (!selectedTemplateId) {
+      setSubmitError('Choose a template first')
+      return
+    }
+    setGenerating(true)
+    setSubmitError(null)
+    setStatus(null)
+    try {
+      const result = await api.strategies.generateStrategy({
+        templateId: selectedTemplateId as TraderStrategyTemplate['id'],
+        request: aiRequest.trim(),
+      })
+      setDraft(cloneDraft(result.draft))
+      setYamlPreview(result.yamlPreview)
+      setMode('ai')
+      setStatus('AI draft ready. Review the YAML preview, then save when it looks right.')
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Generate failed')
+    } finally {
+      setGenerating(false)
+    }
+  }, [aiRequest, selectedTemplateId])
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-text">Strategy Composer</h3>
+        <p className="text-xs text-text-muted mt-1">Start from a template, refine it manually, or let the backend AI draft a YAML preview before you save it.</p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-bg px-4 py-4 space-y-4">
+        {loading ? (
+          <div className="text-sm text-text-muted">Loading strategy templates...</div>
+        ) : error ? (
+          <div className="text-sm text-red">{error}</div>
+        ) : templates.length === 0 ? (
+          <div className="text-sm text-text-muted">No strategy templates are available yet.</div>
+        ) : (
+          <>
+            <div className="grid gap-3 lg:grid-cols-[220px,1fr]">
+              <div className="space-y-1">
+                <label htmlFor="strategy-template" className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                  Template
+                </label>
+                <select
+                  id="strategy-template"
+                  aria-label="Strategy template"
+                  value={selectedTemplateId}
+                  onChange={(e) => applyTemplate(e.target.value)}
+                  className="w-full bg-bg-tertiary border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+                >
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-md border border-border/70 bg-bg-secondary px-3 py-3">
+                <div className="text-sm font-medium text-text">{selectedTemplate?.label ?? 'Template preview'}</div>
+                <div className="mt-1 text-xs text-text-muted">{selectedTemplate?.description}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setMode('manual')}
+                className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${mode === 'manual' ? 'border-accent/40 bg-accent/10 text-accent' : 'border-border text-text-muted hover:text-text hover:bg-bg-tertiary'}`}
+              >
+                Manual Fill
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('ai')}
+                className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${mode === 'ai' ? 'border-accent/40 bg-accent/10 text-accent' : 'border-border text-text-muted hover:text-text hover:bg-bg-tertiary'}`}
+              >
+                AI Generate
+              </button>
+              <button
+                type="button"
+                onClick={() => selectedTemplateId && applyTemplate(selectedTemplateId)}
+                className="px-3 py-1.5 text-xs rounded-md border border-border text-text-muted hover:text-text hover:bg-bg-tertiary transition-colors"
+              >
+                Reset To Template
+              </button>
+            </div>
+
+            {mode === 'ai' && (
+              <div className="space-y-3 rounded-md border border-accent/20 bg-accent/5 px-4 py-4">
+                <div>
+                  <label htmlFor="ai-request" className="text-sm font-medium text-text">AI Brief</label>
+                  <p className="mt-1 text-xs text-text-muted">Describe trigger levels, symbols, risk preferences, or guardrails. The model must stay inside the strategy schema.</p>
+                </div>
+                <textarea
+                  id="ai-request"
+                  aria-label="AI generation request"
+                  value={aiRequest}
+                  onChange={(e) => setAiRequest(e.target.value)}
+                  rows={5}
+                  placeholder="Example: Build a BTC breakout plan on binance-main with explicit long and short trigger levels, 5m false-break rules, and no overnight exposure."
+                  className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text outline-none focus:border-accent"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => { void generateDraft() }}
+                    disabled={generating}
+                    className="px-3 py-1.5 text-sm rounded-md bg-accent text-white hover:bg-accent/80 transition-colors disabled:opacity-50"
+                  >
+                    {generating ? 'Generating...' : 'Generate Draft'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {draft && (
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr),minmax(320px,1fr)]">
+                <StrategyDraftFields
+                  draft={draft}
+                  onChange={(next) => setDraft(next)}
+                  idEditable
+                />
+
+                <div className="space-y-3">
+                  <div className="rounded-md border border-border/70 bg-bg-secondary px-3 py-3">
+                    <div className="text-sm font-medium text-text">Preview</div>
+                    <div className="mt-2 text-xs text-text-muted space-y-1">
+                      <div>ID: {draft.id || '-'}</div>
+                      <div>Sources: {draft.sources.join(', ') || '-'}</div>
+                      <div>Symbols: {draft.universe.symbols.join(', ') || '-'}</div>
+                      <div>Order Types: {draft.executionPolicy.allowedOrderTypes.join(', ') || '-'}</div>
+                    </div>
+                  </div>
+
+                  {yamlPreview && (
+                    <div className="rounded-md border border-border/70 bg-bg-secondary px-3 py-3">
+                      <div className="text-sm font-medium text-text">YAML Preview</div>
+                      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-[11px] text-text-muted font-mono">{yamlPreview}</pre>
+                    </div>
+                  )}
+
+                  {submitError && (
+                    <div className="rounded-md border border-red/30 bg-red/5 px-3 py-2 text-xs text-red">
+                      {submitError}
+                    </div>
+                  )}
+                  {status && (
+                    <div className="rounded-md border border-green/30 bg-green/5 px-3 py-2 text-xs text-green">
+                      {status}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => { void saveDraft() }}
+                    disabled={saving || !draft}
+                    className="w-full px-3 py-2 text-sm rounded-md bg-accent text-white hover:bg-accent/80 transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : yamlPreview ? 'Save Generated Strategy' : 'Save Strategy'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function StrategySection({
   strategies,
   strategyDetails,
+  activityTimeline,
   onExpand,
+  onUpdated,
   onReview,
   reviewRunning,
 }: {
   strategies: TraderStrategySummary[]
   strategyDetails: Record<string, TraderStrategyDetail | null>
+  activityTimeline: Record<string, StrategyChangeActivity[]>
   onExpand: (strategyId: string) => Promise<void>
+  onUpdated: (result: TraderStrategyUpdateResult) => Promise<void>
   onReview: (strategyId?: string) => Promise<void>
   reviewRunning: boolean
 }) {
@@ -291,7 +1039,7 @@ function StrategySection({
     <section className="space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-text">Strategies</h3>
-        <p className="text-xs text-text-muted mt-1">These come from `runtime/strategies/*.yml` and are read-only in the UI for now.</p>
+        <p className="text-xs text-text-muted mt-1">These are loaded from `runtime/strategies/*.yml`. Create new YAML-backed strategies above, then inspect and review them here.</p>
       </div>
 
       {strategies.length === 0 ? (
@@ -305,7 +1053,9 @@ function StrategySection({
               key={strategy.id}
               strategy={strategy}
               detail={strategyDetails[strategy.id]}
+              activityTimeline={activityTimeline[strategy.id] ?? []}
               onExpand={onExpand}
+              onUpdated={onUpdated}
               onReview={onReview}
               reviewRunning={reviewRunning}
             />
@@ -319,17 +1069,27 @@ function StrategySection({
 function StrategyCard({
   strategy,
   detail,
+  activityTimeline,
   onExpand,
+  onUpdated,
   onReview,
   reviewRunning,
 }: {
   strategy: TraderStrategySummary
   detail?: TraderStrategyDetail | null
+  activityTimeline: StrategyChangeActivity[]
   onExpand: (strategyId: string) => Promise<void>
+  onUpdated: (result: TraderStrategyUpdateResult) => Promise<void>
   onReview: (strategyId?: string) => Promise<void>
   reviewRunning: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<TraderStrategyDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const latestActivity = activityTimeline[0]
 
   const toggle = async () => {
     const next = !expanded
@@ -352,6 +1112,12 @@ function StrategyCard({
         <div>Asset: {strategy.asset}</div>
         <div>Sources: {strategy.sources.join(', ')}</div>
         <div>Universe: {strategy.symbols.join(', ')}</div>
+        {latestActivity && (
+          <div>
+            Latest change: {latestActivity.source === 'manual' ? 'Manual edit' : 'Review patch'}
+            {' '}• {timeAgo(latestActivity.ts)} • {latestActivity.summary}
+          </div>
+        )}
       </div>
       <div className="mt-3 flex gap-2">
         <button
@@ -367,11 +1133,88 @@ function StrategyCard({
         >
           {expanded ? 'Hide Details' : 'Show Details'}
         </button>
+        <button
+          onClick={async () => {
+            if (!expanded) {
+              await toggle()
+              return
+            }
+            if (detail) {
+              setDraft(detailToDraft(detail))
+              setEditing(true)
+              setError(null)
+              setStatus(null)
+            }
+          }}
+          className="px-3 py-1.5 text-xs rounded-md border border-border text-text-muted hover:text-text hover:bg-bg-tertiary transition-colors"
+        >
+          Edit Strategy
+        </button>
       </div>
 
       {expanded && (
         <div className="mt-3 border-t border-border/50 pt-3 text-xs text-text-muted space-y-2">
-          {detail ? (
+          {editing && draft ? (
+            <div className="space-y-3">
+              <div className="rounded-md border border-accent/30 bg-accent/5 px-3 py-3">
+                <div className="text-sm font-medium text-text">Edit Strategy</div>
+                <div className="mt-1 text-xs text-text-muted">Strategy ID stays fixed so existing jobs and reviews keep their references.</div>
+              </div>
+              <StrategyDraftFields
+                draft={draft}
+                onChange={setDraft}
+                idEditable={false}
+              />
+              {error && (
+                <div className="rounded-md border border-red/30 bg-red/5 px-3 py-2 text-xs text-red">
+                  {error}
+                </div>
+              )}
+              {status && (
+                <div className="rounded-md border border-green/30 bg-green/5 px-3 py-2 text-xs text-green">
+                  {status}
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false)
+                    setDraft(detail ? detailToDraft(detail) : null)
+                    setError(null)
+                    setStatus(null)
+                  }}
+                  className="px-3 py-1.5 text-sm rounded-md text-text-muted hover:text-text hover:bg-bg-tertiary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={async () => {
+                    if (!draft) return
+                    setSaving(true)
+                    setError(null)
+                    setStatus(null)
+                    try {
+                      const result = await api.strategies.updateStrategy(strategy.id, draft)
+                      await onUpdated(result)
+                      setDraft(cloneDraft(result.strategy))
+                      setStatus(result.changeReport.summary)
+                      setEditing(false)
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Save failed')
+                    } finally {
+                      setSaving(false)
+                    }
+                  }}
+                  className="px-3 py-1.5 text-sm rounded-md bg-accent text-white hover:bg-accent/80 transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          ) : detail ? (
             <>
               <div>Timeframes: {detail.timeframes.context} / {detail.timeframes.structure} / {detail.timeframes.execution}</div>
               <div>
@@ -390,6 +1233,23 @@ function StrategyCard({
               )}
               {detail.behaviorRules.prohibitions.length > 0 && (
                 <div>Prohibitions: {detail.behaviorRules.prohibitions.join('; ')}</div>
+              )}
+              {activityTimeline.length > 0 && (
+                <div className="rounded-md border border-border/70 bg-bg-secondary px-3 py-2 space-y-3">
+                  <div className="text-[11px] uppercase tracking-wide text-text-muted/80">Recent Change Timeline</div>
+                  {activityTimeline.map((activity, index) => (
+                    <div key={`${activity.ts}-${index}`} className="border-t border-border/50 pt-3 first:border-t-0 first:pt-0">
+                      <div className="text-text">
+                        {activity.source === 'manual' ? 'Manual edit' : 'Review patch'}
+                        {' '}• {timeAgo(activity.ts)}
+                      </div>
+                      <div className="mt-1">{activity.summary}</div>
+                      {activity.yamlDiff && (
+                        <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] text-text-muted">{activity.yamlDiff}</pre>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </>
           ) : (
