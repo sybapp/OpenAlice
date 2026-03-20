@@ -111,10 +111,11 @@ const baseStrategy = {
   },
 }
 
-function queueHappyPath(deps: ReturnType<typeof makeDeps>, symbol = 'BTC/USDT:USDT') {
+  function queueHappyPath(deps: ReturnType<typeof makeDeps>, symbol = 'BTC/USDT:USDT') {
   deps.engine.askWithSession
     .mockResolvedValueOnce(complete({
       candidates: [{ source: 'ccxt-main', symbol, reason: 'best setup' }],
+      evaluations: [{ source: 'ccxt-main', symbol, verdict: 'candidate', reason: 'best setup' }],
       summary: 'one good candidate',
     }))
     .mockResolvedValueOnce(complete({
@@ -211,7 +212,7 @@ describe('runTraderJob', () => {
     expect(mocks.setSessionSkill).not.toHaveBeenCalled()
   })
 
-  it('reports a specific reason when single-symbol market-scan returns empty candidates and summary', async () => {
+  it('uses market-scan evaluations as the skip reason when no candidates are returned', async () => {
     mocks.getTraderStrategy.mockResolvedValue({
       ...baseStrategy,
       id: 'mean-revert',
@@ -220,7 +221,16 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({ candidates: [], summary: '' }))
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [],
+      evaluations: [{
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        verdict: 'skip',
+        reason: 'No confirmed rejection candle on 5m.',
+      }],
+      summary: '',
+    }))
 
     const result = await runTraderJob({
       jobId: 'job-single-symbol-empty-scan',
@@ -230,8 +240,18 @@ describe('runTraderJob', () => {
 
     expect(result).toEqual({
       status: 'skip',
-      reason: 'Market scan returned no candidates for single-symbol strategy BTC/USDT:USDT; return that symbol or explain why it is not tradable.',
-      rawText: JSON.stringify({ type: 'complete', output: { candidates: [], summary: '' } }),
+      reason: 'BTC/USDT:USDT on Main Account: No confirmed rejection candle on 5m.',
+      decision: undefined,
+      rawText: JSON.stringify({ type: 'complete', output: {
+        candidates: [],
+        evaluations: [{
+          source: 'Main Account',
+          symbol: 'BTC/USDT:USDT',
+          verdict: 'skip',
+          reason: 'No confirmed rejection candle on 5m.',
+        }],
+        summary: '',
+      } }),
     })
   })
 

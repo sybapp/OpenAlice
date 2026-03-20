@@ -143,8 +143,16 @@ export interface TraderMarketCandidate {
   reason: string
 }
 
+export interface TraderMarketEvaluation {
+  source: string
+  symbol: string
+  verdict: 'candidate' | 'skip'
+  reason: string
+}
+
 export interface TraderMarketScanResult {
   candidates: TraderMarketCandidate[]
+  evaluations: TraderMarketEvaluation[]
   summary: string
 }
 

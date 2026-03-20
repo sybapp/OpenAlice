@@ -168,13 +168,20 @@ function externalizeRunnerResult(
   }
 }
 
-function resolveEmptyMarketScanReason(strategy: TraderStrategy, summary: string): string {
+function summarizeMarketEvaluations(
+  evaluations: Array<{ source: string; symbol: string; reason: string }>,
+): string {
+  const entries = evaluations
+    .map((evaluation) => `${evaluation.symbol} on ${evaluation.source}: ${evaluation.reason.trim()}`)
+    .filter((entry) => !entry.endsWith(':'))
+  return entries.join(' ')
+}
+
+function resolveEmptyMarketScanReason(strategy: TraderStrategy, summary: string, evaluations: Array<{ source: string; symbol: string; reason: string }>): string {
   const normalizedSummary = summary.trim()
   if (normalizedSummary) return normalizedSummary
-  if (strategy.universe.symbols.length === 1) {
-    const symbol = strategy.universe.symbols[0]
-    return `Market scan returned no candidates for single-symbol strategy ${symbol}; return that symbol or explain why it is not tradable.`
-  }
+  const evaluationSummary = summarizeMarketEvaluations(evaluations)
+  if (evaluationSummary) return evaluationSummary
   return 'No tradable candidate found.'
 }
 
@@ -652,12 +659,16 @@ export async function runTraderJob(
       toInternalSource(candidate, sourceAliases),
       (text) => replaceSourceReferences(text, sourceAliases, false),
     )),
+    evaluations: scan.output.evaluations.map((evaluation) => replaceStringsDeep(
+      toInternalSource(evaluation, sourceAliases),
+      (text) => replaceSourceReferences(text, sourceAliases, false),
+    )),
   }
 
   if (scanOutput.candidates.length === 0) {
     return externalizeRunnerResult({
       status: 'skip',
-      reason: resolveEmptyMarketScanReason(strategy, scanOutput.summary),
+      reason: resolveEmptyMarketScanReason(strategy, scanOutput.summary, scanOutput.evaluations),
       rawText: scan.rawText,
     }, presentation)
   }

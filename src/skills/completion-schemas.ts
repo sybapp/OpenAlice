@@ -10,6 +10,12 @@ export const traderMarketScanSchema = z.object({
     symbol: z.string().min(1),
     reason: z.string().min(1),
   })).default([]),
+  evaluations: z.array(z.object({
+    source: z.string().min(1),
+    symbol: z.string().min(1),
+    verdict: z.enum(['candidate', 'skip']),
+    reason: z.string().min(1),
+  })).default([]),
   summary: z.string().default(''),
 })
 

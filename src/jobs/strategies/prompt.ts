@@ -87,13 +87,30 @@ export function buildMarketScanPrompt(strategy: TraderStrategy, snapshot: Trader
     JSON.stringify(snapshot, null, 2),
     '',
     'Goal: identify the best candidate symbols to study next. Use scripts, not OpenAlice tools.',
-    strategy.universe.symbols.length === 1
-      ? `Single-symbol rule: either return at least one candidate for ${strategy.universe.symbols[0]} or provide a non-empty summary explaining why it is not tradable.`
-      : null,
+    'For every configured source/symbol you inspect, include an evaluation entry explaining why it is selected or rejected.',
+    'Candidates may be empty. If nothing is tradable right now, leave candidates empty and explain the rejection reason for each symbol in evaluations.',
+    'Use summary for a concise run-level explanation, not a replacement for symbol-level reasons.',
     'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
       candidates: [{ source: strategy.sources[0] ?? 'source-id', symbol: strategy.universe.symbols[0] ?? 'BTC/USDT', reason: 'short reason' }],
+      evaluations: [{
+        source: strategy.sources[0] ?? 'source-id',
+        symbol: strategy.universe.symbols[0] ?? 'BTC/USDT',
+        verdict: 'candidate',
+        reason: 'short reason',
+      }],
       summary: 'short overview',
+    } satisfies TraderMarketScanResult, null, 2),
+    'No-trade example:',
+    JSON.stringify({
+      candidates: [],
+      evaluations: [{
+        source: strategy.sources[0] ?? 'source-id',
+        symbol: strategy.universe.symbols[0] ?? 'BTC/USDT',
+        verdict: 'skip',
+        reason: 'No confirmed rejection candle on 5m, so the mean-reversion trigger is not active.',
+      }],
+      summary: 'No configured symbol is tradable right now.',
     } satisfies TraderMarketScanResult, null, 2),
   ].filter(Boolean).join('\n')
 }

@@ -645,7 +645,12 @@ async function runTraderBacktestDecision(params: {
   })
   const candidate = scan.output.candidates[0]
   if (!candidate) {
-    return { text: scan.output.summary || 'No tradable candidate found.', operations: [] }
+    const reason = scan.output.summary.trim()
+      || scan.output.evaluations
+        .map((evaluation) => `${evaluation.symbol} on ${evaluation.source}: ${evaluation.reason}`)
+        .join(' ')
+      || 'No tradable candidate found.'
+    return { text: reason, operations: [] }
   }
 
   const symbolStage = buildBacktestStage({
