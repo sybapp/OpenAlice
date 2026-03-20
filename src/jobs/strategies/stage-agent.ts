@@ -11,6 +11,30 @@ export interface TraderStageRequiredScriptCall {
 export interface TraderStageAgentTrace {
   skillId: string
   requiredScriptCalls: TraderStageRequiredScriptCall[]
+  resources: string[]
+  scriptCalls: Array<{ id: string; input: unknown }>
+  iterations?: number
+  completionRejectedCount?: number
+}
+
+interface SkillLoopTraceMetadata {
+  kind: 'skill_loop_trace'
+  skillId: string
+  iterations?: number
+  loadedResources?: string[]
+  scriptCalls?: Array<{ id: string; input: unknown }>
+  completionRejectedCount?: number
+}
+
+async function readLatestSkillLoopTrace(session: SessionStore, skillId: string): Promise<SkillLoopTraceMetadata | null> {
+  if (typeof session.readActive !== 'function') return null
+  const entries = await session.readActive().catch(() => [])
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const metadata = entries[index]?.metadata as Record<string, unknown> | undefined
+    if (metadata?.kind !== 'skill_loop_trace' || metadata.skillId !== skillId) continue
+    return metadata as SkillLoopTraceMetadata
+  }
+  return null
 }
 
 function extractJsonObject(text: string): string | null {
@@ -57,6 +81,8 @@ export async function runTraderStageAgent<T>(params: {
   const trace: TraderStageAgentTrace = {
     skillId: params.skillId,
     requiredScriptCalls: params.requiredScriptCalls ?? [],
+    resources: [],
+    scriptCalls: [],
   }
   const result = await params.deps.engine.askWithSession(params.task, params.session, {
     historyPreamble: 'The following is the prior structured skill-loop history for this trader session.',
@@ -66,6 +92,13 @@ export async function runTraderStageAgent<T>(params: {
       requiredScriptCalls: trace.requiredScriptCalls,
     },
   })
+  const loopTrace = await readLatestSkillLoopTrace(params.session, params.skillId)
+  if (loopTrace) {
+    trace.resources = loopTrace.loadedResources ?? []
+    trace.scriptCalls = loopTrace.scriptCalls ?? []
+    trace.iterations = loopTrace.iterations
+    trace.completionRejectedCount = loopTrace.completionRejectedCount
+  }
   const output = parseStageOutput(result.text, params.schema)
   if (!output) {
     throw new Error(`Skill ${params.skillId} did not return a valid completion payload`)

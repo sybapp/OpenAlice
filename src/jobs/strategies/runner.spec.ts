@@ -111,11 +111,32 @@ const baseStrategy = {
   },
 }
 
+function buildCoverageEvaluations(params: {
+  source: string
+  symbols: string[]
+  candidateSymbol?: string
+  candidateReason?: string
+  skipReason?: string
+}) {
+  return params.symbols.map((symbol) => ({
+    source: params.source,
+    symbol,
+    verdict: symbol === params.candidateSymbol ? 'candidate' : 'skip',
+    reason: symbol === params.candidateSymbol
+      ? (params.candidateReason ?? 'best setup')
+      : (params.skipReason ?? 'Not selected this pass.'),
+  }))
+}
+
   function queueHappyPath(deps: ReturnType<typeof makeDeps>, symbol = 'BTC/USDT:USDT') {
   deps.engine.askWithSession
     .mockResolvedValueOnce(complete({
       candidates: [{ source: 'ccxt-main', symbol, reason: 'best setup' }],
-      evaluations: [{ source: 'ccxt-main', symbol, verdict: 'candidate', reason: 'best setup' }],
+      evaluations: buildCoverageEvaluations({
+        source: 'ccxt-main',
+        symbols: baseStrategy.universe.symbols,
+        candidateSymbol: symbol,
+      }),
       summary: 'one good candidate',
     }))
     .mockResolvedValueOnce(complete({
@@ -304,6 +325,23 @@ describe('runTraderJob', () => {
     }, deps)).rejects.toThrow('Market scan cannot return an all-empty payload.')
   })
 
+  it('rejects market-scan payloads that miss configured coverage', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+      evaluations: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', verdict: 'candidate', reason: 'best setup' }],
+      summary: 'incomplete coverage',
+    }))
+
+    await expect(runTraderJob({
+      jobId: 'job-coverage-gap',
+      strategyId: 'momentum',
+      session: { id: 'session-coverage-gap' } as SessionStore,
+    }, deps)).rejects.toThrow('Market scan is missing explicit evaluations for: ccxt-main::ETH/USDT:USDT')
+  })
+
   it('rejects single-symbol scans that skip the explicit evaluation', async () => {
     mocks.getTraderStrategy.mockResolvedValue({
       ...baseStrategy,
@@ -343,6 +381,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -390,6 +433,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'source-1',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -442,6 +490,12 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup on source-1' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'source-1',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+          candidateReason: 'best setup on source-1',
+        }),
         summary: 'one good candidate from source-1',
       }))
       .mockResolvedValueOnce(complete({
@@ -523,6 +577,10 @@ describe('runTraderJob', () => {
         candidates: [
           { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'first setup' },
           { source: 'ccxt-main', symbol: 'ETH/USDT:USDT', reason: 'backup setup' },
+        ],
+        evaluations: [
+          { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', verdict: 'candidate', reason: 'first setup' },
+          { source: 'ccxt-main', symbol: 'ETH/USDT:USDT', verdict: 'candidate', reason: 'backup setup' },
         ],
         summary: 'two candidates',
       }))
@@ -612,6 +670,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -687,6 +750,18 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-hedge', symbol: 'BTC/USDT:USDT', reason: 'hedge venue has the setup' }],
+        evaluations: [
+          ...buildCoverageEvaluations({
+            source: 'ccxt-main',
+            symbols: baseStrategy.universe.symbols,
+          }),
+          ...buildCoverageEvaluations({
+            source: 'ccxt-hedge',
+            symbols: baseStrategy.universe.symbols,
+            candidateSymbol: 'BTC/USDT:USDT',
+            candidateReason: 'hedge venue has the setup',
+          }),
+        ],
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -788,6 +863,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -894,6 +974,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -974,6 +1059,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -1006,6 +1096,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(complete({
@@ -1056,6 +1151,11 @@ describe('runTraderJob', () => {
     deps.engine.askWithSession
       .mockResolvedValueOnce(completeWrapped({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        evaluations: buildCoverageEvaluations({
+          source: 'ccxt-main',
+          symbols: baseStrategy.universe.symbols,
+          candidateSymbol: 'BTC/USDT:USDT',
+        }),
         summary: 'one good candidate',
       }))
       .mockResolvedValueOnce(completeWrapped({

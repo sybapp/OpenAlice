@@ -1,5 +1,4 @@
 import type { SessionStore } from '../../core/session.js'
-import { setSessionSkill } from '../../skills/session-skill.js'
 import {
   createSourceAliasState,
   HIDDEN_SOURCE_ALIAS_KEY,
@@ -204,37 +203,6 @@ function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(10_000, value)) : 0
 }
 
-function extractJsonObject(text: string): string | null {
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed
-
-  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)
-  if (fence?.[1]) return fence[1].trim()
-
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) return null
-  return trimmed.slice(start, end + 1)
-}
-
-function parseStageOutput<T>(text: string, schema: { parse: (value: unknown) => T }): T | null {
-  const candidate = extractJsonObject(text)
-  if (!candidate) return null
-
-  try {
-    const parsed = JSON.parse(candidate) as Record<string, unknown>
-    const wrappedText = parsed.text
-    const output = parsed.type === 'complete' && 'output' in parsed
-      ? parsed.output
-      : wrappedText && typeof wrappedText === 'object' && (wrappedText as Record<string, unknown>).type === 'complete' && 'output' in (wrappedText as Record<string, unknown>)
-        ? (wrappedText as Record<string, unknown>).output
-        : parsed
-    return schema.parse(output)
-  } catch {
-    return null
-  }
-}
-
 async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunnerDeps): Promise<TraderPreflightSnapshot> {
   const frontalLobe = deps.brain.getFrontalLobe()
   const warnings: string[] = []
@@ -289,27 +257,6 @@ async function buildPreflightSnapshot(strategy: TraderStrategy, deps: TraderRunn
     totalPositions,
     sourceSnapshots,
   }
-}
-
-async function runSkillStage<T>(params: {
-  session: SessionStore
-  skillId: string
-  prompt: string
-  schema: { parse: (value: unknown) => T }
-  deps: TraderRunnerDeps
-  skillContext?: Record<string, unknown>
-}) {
-  await setSessionSkill(params.session, params.skillId)
-  const result = await params.deps.engine.askWithSession(params.prompt, params.session, {
-    historyPreamble: 'The following is the prior structured skill-loop history for this trader session.',
-    maxHistoryEntries: 30,
-    skillContext: params.skillContext,
-  })
-  const output = parseStageOutput(result.text, params.schema)
-  if (!output) {
-    throw new Error(`Skill ${params.skillId} did not return a valid completion payload`)
-  }
-  return { output, rawText: result.text }
 }
 
 function combineBrainUpdates(...updates: Array<string | undefined>): string {
@@ -416,13 +363,19 @@ function validateMarketScanOutput(
   if (output.candidates.length === 0 && output.evaluations.length === 0) {
     throw new Error('Market scan cannot return an all-empty payload.')
   }
-  if (strategy.universe.symbols.length !== 1) return
-
-  const expectedPairs = strategy.sources.map((source) => `${source}::${strategy.universe.symbols[0]}`)
+  const expectedPairs = strategy.sources.flatMap((source) => strategy.universe.symbols.map((symbol) => `${source}::${symbol}`))
   const evaluatedPairs = new Set(output.evaluations.map((evaluation) => `${evaluation.source}::${evaluation.symbol}`))
+  const invalidEvaluations = output.evaluations.filter((evaluation) => !expectedPairs.includes(`${evaluation.source}::${evaluation.symbol}`))
+  if (invalidEvaluations.length > 0) {
+    throw new Error(`Market scan returned evaluations outside configured coverage: ${invalidEvaluations.map((evaluation) => `${evaluation.source}::${evaluation.symbol}`).join(', ')}`)
+  }
   const missingPairs = expectedPairs.filter((pair) => !evaluatedPairs.has(pair))
   if (missingPairs.length > 0) {
     throw new Error(`Market scan is missing explicit evaluations for: ${missingPairs.join(', ')}`)
+  }
+  const invalidCandidates = output.candidates.filter((candidate) => !expectedPairs.includes(`${candidate.source}::${candidate.symbol}`))
+  if (invalidCandidates.length > 0) {
+    throw new Error(`Market scan returned candidates outside configured coverage: ${invalidCandidates.map((candidate) => `${candidate.source}::${candidate.symbol}`).join(', ')}`)
   }
 }
 
@@ -966,12 +919,12 @@ async function runTraderReviewImpl(
     exists: async () => false,
   } as unknown as SessionStore
 
-  const review = await runSkillStage({
+  const review = await runTraderStageAgent({
     session,
     skillId: TRADER_SKILLS.tradeReview,
-    prompt: buildTraderReviewPrompt(publicStrategy, publicSources),
+    task: buildTraderReviewPrompt(publicStrategy, publicSources),
     schema: traderTradeReviewSchema,
-    deps: deps as TraderRunnerDeps,
+    deps,
     skillContext: createSkillContext({
       strategy: publicStrategy,
       sources: publicSources,

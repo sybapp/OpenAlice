@@ -50,8 +50,18 @@ function makeSession(entries: SessionEntry[] = []): SessionStore {
       store.push(entry)
       return entry
     }),
-    appendSystem: vi.fn(async () => {
-      throw new Error('not used')
+    appendSystem: vi.fn(async (content: string | unknown, _provider?: unknown, metadata?: Record<string, unknown>) => {
+      const entry: SessionEntry = {
+        type: 'system',
+        message: { role: 'system', content: content as string },
+        uuid: `s-${store.length}`,
+        parentUuid: null,
+        sessionId: 'session-1',
+        timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
+      }
+      store.push(entry)
+      return entry
     }),
     appendRaw: vi.fn(async (entry: SessionEntry) => {
       store.push(entry)
@@ -139,6 +149,16 @@ describe('SkillLoopRunner', () => {
       kind: 'skill_loop',
       skillId: 'ta-brooks',
     })
+    expect(session.appendSystem).toHaveBeenCalledWith('skill-loop trace', 'engine', expect.objectContaining({
+      kind: 'skill_loop_trace',
+      skillId: 'ta-brooks',
+      iterations: 2,
+      loadedResources: [],
+      scriptCalls: [
+        { id: 'analysis-brooks', input: { symbol: 'BTC-USD', timeframe: '5m' } },
+        { id: 'analysis-brooks', input: { symbol: 'BTC-USD', timeframe: '15m' } },
+      ],
+    }))
   })
 
   it('omits hidden invocation fields from the prompt shown to the model', async () => {
@@ -275,7 +295,8 @@ describe('SkillLoopRunner', () => {
     }
     vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
 
-    const result = await runner.run('analyze BTC', makeSession(), {
+    const session = makeSession()
+    const result = await runner.run('analyze BTC', session, {
       skillContext: {
         requiredScriptCalls: [{ id: 'analysis-brooks', match: { symbol: 'BTC/USDT:USDT' } }],
       },
@@ -283,5 +304,10 @@ describe('SkillLoopRunner', () => {
 
     expect(result).toEqual({ text: 'done', media: [] })
     expect(askWithSession).toHaveBeenCalledTimes(3)
+    expect(session.appendSystem).toHaveBeenCalledWith('skill-loop trace', 'engine', expect.objectContaining({
+      kind: 'skill_loop_trace',
+      completionRejectedCount: 1,
+      requiredScriptCalls: [{ id: 'analysis-brooks', match: { symbol: 'BTC/USDT:USDT' } }],
+    }))
   })
 })

@@ -16,6 +16,16 @@ interface RequiredScriptCall {
   rationale?: string
 }
 
+interface SkillLoopTraceMetadata {
+  kind: 'skill_loop_trace'
+  skillId: string
+  iterations: number
+  loadedResources: string[]
+  scriptCalls: Array<{ id: string; input: unknown }>
+  requiredScriptCalls: RequiredScriptCall[]
+  completionRejectedCount: number
+}
+
 const skillLoopEnvelope = {
   requestScripts: {
     type: 'request_scripts',
@@ -256,6 +266,7 @@ export class SkillLoopRunner {
       ? skill.allowedScripts.filter((id) => requestedScriptIds.includes(id))
       : skill.allowedScripts
     const maxIterations = 8
+    let completionRejectedCount = 0
 
     await session.appendUser(prompt, 'human')
 
@@ -308,6 +319,7 @@ export class SkillLoopRunner {
       if (parsed.type === 'complete') {
         const missingRequiredCalls = getMissingRequiredScriptCalls(invocation, scriptResults)
         if (missingRequiredCalls.length > 0) {
+          completionRejectedCount += 1
           await workingSession.appendSystem(
             [
               'Completion rejected: required evidence is still missing.',
@@ -321,6 +333,17 @@ export class SkillLoopRunner {
         }
         const output = completionSchema ? completionSchema.parse(parsed.output) : parsed.output
         const finalResult = renderCompletion(skill, output)
+        await session.appendSystem('skill-loop trace', 'engine', {
+          kind: 'skill_loop_trace',
+          skillId: skill.id,
+          iterations: iteration + 1,
+          loadedResources: loadedResources.map((resource) => resource.id),
+          scriptCalls: scriptResults.map((entry) => ({ id: entry.id, input: entry.input })),
+          requiredScriptCalls: Array.isArray(invocation.requiredScriptCalls)
+            ? invocation.requiredScriptCalls.filter((value): value is RequiredScriptCall => Boolean(value) && typeof value === 'object' && typeof (value as RequiredScriptCall).id === 'string')
+            : [],
+          completionRejectedCount,
+        } satisfies SkillLoopTraceMetadata)
         await session.appendAssistant(finalResult.text, 'engine', {
           kind: 'skill_loop',
           skillId: skill.id,
