@@ -66,9 +66,12 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
 
   async function handleFire(entry: EventLogEntry): Promise<void> {
     const payload = entry.payload as TraderFirePayload
+    const runId = String(entry.seq)
     if (processingStrategies.has(payload.strategyId)) {
       await opts.eventLog.append('trader.skip', {
+        runId,
         jobId: payload.jobId,
+        jobName: payload.jobName,
         strategyId: payload.strategyId,
         reason: 'overlap — same strategy is already processing',
       })
@@ -83,6 +86,8 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
         jobId: payload.jobId,
         strategyId: payload.strategyId,
         session,
+        runId,
+        jobName: payload.jobName,
       }, opts)
 
       const delivered = result.status === 'done' && result.decision && opts.connectorCenter
@@ -90,6 +95,7 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
         : { delivered: false as const }
 
       await opts.eventLog.append(result.status === 'skip' ? 'trader.skip' : 'trader.done', {
+        runId,
         jobId: payload.jobId,
         jobName: payload.jobName,
         strategyId: payload.strategyId,
@@ -106,6 +112,7 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
         ? await opts.connectorCenter.notify(formatTraderErrorNotification(payload, errorText), { source: 'trader-error' })
         : { delivered: false as const }
       await opts.eventLog.append('trader.error', {
+        runId,
         jobId: payload.jobId,
         jobName: payload.jobName,
         strategyId: payload.strategyId,

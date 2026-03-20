@@ -13,6 +13,7 @@ import { strategiesApi as strategies } from './strategies'
 import { backtestApi as backtest } from './backtest'
 import { devApi as dev } from './dev'
 import { toolsApi as tools } from './tools'
+import { workflowsApi as workflows } from './workflows'
 
 export const api = {
   auth,
@@ -26,6 +27,7 @@ export const api = {
   backtest,
   dev,
   tools,
+  workflows,
 }
 
 // Re-export all types for convenience
@@ -40,6 +42,12 @@ export type {
   AppConfig,
   AIProviderConfig,
   EventLogEntry,
+  TraderWorkflowRunSummary,
+  TraderWorkflowStageEntry,
+  TraderWorkflowRunDetail,
+  TraderWorkflowRunStatus,
+  TraderWorkflowStage,
+  TraderWorkflowStageStatus,
   CronSchedule,
   CronJobState,
   CronJob,

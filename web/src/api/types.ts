@@ -188,6 +188,44 @@ export interface EventLogEntry {
   payload: unknown
 }
 
+export type TraderWorkflowStage =
+  | 'market-scan'
+  | 'trade-thesis'
+  | 'risk-check'
+  | 'trade-plan'
+  | 'trade-execute'
+  | 'trade-execute-script'
+
+export type TraderWorkflowStageStatus = 'completed' | 'skipped' | 'failed'
+export type TraderWorkflowRunStatus = 'running' | 'done' | 'skip' | 'error'
+
+export interface TraderWorkflowRunSummary {
+  runId: string
+  jobId: string
+  jobName?: string
+  strategyId: string
+  startedAt: number
+  endedAt: number | null
+  durationMs: number | null
+  status: TraderWorkflowRunStatus
+  endedStage: TraderWorkflowStage | null
+  headline: string
+}
+
+export interface TraderWorkflowStageEntry {
+  seq: number
+  ts: number
+  stage: TraderWorkflowStage
+  status: TraderWorkflowStageStatus
+  data: unknown
+}
+
+export interface TraderWorkflowRunDetail {
+  summary: TraderWorkflowRunSummary
+  stages: TraderWorkflowStageEntry[]
+  terminalEvent: EventLogEntry | null
+}
+
 // ==================== Cron ====================
 
 export type CronSchedule =

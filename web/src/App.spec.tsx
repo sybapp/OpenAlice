@@ -29,6 +29,7 @@ vi.mock('./routes/ChatPage', () => ({
 
 vi.mock('./routes/PortfolioPage', () => ({ PortfolioPage: () => <div>Portfolio Page</div> }))
 vi.mock('./routes/EventsPage', () => ({ EventsPage: () => <div>Events Page</div> }))
+vi.mock('./routes/WorkflowsPage', () => ({ WorkflowsPage: () => <div>Workflows Page</div> }))
 vi.mock('./routes/HeartbeatPage', () => ({ HeartbeatPage: () => <div>Heartbeat Page</div> }))
 vi.mock('./routes/DataSourcesPage', () => ({ DataSourcesPage: () => <div>Data Sources Page</div> }))
 vi.mock('./routes/ConnectorsPage', () => ({ ConnectorsPage: () => <div>Connectors Page</div> }))

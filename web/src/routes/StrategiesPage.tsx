@@ -113,7 +113,11 @@ function useTraderEvents() {
   const load = useCallback(async () => {
     try {
       const result = await api.events.recent({ limit: 80 })
-      setEntries(result.entries.filter((entry) => entry.type.startsWith('trader.')).slice(-12).reverse())
+      setEntries(result.entries.filter((entry) =>
+        entry.type === 'trader.done'
+        || entry.type === 'trader.skip'
+        || entry.type === 'trader.error'
+        || entry.type.startsWith('trader.review.')).slice(-12).reverse())
     } catch (err) {
       console.warn('Failed to load trader events:', err)
     }

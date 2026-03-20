@@ -14,6 +14,7 @@ function lazyPage<T extends Record<string, ComponentType<any>>>(loader: () => Pr
 const ChatPage = lazyPage(() => import('./routes/ChatPage'), 'ChatPage')
 const PortfolioPage = lazyPage(() => import('./routes/PortfolioPage'), 'PortfolioPage')
 const EventsPage = lazyPage(() => import('./routes/EventsPage'), 'EventsPage')
+const WorkflowsPage = lazyPage(() => import('./routes/WorkflowsPage'), 'WorkflowsPage')
 const SettingsPage = lazyPage(() => import('./routes/SettingsPage'), 'SettingsPage')
 const AIProviderPage = lazyPage(() => import('./routes/AIProviderPage'), 'AIProviderPage')
 const DataSourcesPage = lazyPage(() => import('./routes/DataSourcesPage'), 'DataSourcesPage')
@@ -26,7 +27,7 @@ const HeartbeatPage = lazyPage(() => import('./routes/HeartbeatPage'), 'Heartbea
 const ToolsPage = lazyPage(() => import('./routes/ToolsPage'), 'ToolsPage')
 
 export type Page =
-  | 'chat' | 'portfolio' | 'events' | 'heartbeat' | 'data-sources' | 'connectors'
+  | 'chat' | 'portfolio' | 'events' | 'workflows' | 'heartbeat' | 'data-sources' | 'connectors'
   | 'trading' | 'strategies' | 'backtest'
   | 'ai-provider' | 'settings' | 'tools' | 'dev'
 
@@ -35,6 +36,7 @@ export const ROUTES: Record<Page, string> = {
   'chat': '/',
   'portfolio': '/portfolio',
   'events': '/events',
+  'workflows': '/workflows',
   'heartbeat': '/heartbeat',
   'data-sources': '/data-sources',
   'connectors': '/connectors',
@@ -85,6 +87,7 @@ function AppShell() {
             <Route path="/" element={<ChatPage onSSEStatus={setSseConnected} />} />
             <Route path="/portfolio" element={<PortfolioPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/workflows" element={<WorkflowsPage />} />
             <Route path="/heartbeat" element={<HeartbeatPage />} />
             <Route path="/data-sources" element={<DataSourcesPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />

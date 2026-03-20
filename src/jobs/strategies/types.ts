@@ -304,6 +304,26 @@ export interface TraderReviewJobPatch {
   strategyId?: string
 }
 
+export type TraderWorkflowStage =
+  | 'market-scan'
+  | 'trade-thesis'
+  | 'risk-check'
+  | 'trade-plan'
+  | 'trade-execute'
+  | 'trade-execute-script'
+
+export type TraderWorkflowStageStatus = 'completed' | 'skipped' | 'failed'
+
+export interface TraderWorkflowStageEventPayload {
+  runId: string
+  jobId: string
+  jobName?: string
+  strategyId: string
+  stage: TraderWorkflowStage
+  status: TraderWorkflowStageStatus
+  data: unknown
+}
+
 export interface TraderReviewFirePayload {
   jobId: string
   jobName: string

@@ -19,6 +19,7 @@ import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
 import { createBacktestRoutes } from './routes/backtest.js'
 import { createStrategiesRoutes } from './routes/strategies.js'
+import { createWorkflowRoutes } from './routes/workflows.js'
 import { closeServer } from '../../core/close-server.js'
 
 export interface WebConfig {
@@ -73,6 +74,7 @@ function createWebApp(args: {
   app.route('/api/events', createEventsRoutes(ctx))
   app.route('/api/cron', createCronRoutes(ctx))
   app.route('/api/strategies', createStrategiesRoutes(ctx))
+  app.route('/api/workflows', createWorkflowRoutes(ctx))
   app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
   app.route('/api/trading/config', createTradingConfigRoutes(ctx))
   app.route('/api/trading', createTradingRoutes(ctx))

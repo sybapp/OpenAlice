@@ -35,6 +35,8 @@ import type {
   TraderRunnerResult,
   TraderStrategy,
   TraderTradePlanReadyResult,
+  TraderWorkflowStage,
+  TraderWorkflowStageEventPayload,
 } from './types.js'
 
 const TRADER_SKILLS = {
@@ -65,6 +67,12 @@ interface TraderPreflightSnapshot {
 interface SourcePresentationState {
   aliases: SourceAliasState
   realToDisplay: Record<string, string>
+}
+
+interface TraderRunMeta {
+  runId?: string
+  jobId?: string
+  jobName?: string
 }
 
 function replaceSourceReferences(text: string, aliases: SourceAliasState, toPublic: boolean): string {
@@ -317,6 +325,26 @@ function buildSkipResult(reason: string, rawText: string): TraderRunnerResult {
   }
 }
 
+async function appendTraderStageEvent(
+  deps: TraderRunnerDeps,
+  meta: TraderRunMeta,
+  strategyId: string,
+  stage: TraderWorkflowStage,
+  status: TraderWorkflowStageEventPayload['status'],
+  data: unknown,
+): Promise<void> {
+  if (!meta.runId || !meta.jobId) return
+  await deps.eventLog.append('trader.stage', {
+    runId: meta.runId,
+    jobId: meta.jobId,
+    jobName: meta.jobName,
+    strategyId,
+    stage,
+    status,
+    data,
+  } satisfies TraderWorkflowStageEventPayload)
+}
+
 function summarizePlannedOrder(order: TraderPlannedOrder): string {
   const size = order.qty !== undefined
     ? `qty=${order.qty}`
@@ -451,121 +479,185 @@ async function runCandidatePipeline(params: {
   session: SessionStore
   deps: TraderRunnerDeps
   presentation: SourcePresentationState
+  meta: TraderRunMeta
 }) {
-  const { strategy, candidate, preflightSnapshot, session, deps, presentation } = params
+  const { strategy, candidate, preflightSnapshot, session, deps, presentation, meta } = params
   const { aliases: sourceAliases } = presentation
   const publicStrategy = toPublicStrategy(strategy, sourceAliases)
   const publicCandidate = toPublicSource(candidate, sourceAliases)
   const publicPreflightSnapshot = toPublicSnapshot(preflightSnapshot, sourceAliases)
 
-  const thesis = await runSkillStage({
-    session,
-    skillId: TRADER_SKILLS.tradeThesis,
-    prompt: buildTradeThesisPrompt(publicStrategy, publicCandidate, publicPreflightSnapshot),
-    schema: traderTradeThesisSchema,
-    deps,
-    skillContext: createSkillContext({
-      strategy: publicStrategy,
-      candidate: publicCandidate,
-      snapshot: publicPreflightSnapshot,
-      stage: 'trade-thesis',
-    }, sourceAliases),
-  })
+  let thesis
+  try {
+    thesis = await runSkillStage({
+      session,
+      skillId: TRADER_SKILLS.tradeThesis,
+      prompt: buildTradeThesisPrompt(publicStrategy, publicCandidate, publicPreflightSnapshot),
+      schema: traderTradeThesisSchema,
+      deps,
+      skillContext: createSkillContext({
+        strategy: publicStrategy,
+        candidate: publicCandidate,
+        snapshot: publicPreflightSnapshot,
+        stage: 'trade-thesis',
+      }, sourceAliases),
+    })
+  } catch (error) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'failed', {
+      source: candidate.source,
+      symbol: candidate.symbol,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
   const thesisOutput = replaceStringsDeep(
     toInternalSource(thesis.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
 
   if (thesisOutput.status === 'no_trade') {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'skipped', thesisOutput)
     updateBrainIfPresent(deps, ...thesisOutput.contextNotes)
     return buildSkipResult(thesisOutput.rationale, thesis.rawText)
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'completed', thesisOutput)
 
   // Risk review must use a fresh account snapshot because the earlier AI stages may take minutes.
   const riskSnapshot = await buildPreflightSnapshot(strategy, deps)
   if (riskSnapshot.warnings.some((warning) => warning.includes('not available'))) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'failed', {
+      source: thesisOutput.source,
+      symbol: thesisOutput.symbol,
+      error: riskSnapshot.warnings.join(' '),
+    })
     return { fatal: buildSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText) }
   }
   const publicRiskSnapshot = toPublicSnapshot(riskSnapshot, sourceAliases)
   const publicThesis = toPublicSource(thesisOutput, sourceAliases)
 
-  const risk = await runSkillStage({
-    session,
-    skillId: TRADER_SKILLS.riskCheck,
-    prompt: buildRiskCheckPrompt(publicStrategy, publicThesis, publicRiskSnapshot),
-    schema: traderRiskCheckSchema,
-    deps,
-    skillContext: createSkillContext({
-      strategy: publicStrategy,
-      thesis: publicThesis,
-      snapshot: publicRiskSnapshot,
-      stage: 'risk-check',
-    }, sourceAliases),
-  })
+  let risk
+  try {
+    risk = await runSkillStage({
+      session,
+      skillId: TRADER_SKILLS.riskCheck,
+      prompt: buildRiskCheckPrompt(publicStrategy, publicThesis, publicRiskSnapshot),
+      schema: traderRiskCheckSchema,
+      deps,
+      skillContext: createSkillContext({
+        strategy: publicStrategy,
+        thesis: publicThesis,
+        snapshot: publicRiskSnapshot,
+        stage: 'risk-check',
+      }, sourceAliases),
+    })
+  } catch (error) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'failed', {
+      source: thesisOutput.source,
+      symbol: thesisOutput.symbol,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
   const riskOutput = replaceStringsDeep(
     toInternalSource(risk.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
 
   if (riskOutput.verdict !== 'pass') {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'skipped', riskOutput)
     return buildSkipResult(riskOutput.rationale, risk.rawText)
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'completed', riskOutput)
   const publicRisk = toPublicSource(riskOutput, sourceAliases)
 
-  const plan = await runSkillStage({
-    session,
-    skillId: TRADER_SKILLS.tradePlan,
-    prompt: buildTradePlanPrompt(publicStrategy, publicThesis, publicRisk),
-    schema: traderTradePlanSchema,
-    deps,
-    skillContext: createSkillContext({
-      strategy: publicStrategy,
-      thesis: publicThesis,
-      risk: publicRisk,
-      stage: 'trade-plan',
-    }, sourceAliases),
-  })
+  let plan
+  try {
+    plan = await runSkillStage({
+      session,
+      skillId: TRADER_SKILLS.tradePlan,
+      prompt: buildTradePlanPrompt(publicStrategy, publicThesis, publicRisk),
+      schema: traderTradePlanSchema,
+      deps,
+      skillContext: createSkillContext({
+        strategy: publicStrategy,
+        thesis: publicThesis,
+        risk: publicRisk,
+        stage: 'trade-plan',
+      }, sourceAliases),
+    })
+  } catch (error) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'failed', {
+      source: thesisOutput.source,
+      symbol: thesisOutput.symbol,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
   const planOutput = replaceStringsDeep(
     toInternalSource(plan.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
 
   if (planOutput.status !== 'plan_ready' || planOutput.orders.length === 0) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', planOutput)
     updateBrainIfPresent(deps, planOutput.brainUpdate)
     return buildSkipResult(planOutput.rationale, plan.rawText)
   }
 
   const hardRiskBlock = getHardRiskBudgetViolation(strategy, riskSnapshot, planOutput)
   if (hardRiskBlock) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', {
+      ...planOutput,
+      rationale: hardRiskBlock,
+      gate: 'hard-risk-budget',
+    })
     updateBrainIfPresent(deps, planOutput.brainUpdate)
     return buildSkipResult(hardRiskBlock, plan.rawText)
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'completed', planOutput)
   const publicPlan = toPublicSource(planOutput, sourceAliases)
 
-  const execute = await runSkillStage({
-    session,
-    skillId: TRADER_SKILLS.tradeExecute,
-    prompt: buildTradeExecutePrompt(publicStrategy, publicPlan),
-    schema: traderTradeExecuteSchema,
-    deps,
-    skillContext: createSkillContext({
-      strategy: publicStrategy,
-      plan: publicPlan,
-      stage: 'trade-execute',
-    }, sourceAliases),
-  })
+  let execute
+  try {
+    execute = await runSkillStage({
+      session,
+      skillId: TRADER_SKILLS.tradeExecute,
+      prompt: buildTradeExecutePrompt(publicStrategy, publicPlan),
+      schema: traderTradeExecuteSchema,
+      deps,
+      skillContext: createSkillContext({
+        strategy: publicStrategy,
+        plan: publicPlan,
+        stage: 'trade-execute',
+      }, sourceAliases),
+    })
+  } catch (error) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'failed', {
+      source: planOutput.source,
+      symbol: planOutput.symbol,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
   const executeOutput = replaceStringsDeep(
     toInternalSource(execute.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
 
   if (executeOutput.status !== 'execute') {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'skipped', executeOutput)
     updateBrainIfPresent(deps, executeOutput.brainUpdate)
     return buildSkipResult(executeOutput.rationale, execute.rawText)
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'completed', executeOutput)
 
   const executeScript = getSkillScript('trader-execute-plan')
   if (!executeScript) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute-script', 'failed', {
+      source: planOutput.source,
+      symbol: planOutput.symbol,
+      error: 'Missing trader-execute-plan script',
+    })
     throw new Error('Missing trader-execute-plan script')
   }
 
@@ -593,12 +685,26 @@ async function runCandidatePipeline(params: {
 
   const executionOutcome = buildExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
   if (executionOutcome.rejectedCount > 0 && executionOutcome.filledCount === 0 && executionOutcome.pendingCount === 0) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute-script', 'skipped', {
+      source: planOutput.source,
+      symbol: planOutput.symbol,
+      commitMessage: planOutput.commitMessage,
+      outcome: executionOutcome,
+      result: executionResult,
+    })
     return {
       status: 'skip' as const,
       reason: executionOutcome.rationale,
       rawText: JSON.stringify(executionResult, null, 2),
     }
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute-script', 'completed', {
+    source: planOutput.source,
+    symbol: planOutput.symbol,
+    commitMessage: planOutput.commitMessage,
+    outcome: executionOutcome,
+    result: executionResult,
+  })
 
   const decision: TraderDecision = {
     status: 'trade',
@@ -621,7 +727,7 @@ async function runCandidatePipeline(params: {
 }
 
 export async function runTraderJob(
-  params: { jobId: string; strategyId: string; session: SessionStore },
+  params: { jobId: string; strategyId: string; session: SessionStore; runId?: string; jobName?: string },
   deps: TraderRunnerDeps,
 ): Promise<TraderRunnerResult> {
   const strategy = await getTraderStrategy(params.strategyId)
@@ -640,19 +746,32 @@ export async function runTraderJob(
     return externalizeRunnerResult({ status: 'skip', reason: snapshot.warnings.join(' ') }, presentation)
   }
   const publicSnapshot = toPublicSnapshot(snapshot, sourceAliases)
+  const meta: TraderRunMeta = {
+    runId: params.runId,
+    jobId: params.jobId,
+    jobName: params.jobName,
+  }
 
-  const scan = await runSkillStage({
-    session: params.session,
-    skillId: TRADER_SKILLS.marketScan,
-    prompt: buildMarketScanPrompt(publicStrategy, publicSnapshot),
-    schema: traderMarketScanSchema,
-    deps,
-    skillContext: createSkillContext({
-      strategy: publicStrategy,
-      snapshot: publicSnapshot,
-      stage: 'market-scan',
-    }, sourceAliases),
-  })
+  let scan
+  try {
+    scan = await runSkillStage({
+      session: params.session,
+      skillId: TRADER_SKILLS.marketScan,
+      prompt: buildMarketScanPrompt(publicStrategy, publicSnapshot),
+      schema: traderMarketScanSchema,
+      deps,
+      skillContext: createSkillContext({
+        strategy: publicStrategy,
+        snapshot: publicSnapshot,
+        stage: 'market-scan',
+      }, sourceAliases),
+    })
+  } catch (error) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
   const scanOutput = {
     ...replaceStringsDeep(scan.output, (text) => replaceSourceReferences(text, sourceAliases, false)),
     candidates: scan.output.candidates.map((candidate) => replaceStringsDeep(
@@ -666,12 +785,14 @@ export async function runTraderJob(
   }
 
   if (scanOutput.candidates.length === 0) {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'skipped', scanOutput)
     return externalizeRunnerResult({
       status: 'skip',
       reason: resolveEmptyMarketScanReason(strategy, scanOutput.summary, scanOutput.evaluations),
       rawText: scan.rawText,
     }, presentation)
   }
+  await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'completed', scanOutput)
 
   let lastSkip: TraderRunnerResult = {
     status: 'skip',
@@ -687,6 +808,7 @@ export async function runTraderJob(
       session: params.session,
       deps,
       presentation,
+      meta,
     })
 
     if ('fatal' in result) {

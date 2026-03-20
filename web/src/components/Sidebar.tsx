@@ -50,6 +50,20 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    page: 'workflows',
+    label: 'Workflows',
+    icon: (active) => (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 6h7" />
+        <path d="M4 12h12" />
+        <path d="M4 18h7" />
+        <circle cx="15" cy="6" r="2" />
+        <circle cx="20" cy="12" r="2" />
+        <circle cx="15" cy="18" r="2" />
+      </svg>
+    ),
+  },
+  {
     page: 'heartbeat',
     label: 'Heartbeat',
     icon: (active) => (
