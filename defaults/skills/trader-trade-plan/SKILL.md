@@ -15,7 +15,7 @@ analysisMode: tool-first
 Use only after risk-check passes.
 
 ## Instructions
-Act like a constrained stage-agent. Check the plan contract resource if needed, gather the required fresh account evidence, and translate the thesis into a precise plan. Respect execution policy exactly. If no valid order plan fits the strategy, return skip.
+Act like a constrained stage-agent. Check the plan contract and checklist resources if needed, gather the required fresh account evidence, and translate the thesis into a precise plan. Respect execution policy exactly. If no valid order plan fits the strategy, return skip.
 
 ## Safety notes
 Do not execute the plan in this stage.

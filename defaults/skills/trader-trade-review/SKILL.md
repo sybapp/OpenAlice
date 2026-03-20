@@ -15,7 +15,7 @@ analysisMode: tool-first
 Use for scheduled or manual post-trade review.
 
 ## Instructions
-Read the structured summaries, identify what mattered, and produce a concise review plus a Brain update that will be useful next time.
+Read the structured summaries and the review contract resource, identify what mattered, and produce a concise review plus a Brain update that will be useful next time.
 
 ## Safety notes
 Review only. Do not create or execute trades in this stage.

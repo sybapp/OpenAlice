@@ -501,7 +501,7 @@ function buildScriptSkillTemplate(params: {
   ].join('\n')
 }
 
-const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
+const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string; resources?: Record<string, string> }> = [
   {
     dirName: 'ta-brooks',
     content: buildScriptSkillTemplate({
@@ -626,9 +626,26 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
       userInvocable: false,
       outputSchema: 'TraderTradePlan',
       whenToUse: 'Use only after risk-check passes.',
-      instructions: 'Translate the thesis into a precise plan. Respect execution policy exactly. If no valid order plan fits the strategy, return skip.',
+      instructions: 'Check the plan contract and checklist resources if needed, gather fresh account evidence, and translate the thesis into a precise plan. Respect execution policy exactly. If no valid order plan fits the strategy, return skip.',
       safetyNotes: 'Do not execute the plan in this stage.',
     }),
+    resources: {
+      'references/contract.md': [
+        '# Trade Plan Contract',
+        '',
+        '- Preserve the thesis `chosenScenario` and symbol/source exactly.',
+        '- Respect execution policy and return `skip` when a compliant plan is not possible.',
+        '- Emit a deterministic order plan with explicit rationale and invalidation.',
+      ].join('\n'),
+      'references/checklist.md': [
+        '# Trade Plan Checklist',
+        '',
+        '- Preserve the thesis `chosenScenario`; do not invent a new setup.',
+        '- Respect `executionPolicy.allowedOrderTypes` and `executionPolicy.requireProtection` exactly.',
+        '- Keep orders deterministic, with explicit size and trigger logic when available.',
+        '- Prefer `skip` when the thesis cannot be translated into a compliant order plan.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'trader-trade-execute',
@@ -641,9 +658,26 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
       userInvocable: false,
       outputSchema: 'TraderTradeExecute',
       whenToUse: 'Use only after a trade plan exists.',
-      instructions: 'Read the plan and decide whether to execute it exactly as written or abort it. Do not redesign the plan here.',
+      instructions: 'Check the execute contract and checklist resources if needed, then decide whether to execute the plan exactly as written or abort it. Do not redesign the plan here.',
       safetyNotes: 'You do not execute trades directly. You only confirm or abort.',
     }),
+    resources: {
+      'references/contract.md': [
+        '# Trade Execute Contract',
+        '',
+        '- Read the approved plan as immutable input.',
+        '- Return `execute` only when the plan should be pushed exactly as written.',
+        '- Return `abort` when the setup, policy, or freshness check no longer holds.',
+      ].join('\n'),
+      'references/checklist.md': [
+        '# Trade Execute Checklist',
+        '',
+        '- Confirm the staged plan still matches the current setup.',
+        '- Do not redesign sizing, entries, or exits in this stage.',
+        '- Return `abort` if the plan no longer fits the evidence or policy.',
+        '- Return `execute` only when the plan should be pushed exactly as written.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'trader-trade-review',
@@ -656,9 +690,19 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
       userInvocable: false,
       outputSchema: 'TraderTradeReview',
       whenToUse: 'Use for scheduled or manual post-trade review.',
-      instructions: 'Read the structured summaries, identify what mattered, and produce a concise review plus a Brain update that will be useful next time.',
+      instructions: 'Read the structured summaries and the review contract resource, identify what mattered, and produce a concise review plus a Brain update that will be useful next time.',
       safetyNotes: 'Review only. Do not create or execute trades in this stage.',
     }),
+    resources: {
+      'references/contract.md': [
+        '# Trade Review Contract',
+        '',
+        '- Read the structured review summaries before writing judgment.',
+        '- Focus on what changed, what repeated, and what should be remembered next run.',
+        '- Propose a strategy patch only when the evidence supports a concrete behavior adjustment.',
+        '- Keep the Brain update concise and operational.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'ops-cron-maintainer',
@@ -685,7 +729,7 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string }> = [
 export async function ensureDefaultSkillPacks(): Promise<void> {
   const defaultSkillsDir = getDefaultSkillsDir()
   await mkdir(defaultSkillsDir, { recursive: true })
-  await Promise.all(DEFAULT_SKILL_TEMPLATES.map(async ({ dirName, content }) => {
+  await Promise.all(DEFAULT_SKILL_TEMPLATES.map(async ({ dirName, content, resources }) => {
     const skillDir = resolve(defaultSkillsDir, dirName)
     const filePath = resolve(skillDir, SKILL_FILE_NAME)
     try {
@@ -697,6 +741,18 @@ export async function ensureDefaultSkillPacks(): Promise<void> {
       await mkdir(dirname(filePath), { recursive: true })
       await writeFile(filePath, content)
     }
+    await Promise.all(Object.entries(resources ?? {}).map(async ([relativePath, resourceContent]) => {
+      const resourcePath = resolve(skillDir, relativePath)
+      try {
+        await readFile(resourcePath, 'utf-8')
+      } catch (err: unknown) {
+        if (!(err instanceof Error) || !('code' in err) || (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw err
+        }
+        await mkdir(dirname(resourcePath), { recursive: true })
+        await writeFile(resourcePath, resourceContent)
+      }
+    }))
   }))
 }
 
