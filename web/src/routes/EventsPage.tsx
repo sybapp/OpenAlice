@@ -149,8 +149,6 @@ function matchesTraderQuickFilter(entry: EventLogEntry, quickFilter: TraderQuick
       return entry.type === 'trader.error' || entry.type === 'trader.review.error'
     case 'review':
       return entry.type.startsWith('trader.review.')
-    case 'all':
-      return true
   }
 }
 

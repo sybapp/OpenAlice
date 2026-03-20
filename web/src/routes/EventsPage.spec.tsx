@@ -150,9 +150,11 @@ describe('EventsPage', () => {
     })
 
     render(<EventsPage />)
+    await screen.findByRole('table')
+    const tbody = () => document.querySelector('tbody') as HTMLElement
 
-    expect((await screen.findAllByText('trader.error')).length).toBeGreaterThan(0)
-    await userEvent.click(screen.getAllByText('trader.error')[1]!)
+    expect(within(tbody()).getByText('trader.error')).toBeInTheDocument()
+    await userEvent.click(within(tbody()).getByText('trader.error').closest('tr')!)
 
     expect(await screen.findByText('Raw Payload')).toBeInTheDocument()
     expect(screen.getAllByText('Error').length).toBeGreaterThan(0)
@@ -163,7 +165,7 @@ describe('EventsPage', () => {
     expect(screen.getByText('Cancel pending order')).toBeInTheDocument()
     expect(screen.getByText('If 15m closes above prior swing high')).toBeInTheDocument()
 
-    await userEvent.click(screen.getAllByText('trader.skip')[1]!)
+    await userEvent.click(within(tbody()).getByText('trader.skip').closest('tr')!)
 
     expect((await screen.findAllByText('Skipped')).length).toBeGreaterThan(0)
     expect(screen.getByText('Source: Paper Beta')).toBeInTheDocument()
