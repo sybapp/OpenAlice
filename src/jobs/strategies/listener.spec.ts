@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import type { SessionStore } from '../../core/session.js'
 import { createEventLog, type EventLog, type EventLogEntry } from '../../core/event-log.js'
 import { createTraderListener } from './listener.js'
 
@@ -169,6 +170,84 @@ describe('trader listener', () => {
     })
 
     gate.resolve({ status: 'done', reason: 'completed cleanly' })
+    await listener.stop()
+  })
+
+  it('keeps separate sessions when the same job switches strategies', async () => {
+    runTraderJob.mockResolvedValue({ status: 'skip', reason: 'no trade', rawText: '{}' })
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify: vi.fn() } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-1',
+      jobName: 'Trader Job',
+      strategyId: 'btcusdt-auto-execution',
+    })
+    await eventLog.append('trader.fire', {
+      jobId: 'job-1',
+      jobName: 'Trader Job',
+      strategyId: 'mean-revert',
+    })
+
+    await vi.waitFor(() => expect(runTraderJob).toHaveBeenCalledTimes(2))
+
+    const firstSession = runTraderJob.mock.calls[0][0].session as SessionStore
+    const secondSession = runTraderJob.mock.calls[1][0].session as SessionStore
+    expect(firstSession.id).toBe('trader/job-1-btcusdt-auto-execution')
+    expect(secondSession.id).toBe('trader/job-1-mean-revert')
+    expect(secondSession.id).not.toBe(firstSession.id)
+
+    await listener.stop()
+  })
+
+  it('reuses the same session for repeated fires of one strategy', async () => {
+    runTraderJob.mockResolvedValue({ status: 'skip', reason: 'no trade', rawText: '{}' })
+
+    const listener = createTraderListener({
+      config: {} as never,
+      engine: {} as never,
+      eventLog,
+      connectorCenter: { notify: vi.fn() } as never,
+      brain: {} as never,
+      accountManager: {} as never,
+      marketData: {} as never,
+      ohlcvStore: {} as never,
+      newsStore: {} as never,
+      getAccountGit: () => undefined,
+    })
+
+    listener.start()
+    await eventLog.append('trader.fire', {
+      jobId: 'job-1',
+      jobName: 'Trader Job',
+      strategyId: 'mean-revert',
+    })
+    await vi.waitFor(() => expect(runTraderJob).toHaveBeenCalledTimes(1))
+    await eventLog.append('trader.fire', {
+      jobId: 'job-1',
+      jobName: 'Trader Job',
+      strategyId: 'mean-revert',
+    })
+
+    await vi.waitFor(() => expect(runTraderJob).toHaveBeenCalledTimes(2))
+
+    const firstSession = runTraderJob.mock.calls[0][0].session as SessionStore
+    const secondSession = runTraderJob.mock.calls[1][0].session as SessionStore
+    expect(secondSession).toBe(firstSession)
+    expect(secondSession.id).toBe('trader/job-1-mean-revert')
+
     await listener.stop()
   })
 

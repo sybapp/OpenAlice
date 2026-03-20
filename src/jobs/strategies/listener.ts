@@ -14,6 +14,10 @@ interface TraderListenerOpts extends TraderRunnerDeps {
   connectorCenter?: ConnectorCenter
 }
 
+function buildTraderSessionId(jobId: string, strategyId: string): string {
+  return `trader/${jobId}-${strategyId}`
+}
+
 function formatTraderErrorNotification(payload: TraderFirePayload, error: string): string {
   const compactError = error.replace(/\s+/g, ' ').trim().slice(0, 600)
   return [
@@ -50,12 +54,13 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
   const processingStrategies = new Set<string>()
   const inFlight = new Set<Promise<void>>()
 
-  async function getSession(jobId: string): Promise<SessionStore> {
-    const existing = sessions.get(jobId)
+  async function getSession(jobId: string, strategyId: string): Promise<SessionStore> {
+    const sessionId = buildTraderSessionId(jobId, strategyId)
+    const existing = sessions.get(sessionId)
     if (existing) return existing
-    const session = new SessionStore(`trader/${jobId}`)
+    const session = new SessionStore(sessionId)
     await session.restore()
-    sessions.set(jobId, session)
+    sessions.set(sessionId, session)
     return session
   }
 
@@ -73,7 +78,7 @@ export function createTraderListener(opts: TraderListenerOpts): TraderListener {
     processingStrategies.add(payload.strategyId)
     const startMs = Date.now()
     try {
-      const session = await getSession(payload.jobId)
+      const session = await getSession(payload.jobId, payload.strategyId)
       const result = await runTraderJob({
         jobId: payload.jobId,
         strategyId: payload.strategyId,
