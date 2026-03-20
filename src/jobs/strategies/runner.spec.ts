@@ -55,6 +55,7 @@ function makeDeps() {
 }
 
 function makeAccount(overrides?: {
+  label?: string
   equity?: number
   positions?: Array<{ symbol?: string; marketValue: number; currentPrice?: number }>
   orders?: unknown[]
@@ -75,6 +76,7 @@ function makeAccount(overrides?: {
   }))
   const orders = overrides?.orders ?? []
   return {
+    label: overrides?.label ?? 'Main Account',
     getAccount: vi.fn(async () => ({
       cash: 5_000,
       equity,
@@ -250,6 +252,132 @@ describe('runTraderJob', () => {
     expect(account.getOrders).toHaveBeenCalledTimes(2)
     expect(deps.engine.askWithSession.mock.calls[2][0]).toContain('"equity": 9600')
     expect(deps.engine.askWithSession.mock.calls[2][0]).toContain('"marketValue": 1900')
+  })
+
+  it('masks real trading source ids before sending trader prompts to the model', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      sources: ['paper-1'],
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession
+      .mockResolvedValueOnce(complete({
+        candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+        summary: 'one good candidate',
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'no_trade',
+        source: 'source-1',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'flat',
+        chosenScenario: 'no trade',
+        rationale: 'Stand aside.',
+        invalidation: ['n/a'],
+        confidence: 0.2,
+        contextNotes: [],
+      }))
+
+    const result = await runTraderJob({
+      jobId: 'job-masked-source',
+      strategyId: 'momentum',
+      session: { id: 'session-masked-source' } as SessionStore,
+    }, deps)
+
+    expect(result.status).toBe('skip')
+
+    const scanPrompt = String(deps.engine.askWithSession.mock.calls[0][0])
+    const thesisPrompt = String(deps.engine.askWithSession.mock.calls[1][0])
+    expect(scanPrompt).toContain('source-1')
+    expect(scanPrompt).not.toContain('paper-1')
+    expect(thesisPrompt).toContain('source-1')
+    expect(thesisPrompt).not.toContain('paper-1')
+
+    const scanOptions = deps.engine.askWithSession.mock.calls[0][2]
+    expect(scanOptions.skillContext.strategy.sources).toEqual(['source-1'])
+    expect(scanOptions.skillContext.__sourceAliases.aliasToReal).toEqual({ 'source-1': 'paper-1' })
+  })
+
+  it('returns user-facing source labels instead of internal aliases or source ids', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      sources: ['paper-1'],
+    })
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({
+        commit: { hash: 'abc12345' },
+        pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }], pending: [], rejected: [] },
+        commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }] },
+      })),
+    })
+
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
+    deps.engine.askWithSession
+      .mockResolvedValueOnce(complete({
+        candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup on source-1' }],
+        summary: 'one good candidate from source-1',
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'thesis_ready',
+        source: 'source-1',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'long',
+        chosenScenario: 'primary breakout continuation',
+        alternateScenario: 'range failure',
+        rationale: 'source-1 trend and pullback context align.',
+        invalidation: ['loss of breakout level on source-1'],
+        confidence: 0.74,
+        contextNotes: ['Watch source-1 only.'],
+      }))
+      .mockResolvedValueOnce(complete({
+        verdict: 'pass',
+        source: 'source-1',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Risk budget is available on source-1.',
+        maxRiskPercent: 0.5,
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'plan_ready',
+        source: 'source-1',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'primary breakout continuation',
+        rationale: 'Trend and pullback context align on source-1.',
+        invalidation: ['loss of breakout level on source-1'],
+        commitMessage: 'momentum: source-1 breakout BTC/USDT:USDT',
+        brainUpdate: 'Only execute on source-1.',
+        orders: [{
+          aliceId: 'bybit-BTCUSDT',
+          symbol: 'BTC/USDT:USDT',
+          side: 'buy',
+          type: 'stop',
+          qty: 1,
+          stopPrice: 100,
+          timeInForce: 'day',
+        }],
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'execute',
+        source: 'source-1',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Confirm execution on source-1.',
+        brainUpdate: 'Execute only if source-1 still matches structure.',
+      }))
+
+    const result = await runTraderJob({
+      jobId: 'job-user-facing-source',
+      strategyId: 'momentum',
+      session: { id: 'session-user-facing-source' } as SessionStore,
+    }, deps)
+
+    expect(result.status).toBe('done')
+    expect(result.decision?.source).toBe('Paper Alpha')
+    expect(result.reason).toBe('Confirm execution on Paper Alpha.')
+    expect(result.reason).not.toContain('source-1')
+    expect(result.rawText).not.toContain('source-1')
+    expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith(
+      'Only execute on paper-1.\nExecute only if paper-1 still matches structure.',
+    )
   })
 
   it('tries later scan candidates when the first one is rejected upstream', async () => {
@@ -836,10 +964,11 @@ describe('runTraderReview', () => {
 
   it('updates brain and writes a review event from the review skill result', async () => {
     const deps = makeDeps()
-    deps.accountManager.listAccounts.mockReturnValue([{ id: 'ccxt-main' }])
+    deps.accountManager.listAccounts.mockReturnValue([{ id: 'paper-1' }])
+    deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
     deps.engine.askWithSession.mockResolvedValue(complete({
-      summary: 'Review summary text',
-      brainUpdate: 'Stay selective and keep sizing small after mixed outcomes.',
+      summary: 'Review summary for source-1',
+      brainUpdate: 'Stay selective on source-1 and keep sizing small after mixed outcomes.',
     }))
 
     const result = await runTraderReview(undefined, deps, {
@@ -849,7 +978,7 @@ describe('runTraderReview', () => {
     })
 
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith(
-      'Stay selective and keep sizing small after mixed outcomes.',
+      'Stay selective on Paper Alpha and keep sizing small after mixed outcomes.',
     )
     expect(deps.eventLog.append).toHaveBeenCalledWith('trader.review.done', {
       strategyId: undefined,
@@ -857,11 +986,11 @@ describe('runTraderReview', () => {
       jobId: 'review-1',
       jobName: 'Nightly Review',
       updated: true,
-      summary: 'Review summary text',
+      summary: 'Review summary for Paper Alpha',
     })
     expect(result).toEqual({
       updated: true,
-      summary: 'Review summary text',
+      summary: 'Review summary for Paper Alpha',
       strategyId: undefined,
     })
   })

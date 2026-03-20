@@ -1,10 +1,10 @@
 import { z } from 'zod'
-import type { Config } from '../config.js'
-import type { EventLog } from '../event-log.js'
+import type { Config } from '../core/config.js'
+import type { EventLog } from '../core/event-log.js'
 import type { Brain } from '../domains/cognition/brain/index.js'
 import type { AccountManager } from '../domains/trading/index.js'
 import type { ITradingGit } from '../domains/trading/index.js'
-import type { MarketDataBridge } from '../types.js'
+import type { MarketDataBridge } from '../core/types.js'
 import type { INewsProvider } from '../domains/research/news-collector/types.js'
 import { analyzeBrooksPa } from '../domains/technical-analysis/brooks-pa/analyzer/index.js'
 import { buildBrooksCoreFromDetailed } from '../domains/technical-analysis/brooks-pa/analyzer/core.js'
@@ -15,6 +15,11 @@ import type { OhlcvData } from '../domains/technical-analysis/indicator-kit/inde
 import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 import type { NewsItem } from '../domains/research/news-collector/types.js'
 import { globNews, grepNews, readNews } from '../domains/research/news-collector/tools.js'
+import {
+  presentSourceAlias,
+  readHiddenSourceAliases,
+  resolveSourceAlias,
+} from '../core/source-alias.js'
 
 export interface SkillScriptContext {
   config: Config
@@ -35,6 +40,14 @@ export interface SkillScriptModule<TInput = unknown, TOutput = unknown> {
   inputGuide?: string
   outputSchema?: z.ZodType<TOutput>
   run: (ctx: SkillScriptContext, input: TInput) => Promise<TOutput>
+}
+
+export type AnySkillScriptModule = SkillScriptModule<any, any>
+
+function defineScript<TInput, TOutput>(
+  script: SkillScriptModule<TInput, TOutput>,
+): SkillScriptModule<TInput, TOutput> {
+  return script
 }
 
 interface BacktestScriptInvocation {
@@ -63,6 +76,18 @@ function getBacktestInvocation(ctx: SkillScriptContext): BacktestScriptInvocatio
   const candidate = ctx.invocation.backtest
   if (!candidate || typeof candidate !== 'object') return null
   return candidate as BacktestScriptInvocation
+}
+
+function getSourceAliases(ctx: SkillScriptContext) {
+  return readHiddenSourceAliases(ctx.invocation)
+}
+
+function resolveTraderSource(ctx: SkillScriptContext, source: string): string {
+  return resolveSourceAlias(getSourceAliases(ctx), source)
+}
+
+function presentTraderSource(ctx: SkillScriptContext, source: string): string {
+  return presentSourceAlias(getSourceAliases(ctx), source)
 }
 
 function toOhlcvData(bar: {
@@ -175,10 +200,11 @@ function formatIctResult(
 }
 
 async function buildTraderAccountSnapshot(ctx: SkillScriptContext, source: string) {
+  const resolvedSource = resolveTraderSource(ctx, source)
   const backtest = getBacktestInvocation(ctx)
-  if (backtest?.source === source) {
+  if (backtest?.source === resolvedSource) {
     return {
-      source,
+      source: presentTraderSource(ctx, resolvedSource),
       account: backtest.account ?? null,
       positions: backtest.positions ?? [],
       orders: backtest.orders ?? [],
@@ -186,7 +212,7 @@ async function buildTraderAccountSnapshot(ctx: SkillScriptContext, source: strin
     }
   }
 
-  const account = ctx.accountManager.getAccount(source)
+  const account = ctx.accountManager.getAccount(resolvedSource)
   if (!account) {
     throw new Error(`Configured source not available: ${source}`)
   }
@@ -199,7 +225,7 @@ async function buildTraderAccountSnapshot(ctx: SkillScriptContext, source: strin
   ])
 
   return {
-    source,
+    source: presentTraderSource(ctx, resolvedSource),
     account: accountInfo,
     positions,
     orders,
@@ -212,7 +238,7 @@ async function searchMarket(ctx: SkillScriptContext, query: string, limit: numbe
   const results = matches
     .flatMap((match) => match.results.map((item) => ({
       assetClass: 'crypto' as const,
-      source: match.accountId,
+      source: presentTraderSource(ctx, match.accountId),
       aliceId: item.contract.aliceId,
       symbol: item.contract.localSymbol ?? item.contract.symbol,
       exchange: item.contract.exchange,
@@ -273,8 +299,8 @@ const brooksTimeframesSchema = z.object({
   execution: z.string().optional(),
 }).optional()
 
-const scripts = [
-  {
+const scripts: AnySkillScriptModule[] = [
+  defineScript({
     id: 'research-market-search',
     description: 'Search crypto symbols across configured CCXT accounts before running analysis.',
     inputSchema: z.object({
@@ -284,8 +310,8 @@ const scripts = [
     async run(ctx, input) {
       return searchMarket(ctx, input.query, input.limit)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'analysis-brooks',
     description: 'Run deterministic Brooks-style price action analysis.',
     inputGuide: 'Use an object like {"asset":"crypto","symbol":"BTC/USDT:USDT","timeframes":{"context":"1h","structure":"15m","execution":"5m"}}. timeframes must be a named object, never an array.',
@@ -364,8 +390,8 @@ const scripts = [
       })
       return formatBrooksResult(input.symbol, timeframes, lookbackBars, recentBars, detailLevel, detailed)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'analysis-ict-smc',
     description: 'Run deterministic ICT/SMC structure analysis.',
     inputGuide: 'Use an object like {"asset":"crypto","symbol":"BTC/USDT:USDT","timeframe":"15m"}. asset must stay the literal string "crypto".',
@@ -415,8 +441,8 @@ const scripts = [
 
       return formatIctResult(detailLevel, output)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'analysis-indicator',
     description: 'Calculate a technical indicator formula for a symbol.',
     inputGuide: 'Use an object like {"asset":"crypto","formula":"close(\"BTC/USDT:USDT\", \"5m\")"}. asset must stay the literal string "crypto".',
@@ -448,8 +474,8 @@ const scripts = [
       })
       return calculator.calculate(input.formula, input.precision)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'research-news-company',
     description: 'Load recent symbol-specific news from the collected news archive.',
     inputSchema: z.object({
@@ -472,8 +498,8 @@ const scripts = [
         items,
       }
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'research-news-world',
     description: 'Load recent world/macro news from the collected news archive.',
     inputSchema: z.object({
@@ -492,8 +518,8 @@ const scripts = [
         items,
       }
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'research-news-archive-glob',
     description: 'Search archived news headlines by regex pattern.',
     inputSchema: z.object({
@@ -505,8 +531,8 @@ const scripts = [
     async run(ctx, input) {
       return globNews(createNewsArchiveReader(ctx, input.lookback), input)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'research-news-archive-grep',
     description: 'Search archived news content by regex pattern.',
     inputSchema: z.object({
@@ -519,8 +545,8 @@ const scripts = [
     async run(ctx, input) {
       return grepNews(createNewsArchiveReader(ctx, input.lookback), input)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'research-news-archive-read',
     description: 'Read one archived news item by index.',
     inputSchema: z.object({
@@ -531,8 +557,8 @@ const scripts = [
       const result = await readNews(createNewsArchiveReader(ctx, input.lookback), input)
       return result ?? { error: `News index ${input.index} not found` }
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'trader-account-state',
     description: 'Load fresh account, position, order, and market clock state for a configured source.',
     inputSchema: z.object({
@@ -541,8 +567,8 @@ const scripts = [
     async run(ctx, input) {
       return buildTraderAccountSnapshot(ctx, input.source)
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'trader-review-summaries',
     description: 'Summarize recent trading history and stats for one or more account sources.',
     inputSchema: z.object({
@@ -551,21 +577,22 @@ const scripts = [
     }),
     async run(ctx, input) {
       return input.sources.map((source) => {
-        const git = ctx.getAccountGit(source)
+        const resolvedSource = resolveTraderSource(ctx, source)
+        const git = ctx.getAccountGit(resolvedSource)
         if (!git) {
           return { source, summary: 'No trading history available.' }
         }
         const commits = git.log({ limit: input.limit })
         return {
-          source,
+          source: presentTraderSource(ctx, resolvedSource),
           totalCommits: commits.length,
           latestCommit: commits[0]?.hash ?? null,
           latestMessage: commits[0]?.message ?? null,
         }
       })
     },
-  },
-  {
+  }),
+  defineScript({
     id: 'trader-execute-plan',
     description: 'Deterministically execute a staged trade plan via placeOrder -> tradingCommit -> tradingPush.',
     inputSchema: z.object({
@@ -598,7 +625,8 @@ const scripts = [
       })).min(1),
     }),
     async run(ctx, input) {
-      const git = ctx.getAccountGit(input.source)
+      const resolvedSource = resolveTraderSource(ctx, input.source)
+      const git = ctx.getAccountGit(resolvedSource)
       if (!git) {
         throw new Error(`No git instance for account "${input.source}"`)
       }
@@ -617,18 +645,18 @@ const scripts = [
 
       return { staged, commit, pushed, commitDetails }
     },
-  },
-] satisfies SkillScriptModule[]
+  }),
+]
 
-const scriptMap = new Map(scripts.map((script) => [script.id, script]))
+const scriptMap = new Map<string, AnySkillScriptModule>(scripts.map((script) => [script.id, script]))
 
-export function getSkillScript(id: string): SkillScriptModule | null {
+export function getSkillScript(id: string): AnySkillScriptModule | null {
   return scriptMap.get(id) ?? null
 }
 
-export function listSkillScripts(ids?: string[]): SkillScriptModule[] {
+export function listSkillScripts(ids?: string[]): AnySkillScriptModule[] {
   if (!ids?.length) return [...scriptMap.values()]
   return ids
     .map((id) => scriptMap.get(id))
-    .filter((script): script is SkillScriptModule => Boolean(script))
+    .filter((script): script is AnySkillScriptModule => Boolean(script))
 }

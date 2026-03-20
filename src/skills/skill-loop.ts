@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import type { MediaAttachment } from '../types.js'
-import type { AgentCenter } from '../agent-center.js'
-import type { EngineAskOptions, EngineResult } from '../engine.js'
-import type { SessionEntry, SessionStore } from '../session.js'
+import type { MediaAttachment } from '../core/types.js'
+import type { AgentCenter } from '../core/agent-center.js'
+import type { EngineAskOptions, EngineResult } from '../core/engine.js'
+import type { SessionEntry, SessionStore } from '../core/session.js'
 import { getCompletionSchema } from './completion-schemas.js'
 import type { SkillPack } from './registry.js'
 import { getSkillPack } from './registry.js'
 import { getSessionSkillId } from './session-skill.js'
 import { getSkillScript, listSkillScripts, type SkillScriptContext } from './script-registry.js'
+import { omitHiddenInvocationFields } from '../core/source-alias.js'
 
 const skillLoopEnvelope = {
   requestScripts: {
@@ -148,6 +149,7 @@ function buildSkillLoopPrompt(params: {
   loadedResources: Array<{ id: string; content: string }>
   scriptResults: Array<{ id: string; input: unknown; output: unknown }>
 }): string {
+  const publicInvocation = omitHiddenInvocationFields(params.invocation)
   const availableScripts = listSkillScripts(params.allowedScripts).map((script) => ({
     id: script.id,
     description: script.description,
@@ -159,7 +161,7 @@ function buildSkillLoopPrompt(params: {
     `Task:\n${params.task}`,
     '',
     params.skill.stage ? `Stage: ${params.skill.stage}` : '',
-    Object.keys(params.invocation).length > 0 ? `Invocation context:\n${JSON.stringify(params.invocation, null, 2)}` : '',
+    Object.keys(publicInvocation).length > 0 ? `Invocation context:\n${JSON.stringify(publicInvocation, null, 2)}` : '',
     availableResources.length > 0
       ? `Supporting resources available on request:\n${availableResources.join(', ')}`
       : 'No supporting resources are available for this skill.',

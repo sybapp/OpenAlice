@@ -129,7 +129,9 @@ export function summarizeIctDecisionWindow(params: {
       rangeHigh,
       rangeLow,
       liquiditySweep: recentLiquiditySweep?.side === 'buy' ? 'buy-side' : recentLiquiditySweep?.side === 'sell' ? 'sell-side' : 'none',
-      displacement: params.structure.displacement.active ? params.structure.displacement.side : 'none',
+      displacement: params.structure.displacement.active && params.structure.displacement.side !== 'neutral'
+        ? params.structure.displacement.side
+        : 'none',
       mitigation: params.structure.mitigation.active ? 'active' : 'none',
       premiumDiscount: params.structure.premiumDiscount.state,
       notes,

@@ -17,7 +17,7 @@ import { StreamableResult, type AskOptions, type ProviderEvent } from './ai-prov
 import type { AgentCenter } from './agent-center.js'
 import type { LocalCommandContext } from './commands/types.js'
 import { type LocalCommandRouter } from './commands/router.js'
-import type { SkillLoopRunner } from './skills/skill-loop.js'
+import type { SkillLoopRunner } from '../skills/skill-loop.js'
 
 // ==================== Types ====================
 

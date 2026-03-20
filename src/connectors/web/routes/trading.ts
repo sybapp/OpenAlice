@@ -7,14 +7,25 @@ import type { ITradingGit } from '../../../domains/trading/git/interfaces.js'
 export function createTradingRoutes(ctx: EngineContext) {
   const app = new Hono()
 
+  function requireParam(c: Context, key: string): string | Response {
+    const value = c.req.param(key)
+    return typeof value === 'string' && value.length > 0
+      ? value
+      : c.json({ error: `Missing route param: ${key}` }, { status: 400 })
+  }
+
   function getAccountOrError(c: Context): ITradingAccount | Response {
-    const account = ctx.accountManager.getAccount(c.req.param('id'))
-    return account ?? c.json({ error: 'Account not found' }, 404)
+    const id = requireParam(c, 'id')
+    if (id instanceof Response) return id
+    const account = ctx.accountManager.getAccount(id)
+    return account ?? c.json({ error: 'Account not found' }, { status: 404 })
   }
 
   function getTradingGitOrError(c: Context): ITradingGit | Response {
-    const git = ctx.getAccountGit(c.req.param('id'))
-    return git ?? c.json({ error: 'Account or trading history not found' }, 404)
+    const id = requireParam(c, 'id')
+    if (id instanceof Response) return id
+    const git = ctx.getAccountGit(id)
+    return git ?? c.json({ error: 'Account or trading history not found' }, { status: 404 })
   }
 
   // ==================== Accounts listing ====================
@@ -30,7 +41,7 @@ export function createTradingRoutes(ctx: EngineContext) {
       const equity = await ctx.accountManager.getAggregatedEquity()
       return c.json(equity)
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -38,9 +49,10 @@ export function createTradingRoutes(ctx: EngineContext) {
 
   // Reconnect
   app.post('/accounts/:id/reconnect', async (c) => {
-    const id = c.req.param('id')
+    const id = requireParam(c, 'id')
+    if (id instanceof Response) return id
     const result = await ctx.reconnectAccount(id)
-    return c.json(result, result.success ? 200 : 500)
+    return c.json(result, { status: result.success ? 200 : 500 })
   })
 
   // Account info
@@ -50,7 +62,7 @@ export function createTradingRoutes(ctx: EngineContext) {
     try {
       return c.json(await account.getAccount())
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -62,7 +74,7 @@ export function createTradingRoutes(ctx: EngineContext) {
       const positions = await account.getPositions()
       return c.json({ positions })
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -74,7 +86,7 @@ export function createTradingRoutes(ctx: EngineContext) {
       const orders = await account.getOrders()
       return c.json({ orders })
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -82,11 +94,11 @@ export function createTradingRoutes(ctx: EngineContext) {
   app.get('/accounts/:id/market-clock', async (c) => {
     const account = getAccountOrError(c)
     if (account instanceof Response) return account
-    if (!account.getMarketClock) return c.json({ error: 'Market clock not supported' }, 501)
+    if (!account.getMarketClock) return c.json({ error: 'Market clock not supported' }, { status: 501 })
     try {
       return c.json(await account.getMarketClock())
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -95,11 +107,12 @@ export function createTradingRoutes(ctx: EngineContext) {
     const account = getAccountOrError(c)
     if (account instanceof Response) return account
     try {
-      const symbol = c.req.param('symbol')
+      const symbol = requireParam(c, 'symbol')
+      if (symbol instanceof Response) return symbol
       const quote = await account.getQuote({ symbol })
       return c.json(quote)
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -116,8 +129,10 @@ export function createTradingRoutes(ctx: EngineContext) {
   const getTradingShow = (c: Context) => {
     const git = getTradingGitOrError(c)
     if (git instanceof Response) return git
-    const commit = git.show(c.req.param('hash'))
-    if (!commit) return c.json({ error: 'Commit not found' }, 404)
+    const hash = requireParam(c, 'hash')
+    if (hash instanceof Response) return hash
+    const commit = git.show(hash)
+    if (!commit) return c.json({ error: 'Commit not found' }, { status: 404 })
     return c.json(commit)
   }
 

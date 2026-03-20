@@ -77,6 +77,19 @@ describe('CcxtAccount placeOrder', () => {
     mockState.createOrderCalls.length = 0
   })
 
+  it('uses a neutral default label that does not reveal sandbox mode', () => {
+    const account = new CcxtAccount({
+      exchange: 'binance',
+      apiKey: 'k',
+      apiSecret: 's',
+      sandbox: true,
+      demoTrading: true,
+      defaultMarketType: 'swap',
+    })
+
+    expect(account.label).toBe('Binance')
+  })
+
   it('passes stopPrice and triggerPrice for stop orders', async () => {
     const account = new CcxtAccount({
       exchange: 'binance',

@@ -23,7 +23,7 @@ export class CcxtPlatform implements IPlatform {
     this.id = config.id
     this.providerType = config.exchange
     const exchangeLabel = config.exchange.charAt(0).toUpperCase() + config.exchange.slice(1)
-    this.label = config.label ?? `${exchangeLabel} ${config.defaultMarketType} (${config.sandbox ? 'testnet' : 'live'})`
+    this.label = config.label ?? `${exchangeLabel} ${config.defaultMarketType}`
   }
 
   createAccount(credentials: PlatformCredentials): CcxtAccount {

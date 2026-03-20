@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SessionEntry, SessionStore } from '../session.js'
+import type { SessionEntry, SessionStore } from '../core/session.js'
 
 export const SKILL_MARKER_KIND = 'skill'
 
@@ -16,7 +16,7 @@ export async function setSessionSkill(session: SessionStore, profileId: string |
   const entry: SessionEntry = {
     type: 'system',
     message: { role: 'system', content: profileId ? `skill:${profileId}` : 'skill:off' },
-    metadata: metadata as Record<string, unknown>,
+    metadata: metadata as unknown as Record<string, unknown>,
     uuid: randomUUID(),
     parentUuid: null,
     sessionId: session.id,

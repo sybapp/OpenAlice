@@ -70,7 +70,6 @@ export function initAIProviders(
       ohlcvStore: skillRuntime.ohlcvStore,
       newsStore: skillRuntime.newsStore,
       getAccountGit: skillRuntime.getAccountGit,
-      invocation: {},
     }),
   })
 

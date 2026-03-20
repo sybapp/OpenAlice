@@ -1,6 +1,13 @@
 import type { SessionStore } from '../../core/session.js'
 import { setSessionSkill } from '../../skills/session-skill.js'
 import {
+  createSourceAliasState,
+  HIDDEN_SOURCE_ALIAS_KEY,
+  presentSourceAlias,
+  type SourceAliasState,
+  resolveSourceAlias,
+} from '../../core/source-alias.js'
+import {
   traderMarketScanSchema,
   traderRiskCheckSchema,
   traderTradeExecuteSchema,
@@ -53,6 +60,112 @@ interface TraderPreflightSnapshot {
   exposurePercent: number
   totalPositions: number
   sourceSnapshots: TraderSourceSnapshot[]
+}
+
+interface SourcePresentationState {
+  aliases: SourceAliasState
+  realToDisplay: Record<string, string>
+}
+
+function replaceSourceReferences(text: string, aliases: SourceAliasState, toPublic: boolean): string {
+  let result = text
+  const pairs = toPublic
+    ? Object.entries(aliases.realToAlias)
+    : Object.entries(aliases.aliasToReal)
+  for (const [from, to] of pairs) {
+    result = result.split(from).join(to)
+  }
+  return result
+}
+
+function replaceSourceReferencesForDisplay(text: string, presentation: SourcePresentationState): string {
+  let result = text
+  for (const [alias, real] of Object.entries(presentation.aliases.aliasToReal)) {
+    result = result.split(alias).join(presentation.realToDisplay[real] ?? real)
+  }
+  for (const [real, display] of Object.entries(presentation.realToDisplay)) {
+    result = result.split(real).join(display)
+  }
+  return result
+}
+
+function replaceStringsDeep<T>(value: T, replace: (input: string) => string): T {
+  if (typeof value === 'string') {
+    return replace(value) as T
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceStringsDeep(item, replace)) as T
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, replaceStringsDeep(entry, replace)]),
+    ) as T
+  }
+  return value
+}
+
+function toPublicSource<T extends { source: string }>(value: T, aliases: SourceAliasState): T {
+  return { ...value, source: presentSourceAlias(aliases, value.source) }
+}
+
+function toInternalSource<T extends { source: string }>(value: T, aliases: SourceAliasState): T {
+  return { ...value, source: resolveSourceAlias(aliases, value.source) }
+}
+
+function toPublicStrategy(strategy: TraderStrategy, aliases: SourceAliasState): TraderStrategy {
+  return {
+    ...strategy,
+    sources: strategy.sources.map((source) => presentSourceAlias(aliases, source)),
+  }
+}
+
+function toPublicSnapshot(snapshot: TraderPreflightSnapshot, aliases: SourceAliasState): TraderPreflightSnapshot {
+  return {
+    ...snapshot,
+    warnings: snapshot.warnings.map((warning) => replaceSourceReferences(warning, aliases, true)),
+    sourceSnapshots: snapshot.sourceSnapshots.map((entry) => toPublicSource(entry, aliases)),
+  }
+}
+
+function createSkillContext(
+  context: Record<string, unknown>,
+  aliases: SourceAliasState,
+): Record<string, unknown> {
+  return {
+    ...context,
+    [HIDDEN_SOURCE_ALIAS_KEY]: aliases,
+  }
+}
+
+function createSourcePresentationState(
+  sources: string[],
+  deps: TraderRunnerDeps,
+): SourcePresentationState {
+  const aliases = createSourceAliasState(sources)
+  const realToDisplay = Object.fromEntries(
+    sources.map((source) => {
+      const account = deps.accountManager.getAccount(source) as { label?: string } | undefined
+      return [source, account?.label?.trim() || source]
+    }),
+  )
+  return { aliases, realToDisplay }
+}
+
+function externalizeSource<T extends { source: string }>(value: T, presentation: SourcePresentationState): T {
+  return {
+    ...replaceStringsDeep(value, (text) => replaceSourceReferencesForDisplay(text, presentation)),
+    source: presentation.realToDisplay[value.source] ?? value.source,
+  }
+}
+
+function externalizeRunnerResult(
+  result: TraderRunnerResult,
+  presentation: SourcePresentationState,
+): TraderRunnerResult {
+  return {
+    ...replaceStringsDeep(result, (text) => replaceSourceReferencesForDisplay(text, presentation)),
+    decision: result.decision ? externalizeSource(result.decision, presentation) : undefined,
+  }
 }
 
 function clampPercent(value: number): number {
@@ -320,21 +433,35 @@ async function runCandidatePipeline(params: {
   preflightSnapshot: TraderPreflightSnapshot
   session: SessionStore
   deps: TraderRunnerDeps
+  presentation: SourcePresentationState
 }) {
-  const { strategy, candidate, preflightSnapshot, session, deps } = params
+  const { strategy, candidate, preflightSnapshot, session, deps, presentation } = params
+  const { aliases: sourceAliases } = presentation
+  const publicStrategy = toPublicStrategy(strategy, sourceAliases)
+  const publicCandidate = toPublicSource(candidate, sourceAliases)
+  const publicPreflightSnapshot = toPublicSnapshot(preflightSnapshot, sourceAliases)
 
   const thesis = await runSkillStage({
     session,
     skillId: TRADER_SKILLS.tradeThesis,
-    prompt: buildTradeThesisPrompt(strategy, candidate, preflightSnapshot),
+    prompt: buildTradeThesisPrompt(publicStrategy, publicCandidate, publicPreflightSnapshot),
     schema: traderTradeThesisSchema,
     deps,
-    skillContext: { strategy, candidate, snapshot: preflightSnapshot, stage: 'trade-thesis' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      candidate: publicCandidate,
+      snapshot: publicPreflightSnapshot,
+      stage: 'trade-thesis',
+    }, sourceAliases),
   })
+  const thesisOutput = replaceStringsDeep(
+    toInternalSource(thesis.output, sourceAliases),
+    (text) => replaceSourceReferences(text, sourceAliases, false),
+  )
 
-  if (thesis.output.status === 'no_trade') {
-    updateBrainIfPresent(deps, ...thesis.output.contextNotes)
-    return buildSkipResult(thesis.output.rationale, thesis.rawText)
+  if (thesisOutput.status === 'no_trade') {
+    updateBrainIfPresent(deps, ...thesisOutput.contextNotes)
+    return buildSkipResult(thesisOutput.rationale, thesis.rawText)
   }
 
   // Risk review must use a fresh account snapshot because the earlier AI stages may take minutes.
@@ -342,52 +469,82 @@ async function runCandidatePipeline(params: {
   if (riskSnapshot.warnings.some((warning) => warning.includes('not available'))) {
     return { fatal: buildSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText) }
   }
+  const publicRiskSnapshot = toPublicSnapshot(riskSnapshot, sourceAliases)
+  const publicThesis = toPublicSource(thesisOutput, sourceAliases)
 
   const risk = await runSkillStage({
     session,
     skillId: TRADER_SKILLS.riskCheck,
-    prompt: buildRiskCheckPrompt(strategy, thesis.output, riskSnapshot),
+    prompt: buildRiskCheckPrompt(publicStrategy, publicThesis, publicRiskSnapshot),
     schema: traderRiskCheckSchema,
     deps,
-    skillContext: { strategy, thesis: thesis.output, snapshot: riskSnapshot, stage: 'risk-check' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      thesis: publicThesis,
+      snapshot: publicRiskSnapshot,
+      stage: 'risk-check',
+    }, sourceAliases),
   })
+  const riskOutput = replaceStringsDeep(
+    toInternalSource(risk.output, sourceAliases),
+    (text) => replaceSourceReferences(text, sourceAliases, false),
+  )
 
-  if (risk.output.verdict !== 'pass') {
-    return buildSkipResult(risk.output.rationale, risk.rawText)
+  if (riskOutput.verdict !== 'pass') {
+    return buildSkipResult(riskOutput.rationale, risk.rawText)
   }
+  const publicRisk = toPublicSource(riskOutput, sourceAliases)
 
   const plan = await runSkillStage({
     session,
     skillId: TRADER_SKILLS.tradePlan,
-    prompt: buildTradePlanPrompt(strategy, thesis.output, risk.output),
+    prompt: buildTradePlanPrompt(publicStrategy, publicThesis, publicRisk),
     schema: traderTradePlanSchema,
     deps,
-    skillContext: { strategy, thesis: thesis.output, risk: risk.output, stage: 'trade-plan' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      thesis: publicThesis,
+      risk: publicRisk,
+      stage: 'trade-plan',
+    }, sourceAliases),
   })
+  const planOutput = replaceStringsDeep(
+    toInternalSource(plan.output, sourceAliases),
+    (text) => replaceSourceReferences(text, sourceAliases, false),
+  )
 
-  if (plan.output.status !== 'plan_ready' || plan.output.orders.length === 0) {
-    updateBrainIfPresent(deps, plan.output.brainUpdate)
-    return buildSkipResult(plan.output.rationale, plan.rawText)
+  if (planOutput.status !== 'plan_ready' || planOutput.orders.length === 0) {
+    updateBrainIfPresent(deps, planOutput.brainUpdate)
+    return buildSkipResult(planOutput.rationale, plan.rawText)
   }
 
-  const hardRiskBlock = getHardRiskBudgetViolation(strategy, riskSnapshot, plan.output)
+  const hardRiskBlock = getHardRiskBudgetViolation(strategy, riskSnapshot, planOutput)
   if (hardRiskBlock) {
-    updateBrainIfPresent(deps, plan.output.brainUpdate)
+    updateBrainIfPresent(deps, planOutput.brainUpdate)
     return buildSkipResult(hardRiskBlock, plan.rawText)
   }
+  const publicPlan = toPublicSource(planOutput, sourceAliases)
 
   const execute = await runSkillStage({
     session,
     skillId: TRADER_SKILLS.tradeExecute,
-    prompt: buildTradeExecutePrompt(strategy, plan.output),
+    prompt: buildTradeExecutePrompt(publicStrategy, publicPlan),
     schema: traderTradeExecuteSchema,
     deps,
-    skillContext: { strategy, plan: plan.output, stage: 'trade-execute' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      plan: publicPlan,
+      stage: 'trade-execute',
+    }, sourceAliases),
   })
+  const executeOutput = replaceStringsDeep(
+    toInternalSource(execute.output, sourceAliases),
+    (text) => replaceSourceReferences(text, sourceAliases, false),
+  )
 
-  if (execute.output.status !== 'execute') {
-    updateBrainIfPresent(deps, execute.output.brainUpdate)
-    return buildSkipResult(execute.output.rationale, execute.rawText)
+  if (executeOutput.status !== 'execute') {
+    updateBrainIfPresent(deps, executeOutput.brainUpdate)
+    return buildSkipResult(executeOutput.rationale, execute.rawText)
   }
 
   const executeScript = getSkillScript('trader-execute-plan')
@@ -395,7 +552,7 @@ async function runCandidatePipeline(params: {
     throw new Error('Missing trader-execute-plan script')
   }
 
-  const brainUpdate = updateBrainIfPresent(deps, plan.output.brainUpdate, execute.output.brainUpdate)
+  const brainUpdate = updateBrainIfPresent(deps, planOutput.brainUpdate, executeOutput.brainUpdate)
 
   const executionResult = await executeScript.run({
     config: deps.config,
@@ -408,16 +565,16 @@ async function runCandidatePipeline(params: {
     getAccountGit: deps.getAccountGit,
     invocation: {
       strategy,
-      plan: plan.output,
+      plan: planOutput,
       stage: 'trade-execute-script',
     },
   }, {
-    source: plan.output.source,
-    commitMessage: plan.output.commitMessage,
-    orders: plan.output.orders,
+    source: planOutput.source,
+    commitMessage: planOutput.commitMessage,
+    orders: planOutput.orders,
   })
 
-  const executionOutcome = buildExecutionOutcome(plan.output, executionResult, execute.output.rationale)
+  const executionOutcome = buildExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
   if (executionOutcome.rejectedCount > 0 && executionOutcome.filledCount === 0 && executionOutcome.pendingCount === 0) {
     return {
       status: 'skip' as const,
@@ -429,11 +586,11 @@ async function runCandidatePipeline(params: {
   const decision: TraderDecision = {
     status: 'trade',
     strategyId: strategy.id,
-    source: plan.output.source,
-    symbol: plan.output.symbol,
-    chosenScenario: plan.output.chosenScenario,
+    source: planOutput.source,
+    symbol: planOutput.symbol,
+    chosenScenario: planOutput.chosenScenario,
     rationale: executionOutcome.rationale,
-    invalidation: plan.output.invalidation,
+    invalidation: planOutput.invalidation,
     actionsTaken: executionOutcome.actionsTaken,
     brainUpdate,
   }
@@ -458,53 +615,69 @@ export async function runTraderJob(
     return { status: 'skip', reason: `Strategy ${strategy.id} is disabled` }
   }
 
+  const presentation = createSourcePresentationState(strategy.sources, deps)
+  const { aliases: sourceAliases } = presentation
+  const publicStrategy = toPublicStrategy(strategy, sourceAliases)
   const snapshot = await buildPreflightSnapshot(strategy, deps)
   if (snapshot.warnings.some((warning) => warning.includes('not available'))) {
-    return { status: 'skip', reason: snapshot.warnings.join(' ') }
+    return externalizeRunnerResult({ status: 'skip', reason: snapshot.warnings.join(' ') }, presentation)
   }
+  const publicSnapshot = toPublicSnapshot(snapshot, sourceAliases)
 
   const scan = await runSkillStage({
     session: params.session,
     skillId: TRADER_SKILLS.marketScan,
-    prompt: buildMarketScanPrompt(strategy, snapshot),
+    prompt: buildMarketScanPrompt(publicStrategy, publicSnapshot),
     schema: traderMarketScanSchema,
     deps,
-    skillContext: { strategy, snapshot, stage: 'market-scan' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      snapshot: publicSnapshot,
+      stage: 'market-scan',
+    }, sourceAliases),
   })
+  const scanOutput = {
+    ...replaceStringsDeep(scan.output, (text) => replaceSourceReferences(text, sourceAliases, false)),
+    candidates: scan.output.candidates.map((candidate) => replaceStringsDeep(
+      toInternalSource(candidate, sourceAliases),
+      (text) => replaceSourceReferences(text, sourceAliases, false),
+    )),
+  }
 
-  if (scan.output.candidates.length === 0) {
-    return {
+  if (scanOutput.candidates.length === 0) {
+    return externalizeRunnerResult({
       status: 'skip',
-      reason: scan.output.summary || 'No tradable candidate found.',
+      reason: scanOutput.summary || 'No tradable candidate found.',
       rawText: scan.rawText,
-    }
+    }, presentation)
   }
 
   let lastSkip: TraderRunnerResult = {
     status: 'skip',
-    reason: scan.output.summary || 'No tradable candidate survived the pipeline.',
+    reason: scanOutput.summary || 'No tradable candidate survived the pipeline.',
     rawText: scan.rawText,
   }
 
-  for (const candidate of scan.output.candidates) {
+  for (const candidate of scanOutput.candidates) {
     const result = await runCandidatePipeline({
       strategy,
       candidate,
       preflightSnapshot: snapshot,
       session: params.session,
       deps,
+      presentation,
     })
 
     if ('fatal' in result) {
-      return result.fatal
+      return externalizeRunnerResult(result.fatal, presentation)
     }
     if (result.status === 'done') {
-      return result
+      return externalizeRunnerResult(result, presentation)
     }
     lastSkip = result
   }
 
-  return lastSkip
+  return externalizeRunnerResult(lastSkip, presentation)
 }
 
 export async function runTraderReview(
@@ -514,6 +687,10 @@ export async function runTraderReview(
 ): Promise<TraderReviewResult> {
   const strategy = strategyId ? await getTraderStrategy(strategyId) : null
   const sources = strategy?.sources ?? deps.accountManager.listAccounts().map((account) => account.id)
+  const presentation = createSourcePresentationState(sources, deps)
+  const { aliases: sourceAliases } = presentation
+  const publicStrategy = strategy ? toPublicStrategy(strategy, sourceAliases) : null
+  const publicSources = sources.map((source) => presentSourceAlias(sourceAliases, source))
   const session = {
     id: `trader-review/${strategyId ?? 'all'}`,
     appendUser: async () => undefined,
@@ -529,24 +706,35 @@ export async function runTraderReview(
   const review = await runSkillStage({
     session,
     skillId: TRADER_SKILLS.tradeReview,
-    prompt: buildTraderReviewPrompt(strategy, sources),
+    prompt: buildTraderReviewPrompt(publicStrategy, publicSources),
     schema: traderTradeReviewSchema,
     deps: deps as TraderRunnerDeps,
-    skillContext: { strategy, sources, stage: 'trade-review' },
+    skillContext: createSkillContext({
+      strategy: publicStrategy,
+      sources: publicSources,
+      stage: 'trade-review',
+    }, sourceAliases),
   })
+  const reviewOutput = replaceStringsDeep(
+    review.output,
+    (text) => replaceSourceReferencesForDisplay(
+      replaceSourceReferences(text, sourceAliases, false),
+      presentation,
+    ),
+  )
 
-  deps.brain.updateFrontalLobe(review.output.brainUpdate)
+  deps.brain.updateFrontalLobe(reviewOutput.brainUpdate)
   await deps.eventLog.append('trader.review.done', {
     strategyId,
     trigger: meta?.trigger ?? 'manual',
     jobId: meta?.jobId,
     jobName: meta?.jobName,
     updated: true,
-    summary: review.output.summary,
+    summary: reviewOutput.summary,
   })
   return {
     updated: true,
-    summary: review.output.summary,
+    summary: reviewOutput.summary,
     strategyId,
   }
 }

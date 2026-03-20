@@ -24,7 +24,7 @@ export interface SendPayload {
   /** Media attachments (e.g. screenshots from tools). */
   media?: MediaAttachment[]
   /** Where this payload originated from. */
-  source?: 'heartbeat' | 'cron' | 'manual'
+  source?: 'heartbeat' | 'cron' | 'manual' | 'trader-done' | 'trader-error'
 }
 
 /** Result of a send() call. */
@@ -66,7 +66,7 @@ export interface Connector {
 export interface NotifyOpts {
   kind?: 'message' | 'notification'
   media?: MediaAttachment[]
-  source?: 'heartbeat' | 'cron' | 'manual'
+  source?: 'heartbeat' | 'cron' | 'manual' | 'trader-done' | 'trader-error'
 }
 
 /** Result of a notify() call. */
@@ -189,7 +189,7 @@ export class ConnectorCenter {
 
     if (this.lastInteraction) {
       const connector = this.connectors.get(this.lastInteraction.channel)
-      if (matches(connector)) return connector
+      if (connector && matches(connector)) return connector
     }
 
     const fallback = this.list().find((connector) => matches(connector))
@@ -197,7 +197,7 @@ export class ConnectorCenter {
 
     if (opts?.requirePush) {
       const first = this.connectors.values().next()
-      return first.done ? null : first.value
+      return first.done ? null : (first.value ?? null)
     }
 
     return null

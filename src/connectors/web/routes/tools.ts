@@ -33,7 +33,7 @@ export function createToolsRoutes(toolCenter: ToolCenter) {
     try {
       const body = await c.req.json()
       const nextDisabled = await readDisabledSystemTools(body.disabled)
-      const validated = await writeConfigSection('tools', { disabled: nextDisabled })
+      const validated = await writeConfigSection('tools', { disabled: nextDisabled }) as { disabled: string[] }
       return c.json({ disabledSystemTools: validated.disabled })
     } catch (err) {
       const validationError = getValidationErrorPayload(err)

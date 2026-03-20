@@ -1,4 +1,4 @@
-import type { ToolPolicy, ToolInventoryItem } from '../tool-center.js'
+import type { ToolPolicy, ToolInventoryItem } from '../core/tool-center.js'
 import type { SkillPack } from './registry.js'
 import { ANALYSIS_REPORT_INSTRUCTIONS } from './analysis-report.js'
 import { createGlobPolicyMatcher } from '../core/tool-policy-match.js'

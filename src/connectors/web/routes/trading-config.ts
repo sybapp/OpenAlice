@@ -38,7 +38,7 @@ function toClientAccount(a: TradingAccountConfig) {
 function buildAccountConfig(id: string, body: Record<string, unknown>, existing?: TradingAccountConfig): TradingAccountConfig {
   return {
     id,
-    platformId: typeof body.platformId === 'string' ? body.platformId : existing?.platformId,
+    platformId: typeof body.platformId === 'string' ? body.platformId : existing?.platformId ?? '',
     label: typeof body.label === 'string' ? body.label : existing?.label,
     guards: Array.isArray(body.guards) ? body.guards : existing?.guards ?? [],
     apiKey: mergeSecretField(existing?.apiKey, body, 'apiKey'),
@@ -67,7 +67,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       ])
       return c.json({ platforms, accounts: accounts.map(toClientAccount) })
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -78,7 +78,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       const id = c.req.param('id')
       const body = await c.req.json()
       if (body.id !== id) {
-        return c.json({ error: 'Body id must match URL id' }, 400)
+        return c.json({ error: 'Body id must match URL id' }, { status: 400 })
       }
       const validated = platformConfigSchema.parse(body)
       const platforms = await readPlatformsConfig()
@@ -99,9 +99,9 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
     } catch (err) {
       const validationError = getValidationErrorPayload(err)
       if (validationError) {
-        return c.json(validationError, 400)
+        return c.json(validationError, { status: 400 })
       }
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -116,16 +116,16 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       if (refs.length > 0) {
         return c.json({
           error: `Platform "${id}" is referenced by ${refs.length} account(s): ${refs.map((a) => a.id).join(', ')}. Remove them first.`,
-        }, 400)
+        }, { status: 400 })
       }
       const filtered = platforms.filter((p) => p.id !== id)
       if (filtered.length === platforms.length) {
-        return c.json({ error: `Platform "${id}" not found` }, 404)
+        return c.json({ error: `Platform "${id}" not found` }, { status: 404 })
       }
       await writePlatformsConfig(filtered)
       return c.json({ success: true })
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -136,7 +136,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       const id = c.req.param('id')
       const body = await c.req.json<Record<string, unknown>>()
       if (body.id !== id) {
-        return c.json({ error: 'Body id must match URL id' }, 400)
+        return c.json({ error: 'Body id must match URL id' }, { status: 400 })
       }
 
       const accounts = await readAccountsConfig()
@@ -149,7 +149,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       // Validate platformId reference
       const platforms = await readPlatformsConfig()
       if (!platforms.some((p) => p.id === validated.platformId)) {
-        return c.json({ error: `Platform "${validated.platformId}" not found` }, 400)
+        return c.json({ error: `Platform "${validated.platformId}" not found` }, { status: 400 })
       }
 
       upsertById(accounts, validated)
@@ -164,9 +164,9 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
     } catch (err) {
       const validationError = getValidationErrorPayload(err)
       if (validationError) {
-        return c.json(validationError, 400)
+        return c.json(validationError, { status: 400 })
       }
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 
@@ -176,7 +176,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       const accounts = await readAccountsConfig()
       const filtered = accounts.filter((a) => a.id !== id)
       if (filtered.length === accounts.length) {
-        return c.json({ error: `Account "${id}" not found` }, 404)
+        return c.json({ error: `Account "${id}" not found` }, { status: 404 })
       }
       await writeAccountsConfig(filtered)
       // Close running account instance if any
@@ -185,7 +185,7 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
       }
       return c.json({ success: true })
     } catch (err) {
-      return c.json({ error: String(err) }, 500)
+      return c.json({ error: String(err) }, { status: 500 })
     }
   })
 

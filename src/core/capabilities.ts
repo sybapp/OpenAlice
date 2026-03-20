@@ -48,9 +48,14 @@ class MemorySessionStore {
     provider: SessionEntry['provider'],
     metadata?: Record<string, unknown>,
   ) {
+    const role: SessionEntry['message']['role'] = type === 'user'
+      ? 'user'
+      : type === 'assistant'
+        ? 'assistant'
+        : 'system'
     const entry: SessionEntry = {
       type,
-      message: { role: type, content },
+      message: { role, content },
       uuid: crypto.randomUUID(),
       parentUuid: this.lastUuid,
       sessionId: this.id,
@@ -99,7 +104,7 @@ export function getMcpSkillToolName(skillId: string): string {
   return `skill__${skillId}`
 }
 
-function isInvocableScriptLoopSkill(skill: SkillCapabilityInventoryItem): boolean {
+function isInvocableScriptLoopSkill(skill: { runtime: 'tool-loop' | 'script-loop'; userInvocable: boolean }): boolean {
   return skill.runtime === 'script-loop' && skill.userInvocable
 }
 
@@ -179,9 +184,10 @@ export async function createMcpCapabilityTools(ctx: EngineContext): Promise<Reco
       execute: async ({ task, invocation }) => {
         const session = new MemorySessionStore(`mcp/${skill.id}/${crypto.randomUUID().slice(0, 8)}`)
         await setSessionSkill(session as never, skill.id)
-        const result = await ctx.engine.askWithSession(task, session as never, {
+        const stream = ctx.engine.askWithSession(task, session as never, {
           skillContext: invocation ?? {},
         })
+        const result = await stream
         return {
           skillId: skill.id,
           text: result.text,

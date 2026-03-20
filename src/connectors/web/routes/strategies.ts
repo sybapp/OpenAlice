@@ -13,7 +13,7 @@ type TraderJobInput = {
 }
 
 function jsonError(c: Context, err: unknown, status = 500) {
-  return c.json({ error: String(err) }, status)
+  return c.json({ error: String(err) }, status as any)
 }
 
 async function requireStrategy(c: Context, strategyId: string | undefined) {
@@ -24,7 +24,7 @@ async function requireStrategy(c: Context, strategyId: string | undefined) {
   if (strategy) {
     return strategy
   }
-  return c.json({ error: `Unknown strategy: ${strategyId}` }, 404)
+  return c.json({ error: `Unknown strategy: ${strategyId}` }, { status: 404 })
 }
 
 function asSchedule(schedule?: ScheduleInput): CronSchedule | undefined {
@@ -46,7 +46,7 @@ export function createStrategiesRoutes(ctx: EngineContext) {
     try {
       const strategy = await getTraderStrategy(c.req.param('id'))
       if (!strategy) {
-        return c.json({ error: `Unknown strategy: ${c.req.param('id')}` }, 404)
+        return c.json({ error: `Unknown strategy: ${c.req.param('id')}` }, { status: 404 })
       }
       return c.json(strategy)
     } catch (err) {
@@ -62,7 +62,7 @@ export function createStrategiesRoutes(ctx: EngineContext) {
     try {
       const body = await c.req.json<TraderJobInput>()
       if (!body.name || !body.strategyId || !body.schedule?.kind) {
-        return c.json({ error: 'name, strategyId, and schedule are required' }, 400)
+        return c.json({ error: 'name, strategyId, and schedule are required' }, { status: 400 })
       }
       const strategyResult = await requireStrategy(c, body.strategyId)
       if (strategyResult instanceof Response) {
@@ -120,7 +120,7 @@ export function createStrategiesRoutes(ctx: EngineContext) {
 
   app.post('/review', async (c) => {
     try {
-      const body = await c.req.json<{ strategyId?: string }>().catch(() => ({}))
+      const body = await c.req.json<{ strategyId?: string }>().catch((): { strategyId?: string } => ({}))
       return c.json(await ctx.runTraderReview(body.strategyId))
     } catch (err) {
       return jsonError(c, err)
@@ -135,7 +135,7 @@ export function createStrategiesRoutes(ctx: EngineContext) {
     try {
       const body = await c.req.json<TraderJobInput>()
       if (!body.name || !body.schedule?.kind) {
-        return c.json({ error: 'name and schedule are required' }, 400)
+        return c.json({ error: 'name and schedule are required' }, { status: 400 })
       }
       const strategyResult = await requireStrategy(c, body.strategyId)
       if (strategyResult instanceof Response) {

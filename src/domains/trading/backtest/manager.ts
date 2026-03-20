@@ -29,7 +29,7 @@ import {
   type BacktestRunSummary,
   type BacktestStrategyContext,
 } from './types.js'
-import type { GitExportState, Operation } from '../git/types.js'
+import type { GitExportState, Operation, PlaceOrderParams } from '../git/types.js'
 import { getTraderStrategy } from '../../../jobs/strategies/strategy.js'
 import {
   buildMarketScanPrompt,
@@ -614,7 +614,7 @@ function planToBacktestOperations(plan: {
 }): Operation[] {
   return plan.orders.map((order) => ({
     action: 'placeOrder',
-    params: order,
+    params: order as unknown as PlaceOrderParams,
   }))
 }
 

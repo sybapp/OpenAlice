@@ -85,7 +85,7 @@ export class CcxtAccount implements ITradingAccount {
     this.exchangeName = config.exchange
     this.provider = config.exchange  // use exchange name as provider (e.g. "bybit", "binance")
     this.id = config.id ?? `${config.exchange}-main`
-    this.label = config.label ?? `${config.exchange.charAt(0).toUpperCase() + config.exchange.slice(1)} ${config.sandbox ? 'Testnet' : 'Live'}`
+    this.label = config.label ?? `${config.exchange.charAt(0).toUpperCase() + config.exchange.slice(1)}`
     this.defaultMarketType = config.defaultMarketType
     this.readOnly = !config.apiKey || !config.apiSecret
 

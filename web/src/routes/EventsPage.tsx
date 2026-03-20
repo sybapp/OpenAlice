@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { api, type EventLogEntry, type CronJob, type CronSchedule } from '../api'
 import { useSSE } from '../hooks/useSSE'
 import { Toggle } from '../components/Toggle'
@@ -29,12 +29,261 @@ function scheduleLabel(s: CronSchedule): string {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+}
+
+type TraderEventTone = {
+  badge: string
+  card: string
+  label: string
+  accent: string
+}
+
+type TraderQuickFilter = 'all' | 'trader' | 'executed' | 'skipped' | 'error' | 'review'
+type Tab = 'events' | 'cron'
+
+const traderQuickFilters: Array<{ value: TraderQuickFilter, label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'trader', label: 'Trader' },
+  { value: 'executed', label: 'Executed' },
+  { value: 'skipped', label: 'Skipped' },
+  { value: 'error', label: 'Error' },
+  { value: 'review', label: 'Review' },
+]
+
+function isTraderQuickFilter(value: string | null): value is TraderQuickFilter {
+  return value === 'all'
+    || value === 'trader'
+    || value === 'executed'
+    || value === 'skipped'
+    || value === 'error'
+    || value === 'review'
+}
+
+function isTab(value: string | null): value is Tab {
+  return value === 'events' || value === 'cron'
+}
+
+function readSearchParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  return new URLSearchParams(window.location.search)
+}
+
+function replaceSearchParams(updater: (params: URLSearchParams) => void): void {
+  if (typeof window === 'undefined') return
+
+  const params = new URLSearchParams(window.location.search)
+  updater(params)
+
+  const next = params.toString()
+  const nextUrl = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`
+  window.history.replaceState(window.history.state, '', nextUrl)
+}
+
+function traderEventTone(type: string): TraderEventTone {
+  if (type === 'trader.done') {
+    return {
+      label: 'Executed',
+      accent: 'text-green',
+      badge: 'border-green/40 bg-green/12 text-green',
+      card: 'border-green/25 bg-green/8',
+    }
+  }
+
+  if (type === 'trader.skip' || type === 'trader.review.skip') {
+    return {
+      label: 'Skipped',
+      accent: 'text-notification-border',
+      badge: 'border-notification-border/40 bg-notification-bg/70 text-notification-border',
+      card: 'border-notification-border/25 bg-notification-bg/35',
+    }
+  }
+
+  if (type === 'trader.error' || type === 'trader.review.error') {
+    return {
+      label: 'Error',
+      accent: 'text-red',
+      badge: 'border-red/40 bg-red/12 text-red',
+      card: 'border-red/25 bg-red/8',
+    }
+  }
+
+  if (type.startsWith('trader.review.')) {
+    return {
+      label: 'Review',
+      accent: 'text-accent',
+      badge: 'border-accent/40 bg-accent/12 text-accent',
+      card: 'border-accent/25 bg-accent/6',
+    }
+  }
+
+  return {
+    label: 'Trader',
+    accent: 'text-accent',
+    badge: 'border-accent/40 bg-accent/12 text-accent',
+    card: 'border-border bg-bg-secondary',
+  }
+}
+
+function matchesTraderQuickFilter(entry: EventLogEntry, quickFilter: TraderQuickFilter): boolean {
+  if (quickFilter === 'all') return true
+  if (!entry.type.startsWith('trader.')) return false
+
+  switch (quickFilter) {
+    case 'trader':
+      return true
+    case 'executed':
+      return entry.type === 'trader.done'
+    case 'skipped':
+      return entry.type === 'trader.skip' || entry.type === 'trader.review.skip'
+    case 'error':
+      return entry.type === 'trader.error' || entry.type === 'trader.review.error'
+    case 'review':
+      return entry.type.startsWith('trader.review.')
+    case 'all':
+      return true
+  }
+}
+
 // Map event types to color classes
 function eventTypeColor(type: string): string {
   if (type.startsWith('heartbeat.')) return 'text-purple'
   if (type.startsWith('cron.')) return 'text-accent'
   if (type.startsWith('message.')) return 'text-green'
+  if (type.startsWith('trader.')) return traderEventTone(type).accent
   return 'text-text-muted'
+}
+
+function formatTraderPayloadPreview(type: string, payload: unknown): string | null {
+  if (!type.startsWith('trader.')) return null
+  if (!isRecord(payload)) return null
+
+  const strategyId = asString(payload.strategyId)
+  const reason = asString(payload.reason)
+  const error = asString(payload.error)
+  const summary = asString(payload.summary)
+  const source = isRecord(payload.decision) ? asString(payload.decision.source) : null
+  const symbol = isRecord(payload.decision) ? asString(payload.decision.symbol) : null
+
+  const parts = [
+    strategyId,
+    source && symbol ? `${source} • ${symbol}` : source ?? symbol,
+    reason ?? error ?? summary,
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(' — ') : null
+}
+
+function renderTraderPayloadDetails(type: string, payload: unknown): ReactNode | null {
+  if (!type.startsWith('trader.') || !isRecord(payload)) return null
+
+  const tone = traderEventTone(type)
+  const decision = isRecord(payload.decision) ? payload.decision : null
+  const actionsTaken = decision ? asStringArray(decision.actionsTaken) : []
+  const invalidation = decision ? asStringArray(decision.invalidation) : []
+  const strategyId = asString(payload.strategyId)
+  const jobLabel = asString(payload.jobName) ?? asString(payload.jobId)
+  const reason = asString(payload.reason)
+  const error = asString(payload.error)
+  const summary = asString(payload.summary)
+  const source = decision ? asString(decision.source) : null
+  const symbol = decision ? asString(decision.symbol) : null
+  const scenario = decision ? asString(decision.chosenScenario) : null
+  const channel = asString(payload.channel)
+  const headline = error ?? reason ?? summary
+  const chips = [
+    source ? `Source: ${source}` : null,
+    symbol ? `Symbol: ${symbol}` : null,
+    scenario ? `Scenario: ${scenario}` : null,
+    channel ? `Channel: ${channel}` : null,
+  ].filter((value): value is string => Boolean(value))
+
+  const rows: Array<[string, string | null]> = [
+    ['Strategy', strategyId],
+    ['Job', jobLabel],
+    ['Reason', reason],
+    ['Error', error],
+    ['Summary', summary],
+  ]
+
+  const visibleRows = rows.filter(([, value]) => value)
+  if (visibleRows.length === 0 && chips.length === 0 && actionsTaken.length === 0 && invalidation.length === 0) return null
+
+  return (
+    <div className={`mb-3 rounded-lg border p-3 text-[11px] shadow-sm ${tone.card}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${tone.badge}`}>
+          {tone.label}
+        </span>
+        {strategyId && <span className="font-semibold text-text">{strategyId}</span>}
+        {jobLabel && <span className="text-text-muted">{jobLabel}</span>}
+      </div>
+
+      {headline && (
+        <div className="mt-3 rounded-md border border-border/40 bg-bg/45 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words">
+          {headline}
+        </div>
+      )}
+
+      {chips.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {chips.map((chip) => (
+            <span
+              key={chip}
+              className="rounded-full border border-border/60 bg-bg/55 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-text-muted"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {visibleRows.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {visibleRows.map(([label, value]) => (
+            <div key={label} className="rounded-md border border-border/40 bg-bg/45 px-3 py-2">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-text-muted">{label}</div>
+              <div className="text-text whitespace-pre-wrap break-words">{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {actionsTaken.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-text-muted">Actions</div>
+          <div className="space-y-1">
+            {actionsTaken.map((action) => (
+              <div key={action} className="rounded-md border border-border/40 bg-bg/45 px-3 py-2 text-text whitespace-pre-wrap break-words">
+                {action}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {invalidation.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-text-muted">Invalidation</div>
+          <div className="space-y-1">
+            {invalidation.map((item) => (
+              <div key={item} className="rounded-md border border-border/40 bg-bg/45 px-3 py-2 text-text whitespace-pre-wrap break-words">
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ==================== EventLog Section ====================
@@ -42,8 +291,14 @@ function eventTypeColor(type: string): string {
 const PAGE_SIZE = 100
 
 function EventLogSection() {
+  const initialQuery = useRef(readSearchParams())
+  const initialTypeFilter = initialQuery.current.get('type') ?? ''
   const [entries, setEntries] = useState<EventLogEntry[]>([])
-  const [typeFilter, setTypeFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState(initialTypeFilter)
+  const [traderQuickFilter, setTraderQuickFilter] = useState<TraderQuickFilter>(() => {
+    const value = initialQuery.current.get('trader')
+    return isTraderQuickFilter(value) ? value : 'all'
+  })
   const [paused, setPaused] = useState(false)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -51,6 +306,8 @@ function EventLogSection() {
   const [loading, setLoading] = useState(true)
   const [types, setTypes] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
+  const visibleEntries = entries.filter((entry) => matchesTraderQuickFilter(entry, traderQuickFilter))
+  const hasTraderQuickFilter = traderQuickFilter !== 'all'
 
   // Fetch a page from disk
   const fetchPage = useCallback(async (p: number, type?: string) => {
@@ -73,7 +330,19 @@ function EventLogSection() {
   }, [])
 
   // Initial load
-  useEffect(() => { fetchPage(1) }, [fetchPage])
+  useEffect(() => {
+    fetchPage(1, initialTypeFilter || undefined)
+  }, [fetchPage, initialTypeFilter])
+
+  useEffect(() => {
+    replaceSearchParams((params) => {
+      if (typeFilter) params.set('type', typeFilter)
+      else params.delete('type')
+
+      if (traderQuickFilter !== 'all') params.set('trader', traderQuickFilter)
+      else params.delete('trader')
+    })
+  }, [typeFilter, traderQuickFilter])
 
   // Track all seen event types (persists across page changes)
   useEffect(() => {
@@ -99,7 +368,7 @@ function EventLogSection() {
       setTotal((prev) => prev + 1)
       // Only prepend to visible list when on page 1 and matching filter
       if (page === 1) {
-        const matchesFilter = !typeFilter || entry.type === typeFilter
+        const matchesFilter = (!typeFilter || entry.type === typeFilter) && matchesTraderQuickFilter(entry, traderQuickFilter)
         if (matchesFilter) {
           setEntries((prev) => [entry, ...prev].slice(0, PAGE_SIZE))
         }
@@ -111,7 +380,7 @@ function EventLogSection() {
   // Type filter change → reset to page 1
   const handleTypeChange = useCallback((type: string) => {
     setTypeFilter(type)
-    fetchPage(1, type)
+    fetchPage(1, type || undefined)
   }, [fetchPage])
 
   // Page navigation
@@ -123,36 +392,60 @@ function EventLogSection() {
   return (
     <div className="flex flex-col gap-3 h-full">
       {/* Controls */}
-      <div className="flex items-center gap-3 shrink-0">
-        <select
-          value={typeFilter}
-          onChange={(e) => handleTypeChange(e.target.value)}
-          className="bg-bg-tertiary text-text text-sm rounded-md border border-border px-2 py-1.5 outline-none focus:border-accent"
-        >
-          <option value="">All types</option>
-          {types.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+      <div className="flex flex-col gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={typeFilter}
+            onChange={(e) => handleTypeChange(e.target.value)}
+            className="bg-bg-tertiary text-text text-sm rounded-md border border-border px-2 py-1.5 outline-none focus:border-accent"
+          >
+            <option value="">All types</option>
+            {types.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
 
-        <button
-          onClick={() => setPaused(!paused)}
-          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
-            paused
-              ? 'border-notification-border text-notification-border hover:bg-notification-bg'
-              : 'border-border text-text-muted hover:bg-bg-tertiary'
-          }`}
-        >
-          {paused ? '▶ Resume' : '⏸ Pause'}
-        </button>
+          <button
+            onClick={() => setPaused(!paused)}
+            className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+              paused
+                ? 'border-notification-border text-notification-border hover:bg-notification-bg'
+                : 'border-border text-text-muted hover:bg-bg-tertiary'
+            }`}
+          >
+            {paused ? '▶ Resume' : '⏸ Pause'}
+          </button>
 
-        <span className="text-xs text-text-muted ml-auto">
-          {total > 0
-            ? `Page ${page} of ${totalPages} · ${total} events`
-            : '0 events'
-          }
-          {typeFilter && ' (filtered)'}
-        </span>
+          <span className="text-xs text-text-muted ml-auto">
+            {total > 0
+              ? `Page ${page} of ${totalPages} · ${total} events`
+              : '0 events'
+            }
+            {hasTraderQuickFilter && ` · ${visibleEntries.length} shown`}
+            {(typeFilter || hasTraderQuickFilter) && ' (filtered)'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-[0.12em] text-text-muted">Quick filters</span>
+          {traderQuickFilters.map((filter) => {
+            const active = traderQuickFilter === filter.value
+            return (
+              <button
+                key={filter.value}
+                type="button"
+                onClick={() => setTraderQuickFilter(filter.value)}
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                  active
+                    ? 'border-accent/50 bg-accent/15 text-accent'
+                    : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
+                }`}
+              >
+                {filter.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Event list — fills remaining space */}
@@ -160,10 +453,12 @@ function EventLogSection() {
         ref={containerRef}
         className="flex-1 min-h-0 bg-bg rounded-lg border border-border overflow-y-auto font-mono text-xs"
       >
-        {loading && entries.length === 0 ? (
+        {loading && visibleEntries.length === 0 ? (
           <div className="px-4 py-8 text-center text-text-muted">Loading...</div>
-        ) : entries.length === 0 ? (
-          <div className="px-4 py-8 text-center text-text-muted">No events yet</div>
+        ) : visibleEntries.length === 0 ? (
+          <div className="px-4 py-8 text-center text-text-muted">
+            {entries.length === 0 ? 'No events yet' : 'No events match the current filters'}
+          </div>
         ) : (
           <table className="w-full">
             <thead className="sticky top-0 bg-bg-secondary">
@@ -175,7 +470,7 @@ function EventLogSection() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <EventRow key={entry.seq} entry={entry} />
               ))}
             </tbody>
@@ -226,20 +521,24 @@ function EventLogSection() {
 function EventRow({ entry }: { entry: EventLogEntry }) {
   const [expanded, setExpanded] = useState(false)
   const payloadStr = JSON.stringify(entry.payload)
+  const traderPreview = formatTraderPayloadPreview(entry.type, entry.payload)
   const isLong = payloadStr.length > 120
+  const preview = traderPreview ?? (isLong ? payloadStr.slice(0, 120) + '...' : payloadStr)
+  const hasFormattedDetails = Boolean(renderTraderPayloadDetails(entry.type, entry.payload))
+  const isExpandable = isLong || hasFormattedDetails
 
   return (
     <>
       <tr
         className="border-t border-border/50 hover:bg-bg-secondary/50 cursor-pointer"
-        onClick={() => isLong && setExpanded(!expanded)}
+        onClick={() => isExpandable && setExpanded(!expanded)}
       >
         <td className="px-3 py-1.5 text-text-muted">{entry.seq}</td>
         <td className="px-3 py-1.5 text-text-muted whitespace-nowrap">{formatDateTime(entry.ts)}</td>
         <td className={`px-3 py-1.5 ${eventTypeColor(entry.type)}`}>{entry.type}</td>
         <td className="px-3 py-1.5 text-text-muted truncate">
-          {isLong ? payloadStr.slice(0, 120) + '...' : payloadStr}
-          {isLong && (
+          {preview}
+          {isExpandable && (
             <span className="ml-1 text-accent">{expanded ? '▾' : '▸'}</span>
           )}
         </td>
@@ -247,6 +546,10 @@ function EventRow({ entry }: { entry: EventLogEntry }) {
       {expanded && (
         <tr className="border-t border-border/30">
           <td colSpan={4} className="px-3 py-2">
+            {renderTraderPayloadDetails(entry.type, entry.payload)}
+            {hasFormattedDetails && (
+              <div className="mb-2 text-[10px] uppercase tracking-[0.12em] text-text-muted">Raw Payload</div>
+            )}
             <pre className="text-text-muted whitespace-pre-wrap break-all bg-bg-tertiary rounded p-2 text-[11px]">
               {JSON.stringify(entry.payload, null, 2)}
             </pre>
@@ -545,12 +848,19 @@ function AddCronJobForm({ onClose, onCreated }: { onClose: () => void; onCreated
   )
 }
 
-// ==================== Main Page ====================
-
-type Tab = 'events' | 'cron'
-
 export function EventsPage() {
-  const [tab, setTab] = useState<Tab>('events')
+  const initialQuery = useRef(readSearchParams())
+  const [tab, setTab] = useState<Tab>(() => {
+    const value = initialQuery.current.get('tab')
+    return isTab(value) ? value : 'events'
+  })
+
+  useEffect(() => {
+    replaceSearchParams((params) => {
+      if (tab !== 'events') params.set('tab', tab)
+      else params.delete('tab')
+    })
+  }, [tab])
 
   return (
     <div className="flex flex-col flex-1 min-h-0">

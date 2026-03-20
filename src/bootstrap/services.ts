@@ -122,14 +122,19 @@ async function fetchCcxtHistoricalBars(params: {
     if (!Array.isArray(batch) || batch.length === 0) break
 
     for (const item of batch) {
-      const [ts, open, high, low, close, volume] = item
+      const ts = Number(item[0] ?? NaN)
+      const open = Number(item[1] ?? NaN)
+      const high = Number(item[2] ?? NaN)
+      const low = Number(item[3] ?? NaN)
+      const close = Number(item[4] ?? NaN)
+      const volume = item[5]
       if (!Number.isFinite(ts) || ts < startMs || ts > endMs) continue
       rows.push({
         date: new Date(ts).toISOString(),
-        open: Number(open),
-        high: Number(high),
-        low: Number(low),
-        close: Number(close),
+        open,
+        high,
+        low,
+        close,
         volume: volume == null ? null : Number(volume),
       })
     }

@@ -62,7 +62,7 @@ async function withSessionLock<T>(session: SessionStore, fn: () => Promise<T>): 
  *
  * The raw `askClaudeCode` remains available for stateless one-shot calls (e.g. compaction callbacks).
  */
-export async function askClaudeCodeWithSession(
+export function askClaudeCodeWithSession(
   prompt: string,
   session: SessionStore,
   config: ClaudeCodeSessionConfig,

@@ -919,8 +919,8 @@ Use this after placing limit/stop orders to check if they've been filled.`,
 
             // Grace period: skip recently created orders (< 30s) to avoid cancelling
             // protection orders that were just placed for a new position
-            if ((order as { createdAt?: string }).createdAt) {
-              const age = Date.now() - new Date((order as { createdAt?: string }).createdAt!).getTime()
+            if (order.createdAt) {
+              const age = Date.now() - order.createdAt.getTime()
               if (age < 30_000) continue
             }
 

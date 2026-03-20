@@ -4,6 +4,7 @@
  * Unified git-like state management for tracking trading operation history.
  */
 
+import type { SecType } from '../contract.js'
 import type { Position, Order, OrderType, TimeInForce } from '../interfaces.js'
 
 // ==================== Commit Hash ====================
@@ -193,7 +194,7 @@ export interface GitArchiveMetadata {
 
 export interface PersistedProtectionWatcher {
   orderId: string
-  contractRef: { aliceId?: string; symbol?: string; secType?: string }
+  contractRef: { aliceId?: string; symbol?: string; secType?: SecType }
   plan: {
     stopLossPrice?: number; stopLossPct?: number
     takeProfitPrice?: number; takeProfitPct?: number

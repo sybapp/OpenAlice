@@ -10,6 +10,7 @@
  */
 
 import type { Contract } from './contract.js'
+import type { SecType } from './contract.js'
 import type {
   ITradingAccount,
   Order,
@@ -223,7 +224,7 @@ function toContractRef(params: {
   const contract: Partial<Contract> = {}
   if (params.aliceId) contract.aliceId = params.aliceId
   if (params.symbol) contract.symbol = params.symbol
-  if (params.secType) contract.secType = params.secType as Contract['secType']
+  if (params.secType) contract.secType = params.secType as unknown as SecType
   if (params.currency) contract.currency = params.currency
   if (params.exchange) contract.exchange = params.exchange
   return contract

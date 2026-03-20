@@ -140,4 +140,68 @@ describe('SkillLoopRunner', () => {
       skillId: 'ta-brooks',
     })
   })
+
+  it('omits hidden invocation fields from the prompt shown to the model', async () => {
+    const askWithSession = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        complete: {
+          type: 'complete',
+          output: { text: 'done' },
+        },
+      }),
+      media: [],
+    })
+
+    const runner = new SkillLoopRunner(
+      { askWithSession } as never,
+      {
+        config: {} as never,
+        eventLog: {} as never,
+        brain: {} as never,
+        accountManager: {} as never,
+        marketData: {} as never,
+        ohlcvStore: {} as never,
+        newsStore: {} as never,
+        getAccountGit: vi.fn(),
+      },
+    )
+
+    const skill: SkillPack = {
+      id: 'ta-brooks',
+      label: 'Brooks',
+      description: 'Brooks analysis',
+      runtime: 'script-loop',
+      userInvocable: true,
+      preferredTools: [],
+      toolAllow: undefined,
+      toolDeny: undefined,
+      allowedScripts: ['analysis-brooks'],
+      outputSchema: 'ChatResponse',
+      decisionWindowBars: 10,
+      analysisMode: 'tool-first',
+      whenToUse: '',
+      instructions: '',
+      safetyNotes: '',
+      examples: '',
+      resources: [],
+      body: '',
+      sourcePath: '/tmp/SKILL.md',
+    }
+    vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
+
+    await runner.run('analyze BTC', makeSession(), {
+      skillContext: {
+        visibleSource: 'source-1',
+        __sourceAliases: {
+          aliasToReal: { 'source-1': 'paper-1' },
+          realToAlias: { 'paper-1': 'source-1' },
+        },
+      },
+    })
+
+    const prompt = String(askWithSession.mock.calls[0][0])
+    expect(prompt).toContain('"visibleSource": "source-1"')
+    expect(prompt).not.toContain('__sourceAliases')
+    expect(prompt).not.toContain('paper-1')
+  })
 })

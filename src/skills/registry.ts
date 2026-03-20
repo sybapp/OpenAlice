@@ -5,8 +5,11 @@ import { ANALYSIS_REPORT_NAME } from './analysis-report.js'
 
 const SKILL_FILE_NAME = 'SKILL.md'
 
-type FrontmatterValue = string | number | boolean | FrontmatterObject | FrontmatterValue[]
-type FrontmatterObject = Record<string, FrontmatterValue>
+type FrontmatterValue = string | number | boolean | FrontmatterObject | FrontmatterArray
+interface FrontmatterObject {
+  [key: string]: FrontmatterValue
+}
+interface FrontmatterArray extends Array<FrontmatterValue> {}
 
 function getUserSkillsDir(): string {
   return resolve('runtime/skills')
