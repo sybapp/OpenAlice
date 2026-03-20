@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   api,
   type EventLogEntry,
@@ -145,7 +145,7 @@ function renderOrders(data: Record<string, unknown>) {
   )
 }
 
-function renderStageData(stage: TraderWorkflowStageEntry): JSX.Element {
+function renderStageData(stage: TraderWorkflowStageEntry): ReactNode {
   const data = isRecord(stage.data) ? stage.data : {}
 
   switch (stage.stage) {
