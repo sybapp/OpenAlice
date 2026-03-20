@@ -197,7 +197,7 @@ async function main() {
 
   // ---- Engine Context ----
   ctx = {
-    config, connectorCenter, engine, eventLog, heartbeat, cronEngine, trader, traderReview, toolCenter,
+    config, connectorCenter, engine, eventLog, brain, heartbeat, cronEngine, trader, traderReview, toolCenter,
     accountManager, backtest, marketData,
     getAccountGit,
     reconnectAccount,

@@ -77,7 +77,7 @@ function createWebApp(args: {
   app.route('/api/trading/config', createTradingConfigRoutes(ctx))
   app.route('/api/trading', createTradingRoutes(ctx))
   app.route('/api/backtest', createBacktestRoutes(ctx))
-  app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
+  app.route('/api/dev', createDevRoutes({ connectorCenter: ctx.connectorCenter, ctx, session }))
   app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
 
   const uiRoot = resolve('dist/web')

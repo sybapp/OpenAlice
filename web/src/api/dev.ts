@@ -29,6 +29,14 @@ export interface SessionInfo {
   sizeBytes: number
 }
 
+export type RuntimeDataTarget = 'chat' | 'events' | 'brain'
+
+export interface RuntimeDataClearResult {
+  target: RuntimeDataTarget
+  removedEntries: number
+  message: string
+}
+
 export const devApi = {
   async registry(): Promise<RegistryResponse> {
     return fetchJson('/api/dev/registry')
@@ -45,5 +53,13 @@ export const devApi = {
   async sessions(): Promise<SessionInfo[]> {
     const data = await fetchJson<{ sessions: SessionInfo[] }>('/api/dev/sessions')
     return data.sessions
+  },
+
+  async clearRuntimeData(target: RuntimeDataTarget): Promise<RuntimeDataClearResult> {
+    return fetchJsonOrThrow('/api/dev/runtime/clear', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ target }),
+    }, 'Failed to clear runtime data')
   },
 }

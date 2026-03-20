@@ -61,6 +61,8 @@ export function SettingsPage() {
               </div>
             </Section>
 
+            <DataControlsSection />
+
             {/* Agent */}
             <Section id="agent" title="Agent" description="Controls file-system and tool permissions for the AI. Changes apply on the next request.">
               <div className="flex items-center justify-between">
@@ -97,6 +99,104 @@ export function SettingsPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function DataControlsSection() {
+  const [busyTarget, setBusyTarget] = useState<'chat' | 'events' | 'brain' | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const runClear = useCallback(async (
+    target: 'chat' | 'events' | 'brain',
+    confirmation: string,
+  ) => {
+    if (!window.confirm(confirmation)) {
+      return
+    }
+
+    setBusyTarget(target)
+    setMessage(null)
+    setError(null)
+    try {
+      const result = await api.dev.clearRuntimeData(target)
+      setMessage(result.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear runtime data')
+    } finally {
+      setBusyTarget(null)
+    }
+  }, [])
+
+  return (
+    <Section
+      id="data-controls"
+      title="Data Controls"
+      description="Delete persisted runtime memory and history. These actions cannot be undone."
+    >
+      <div className="space-y-3">
+        <RuntimeDataCard
+          title="Web Chat History"
+          description="Deletes the persisted `web/default` chat session so the Chat page starts fresh."
+          buttonLabel={busyTarget === 'chat' ? 'Clearing…' : 'Clear Chat History'}
+          disabled={busyTarget !== null}
+          onClear={() => runClear('chat', 'Delete the persisted web chat history?')}
+        />
+        <RuntimeDataCard
+          title="Event Log"
+          description="Removes the event log timeline used by Events, strategy history, and recent activity views."
+          buttonLabel={busyTarget === 'events' ? 'Clearing…' : 'Clear Event Log'}
+          disabled={busyTarget !== null}
+          onClear={() => runClear('events', 'Delete all persisted event log entries?')}
+        />
+        <RuntimeDataCard
+          title="Brain Memory"
+          description="Resets frontal lobe memory, emotion state, and the persisted Brain commit history."
+          buttonLabel={busyTarget === 'brain' ? 'Resetting…' : 'Reset Brain Memory'}
+          disabled={busyTarget !== null}
+          onClear={() => runClear('brain', 'Reset Brain memory and remove its commit history?')}
+        />
+
+        {message && (
+          <div className="rounded-lg border border-green/30 bg-green/5 px-4 py-3 text-sm text-green">
+            {message}
+          </div>
+        )}
+        {error && (
+          <div className="rounded-lg border border-red/30 bg-red/5 px-4 py-3 text-sm text-red">
+            {error}
+          </div>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+function RuntimeDataCard({
+  title,
+  description,
+  buttonLabel,
+  disabled,
+  onClear,
+}: {
+  title: string
+  description: string
+  buttonLabel: string
+  disabled: boolean
+  onClear: () => void
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-bg-secondary/40 px-4 py-3">
+      <div className="text-sm font-medium text-text">{title}</div>
+      <div className="mt-1 text-[12px] text-text-muted">{description}</div>
+      <button
+        onClick={onClear}
+        disabled={disabled}
+        className="mt-3 rounded-lg border border-red/30 px-3 py-2 text-[13px] font-medium text-red transition-colors hover:bg-red/5 disabled:opacity-50"
+      >
+        {buttonLabel}
+      </button>
     </div>
   )
 }

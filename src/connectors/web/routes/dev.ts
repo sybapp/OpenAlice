@@ -12,10 +12,19 @@
  */
 import { Hono } from 'hono'
 import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { RUNTIME_SESSIONS_DIR } from '../../../core/paths.js'
 import type { ConnectorCenter } from '../../../core/connector-center.js'
+import type { EngineContext } from '../../../core/types.js'
+import type { SessionStore } from '../../../core/session.js'
 
-export function createDevRoutes(connectorCenter: ConnectorCenter) {
+type ClearTarget = 'chat' | 'events' | 'brain'
+
+export function createDevRoutes(args: {
+  connectorCenter: ConnectorCenter
+  ctx: EngineContext
+  session: SessionStore
+}) {
+  const { connectorCenter, ctx, session } = args
   const app = new Hono()
 
   /** List all registered connectors + last interaction info. */
@@ -63,14 +72,13 @@ export function createDevRoutes(connectorCenter: ConnectorCenter) {
 
   /** List all session files (id + size). */
   app.get('/sessions', async (c) => {
-    const dir = join(process.cwd(), 'data', 'sessions')
     try {
-      const files = await readdir(dir)
+      const files = await readdir(RUNTIME_SESSIONS_DIR)
       const sessions = await Promise.all(
         files
           .filter((f) => f.endsWith('.jsonl'))
           .map(async (f) => {
-            const s = await stat(join(dir, f))
+            const s = await stat(`${RUNTIME_SESSIONS_DIR}/${f}`)
             return { id: f.replace('.jsonl', ''), sizeBytes: s.size }
           }),
       )
@@ -78,6 +86,42 @@ export function createDevRoutes(connectorCenter: ConnectorCenter) {
     } catch {
       return c.json({ sessions: [] })
     }
+  })
+
+  app.post('/runtime/clear', async (c) => {
+    const body: { target?: ClearTarget } = await c.req.json<{ target?: ClearTarget }>().catch(() => ({}))
+    const target = body.target
+    if (target !== 'chat' && target !== 'events' && target !== 'brain') {
+      return c.json({ error: 'target must be one of: chat, events, brain' }, 400)
+    }
+
+    if (target === 'chat') {
+      const removedEntries = (await session.readAll()).length
+      await session.clear()
+      return c.json({
+        target,
+        removedEntries,
+        message: removedEntries > 0 ? `Cleared ${removedEntries} web chat history entries.` : 'Web chat history was already empty.',
+      })
+    }
+
+    if (target === 'events') {
+      const removedEntries = (await ctx.eventLog.read()).length
+      await ctx.eventLog.clear()
+      return c.json({
+        target,
+        removedEntries,
+        message: removedEntries > 0 ? `Cleared ${removedEntries} event log entries.` : 'Event log was already empty.',
+      })
+    }
+
+    const removedEntries = ctx.brain.exportState().commits.length
+    ctx.brain.reset()
+    return c.json({
+      target,
+      removedEntries,
+      message: removedEntries > 0 ? `Reset Brain memory and removed ${removedEntries} memory commits.` : 'Brain memory was already empty.',
+    })
   })
 
   return app

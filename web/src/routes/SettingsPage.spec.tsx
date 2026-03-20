@@ -48,4 +48,30 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByText('This tab is currently locked.')).toBeInTheDocument())
     expect(sessionStorage.getItem('authToken')).toBeNull()
   })
+
+  it('clears persisted runtime history from the data controls section', async () => {
+    vi.spyOn(api.config, 'load').mockResolvedValue(config)
+    vi.spyOn(api.auth, 'check').mockResolvedValue({ authRequired: true })
+    vi.spyOn(api.auth, 'verify').mockResolvedValue({ valid: true })
+    vi.spyOn(api.dev, 'clearRuntimeData').mockResolvedValue({
+      target: 'chat',
+      removedEntries: 12,
+      message: 'Cleared 12 web chat history entries.',
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(
+      <AuthSessionProvider>
+        <SettingsPage />
+      </AuthSessionProvider>,
+    )
+
+    await screen.findByText('Data Controls')
+    await userEvent.click(screen.getByRole('button', { name: 'Clear Chat History' }))
+
+    await waitFor(() => {
+      expect(api.dev.clearRuntimeData).toHaveBeenCalledWith('chat')
+    })
+    expect(await screen.findByText('Cleared 12 web chat history entries.')).toBeInTheDocument()
+  })
 })

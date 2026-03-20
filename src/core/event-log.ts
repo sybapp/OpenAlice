@@ -75,6 +75,9 @@ export interface EventLog {
   /** Subscribe to new events of a specific type. Returns unsubscribe fn. */
   subscribeType(type: string, listener: EventLogListener): () => void
 
+  /** Clear all persisted and in-memory entries. */
+  clear(): Promise<void>
+
   /** Close the log (clear listeners and buffer). */
   close(): Promise<void>
 
@@ -257,6 +260,16 @@ export async function createEventLog(opts?: {
 
   // ---------- lifecycle ----------
 
+  async function clear(): Promise<void> {
+    seq = 0
+    buffer = []
+    try {
+      await unlink(logPath)
+    } catch (err: unknown) {
+      if (!isENOENT(err)) throw err
+    }
+  }
+
   async function close(): Promise<void> {
     listeners.clear()
     typeListeners.clear()
@@ -283,6 +296,7 @@ export async function createEventLog(opts?: {
     lastSeq: () => seq,
     subscribe,
     subscribeType,
+    clear,
     close,
     _resetForTest,
   }

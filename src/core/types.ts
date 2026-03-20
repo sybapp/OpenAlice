@@ -1,4 +1,5 @@
 import type { AccountManager, BacktestRunManager } from '../domains/trading/index.js'
+import type { Brain } from '../domains/cognition/brain/index.js'
 import type { ITradingGit } from '../domains/trading/git/interfaces.js'
 import type { CronEngine } from '../jobs/cron/engine.js'
 import type { Heartbeat } from '../jobs/heartbeat/index.js'
@@ -48,6 +49,7 @@ export interface EngineContext {
   connectorCenter: ConnectorCenter
   engine: Engine
   eventLog: EventLog
+  brain: Brain
   heartbeat: Heartbeat
   cronEngine: CronEngine
   trader: TraderJobEngine

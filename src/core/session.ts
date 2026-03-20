@@ -18,7 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFile, appendFile, mkdir } from 'node:fs/promises'
+import { readFile, appendFile, mkdir, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getActiveEntries } from './compaction.js'
 import { RUNTIME_SESSIONS_DIR } from './paths.js'
@@ -163,6 +163,18 @@ export class SessionStore {
       return true
     } catch {
       return false
+    }
+  }
+
+  /** Remove the persisted session history and reset the message chain. */
+  async clear(): Promise<void> {
+    this.lastUuid = null
+    try {
+      await unlink(this.filePath)
+    } catch (err: unknown) {
+      if (!(err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+        throw err
+      }
     }
   }
 

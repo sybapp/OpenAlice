@@ -77,6 +77,17 @@ export class Brain {
     return { success: true, message: `Emotion: ${from} → ${emotion}` };
   }
 
+  reset(): { success: boolean; message: string } {
+    this.state = {
+      frontalLobe: '',
+      emotion: 'neutral',
+    };
+    this.commits = [];
+    this.head = null;
+    this.config.onCommit?.(this.exportState());
+    return { success: true, message: 'Brain memory reset successfully' };
+  }
+
   // ==================== Serialization ====================
 
   exportState(): BrainExportState {

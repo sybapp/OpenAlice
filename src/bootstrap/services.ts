@@ -4,7 +4,7 @@
  * Brain, EventLog, CronEngine, NewsCollectorStore, and CCXT-backed market data.
  */
 
-import { readFile, writeFile, appendFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import type { Config } from '../core/config.js'
 import ccxt from 'ccxt'
@@ -187,17 +187,18 @@ export async function initServices(config: Config) {
   ])
 
   const brainOnCommit = async (state: BrainExportState) => {
+    const emotionLog = state.commits
+      .filter((commit) => commit.type === 'emotion')
+      .map((commit, index, commits) => {
+        const previous = index > 0 ? commits[index - 1]?.stateAfter.emotion ?? 'unknown' : 'unknown'
+        return `## ${commit.timestamp}\n**${previous} → ${commit.stateAfter.emotion}**\n${commit.message}\n`
+      })
+      .join('\n')
+
     await mkdir(RUNTIME_BRAIN_DIR, { recursive: true })
     await writeFile(BRAIN_STATE_FILE, JSON.stringify(state, null, 2))
     await writeFile(FRONTAL_LOBE_FILE, state.state.frontalLobe)
-    const latest = state.commits[state.commits.length - 1]
-    if (latest?.type === 'emotion') {
-      const prev = state.commits.length > 1
-        ? state.commits[state.commits.length - 2]?.stateAfter.emotion ?? 'unknown'
-        : 'unknown'
-      await appendFile(EMOTION_LOG_FILE,
-        `## ${latest.timestamp}\n**${prev} → ${latest.stateAfter.emotion}**\n${latest.message}\n\n`)
-    }
+    await writeFile(EMOTION_LOG_FILE, emotionLog)
   }
 
   const brain = brainExport
