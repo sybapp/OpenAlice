@@ -1181,6 +1181,45 @@ describe('runTraderJob', () => {
     expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'session-5' }), 'trader-market-scan')
     expect(mocks.setSessionSkill).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'session-5' }), 'trader-trade-thesis')
   })
+
+  it('records ordered stage events with workflow state through execution', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({
+        commit: { hash: 'abc12345' },
+        pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }], pending: [], rejected: [] },
+        commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }] },
+      })),
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    queueHappyPath(deps)
+
+    const result = await runTraderJob({
+      jobId: 'job-stage-events',
+      strategyId: 'momentum',
+      session: { id: 'session-stage-events' } as SessionStore,
+      runId: 'run-stage-events',
+      jobName: 'Stage Events',
+    }, deps)
+
+    expect(result.status).toBe('done')
+
+    const stageEvents = deps.eventLog.append.mock.calls
+      .filter(([type]) => type === 'trader.stage')
+      .map(([, payload]) => payload)
+
+    expect(stageEvents.map((payload: any) => `${payload.stage}:${payload.status}`)).toEqual([
+      'market-scan:completed',
+      'trade-thesis:completed',
+      'risk-check:completed',
+      'trade-plan:completed',
+      'trade-execute:completed',
+      'trade-execute-script:completed',
+    ])
+    expect(stageEvents.every((payload: any) => payload.runId === 'run-stage-events')).toBe(true)
+    expect(stageEvents.every((payload: any) => payload.data.workflowState === payload.stage)).toBe(true)
+  })
 })
 
 describe('runTraderReview', () => {
