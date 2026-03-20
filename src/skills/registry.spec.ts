@@ -199,6 +199,32 @@ plugin safe
     })
   })
 
+  it('loads markdown resources from a skill references directory', async () => {
+    await mkdir(join(tempDir, 'runtime/skills/ref-skill/references'), { recursive: true })
+    await writeFile(join(tempDir, 'runtime/skills/ref-skill/SKILL.md'), `---
+name: ref-skill
+description: Reference demo
+runtime: script-loop
+scripts:
+  - trader-account-state
+outputSchema: ChatResponse
+---
+# Ref Skill
+
+## When to use
+whenever
+
+## Instructions
+read a resource if needed
+`)
+    await writeFile(join(tempDir, 'runtime/skills/ref-skill/references/checklist.md'), '# Checklist\n')
+
+    const skill = await getSkillPack('ref-skill')
+    expect(skill?.resources).toEqual([
+      expect.objectContaining({ id: 'references/checklist' }),
+    ])
+  })
+
   it('writes plugin-style default skills for new installs', async () => {
     await ensureDefaultSkillPacks()
 

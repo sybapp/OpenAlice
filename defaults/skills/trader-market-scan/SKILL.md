@@ -19,7 +19,7 @@ analysisMode: tool-first
 Use only as the first stage of the trader pipeline.
 
 ## Instructions
-Scan the configured universe, request only the scripts needed to rank candidates, and return a small list of the best symbols to study next.
+Act like a constrained stage-agent. Start by checking the coverage contract resource if needed, then request the required scripts before judging the setup list. Return a small ranked list of the best symbols to study next plus explicit evaluations for the configured coverage set.
 
 ## Safety notes
 Do not build orders or execute trades in this stage.

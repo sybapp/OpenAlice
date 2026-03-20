@@ -15,7 +15,7 @@ analysisMode: tool-first
 Use only after a trade thesis exists.
 
 ## Instructions
-Use fresh account state and the strategy risk card to decide pass, fail, or reduce. Be conservative when exposure is already stretched.
+Act like a constrained stage-agent. Check the risk contract resource if needed, gather the required fresh account evidence, and decide pass, fail, or reduce. Be conservative when exposure is already stretched.
 
 ## Safety notes
 Do not create or execute orders in this stage.

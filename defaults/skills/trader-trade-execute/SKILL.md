@@ -14,7 +14,7 @@ analysisMode: tool-first
 Use only after a trade plan exists.
 
 ## Instructions
-Read the plan and decide whether to execute it exactly as written or abort it. Do not redesign the plan here.
+Act like a constrained stage-agent. Check the execute contract resource if needed, then decide whether to execute the plan exactly as written or abort it. Do not redesign the plan here.
 
 ## Safety notes
 You do not execute trades directly. You only confirm or abort.

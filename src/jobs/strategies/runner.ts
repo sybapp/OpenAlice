@@ -18,13 +18,20 @@ import {
 import { getSkillScript } from '../../skills/script-registry.js'
 import type { AccountInfo, MarketClock, Order, Position } from '../../domains/trading/interfaces.js'
 import {
-  buildMarketScanPrompt,
-  buildRiskCheckPrompt,
-  buildTradeExecutePrompt,
-  buildTradePlanPrompt,
   buildTraderReviewPrompt,
-  buildTradeThesisPrompt,
 } from './prompt.js'
+import {
+  buildMarketScanTask,
+  buildRiskCheckTask,
+  buildTradeExecuteTask,
+  buildTradePlanTask,
+  buildTradeThesisTask,
+} from './orchestrator-prompts.js'
+import {
+  runTraderStageAgent,
+  type TraderStageAgentTrace,
+  type TraderStageRequiredScriptCall,
+} from './stage-agent.js'
 import { applyTraderStrategyPatch, getTraderStrategy } from './strategy.js'
 import type {
   TraderDecision,
@@ -345,6 +352,110 @@ async function appendTraderStageEvent(
   } satisfies TraderWorkflowStageEventPayload)
 }
 
+function attachAgentTrace<T extends Record<string, unknown>>(data: T, trace: TraderStageAgentTrace): T & { agentTrace: TraderStageAgentTrace } {
+  return {
+    ...data,
+    agentTrace: trace,
+  }
+}
+
+function buildMarketScanRequiredScriptCalls(strategy: TraderStrategy): TraderStageRequiredScriptCall[] {
+  return [
+    ...strategy.sources.map((source) => ({
+      id: 'trader-account-state',
+      match: { source },
+      rationale: `Load fresh account state for ${source}.`,
+    })),
+    ...strategy.universe.symbols.flatMap((symbol) => ([
+      {
+        id: 'analysis-brooks',
+        match: { asset: strategy.universe.asset, symbol },
+        rationale: `Gather Brooks structure for ${symbol}.`,
+      },
+      {
+        id: 'analysis-ict-smc',
+        match: { asset: strategy.universe.asset, symbol },
+        rationale: `Gather ICT/SMC structure for ${symbol}.`,
+      },
+    ])),
+  ]
+}
+
+function buildTradeThesisRequiredScriptCalls(strategy: TraderStrategy, candidate: TraderMarketCandidate): TraderStageRequiredScriptCall[] {
+  return [
+    {
+      id: 'trader-account-state',
+      match: { source: candidate.source },
+      rationale: `Load fresh account state for ${candidate.source}.`,
+    },
+    {
+      id: 'analysis-brooks',
+      match: { asset: strategy.universe.asset, symbol: candidate.symbol },
+      rationale: `Gather Brooks structure for ${candidate.symbol}.`,
+    },
+    {
+      id: 'analysis-ict-smc',
+      match: { asset: strategy.universe.asset, symbol: candidate.symbol },
+      rationale: `Gather ICT/SMC structure for ${candidate.symbol}.`,
+    },
+  ]
+}
+
+function buildSingleSourceRequiredScriptCall(source: string, stageLabel: string): TraderStageRequiredScriptCall[] {
+  return [{
+    id: 'trader-account-state',
+    match: { source },
+    rationale: `Reload fresh account state for ${source} during ${stageLabel}.`,
+  }]
+}
+
+function validateMarketScanOutput(
+  strategy: TraderStrategy,
+  output: { candidates: TraderMarketCandidate[]; evaluations: Array<{ source: string; symbol: string; verdict: string }> },
+) {
+  if (output.candidates.length === 0 && output.evaluations.length === 0) {
+    throw new Error('Market scan cannot return an all-empty payload.')
+  }
+  if (strategy.universe.symbols.length !== 1) return
+
+  const expectedPairs = strategy.sources.map((source) => `${source}::${strategy.universe.symbols[0]}`)
+  const evaluatedPairs = new Set(output.evaluations.map((evaluation) => `${evaluation.source}::${evaluation.symbol}`))
+  const missingPairs = expectedPairs.filter((pair) => !evaluatedPairs.has(pair))
+  if (missingPairs.length > 0) {
+    throw new Error(`Market scan is missing explicit evaluations for: ${missingPairs.join(', ')}`)
+  }
+}
+
+function validateThesisOutput(candidate: TraderMarketCandidate, output: { source: string; symbol: string }) {
+  if (output.source !== candidate.source || output.symbol !== candidate.symbol) {
+    throw new Error(`Trade thesis output must stay on ${candidate.symbol} at ${candidate.source}.`)
+  }
+}
+
+function validateRiskOutput(thesis: { source: string; symbol: string }, output: { source: string; symbol: string }) {
+  if (output.source !== thesis.source || output.symbol !== thesis.symbol) {
+    throw new Error(`Risk check output must stay on ${thesis.symbol} at ${thesis.source}.`)
+  }
+}
+
+function validateTradePlanOutput(thesis: { source: string; symbol: string; chosenScenario: string }, output: TraderTradePlanReadyResult | any) {
+  if (output.source !== thesis.source || output.symbol !== thesis.symbol) {
+    throw new Error(`Trade plan output must stay on ${thesis.symbol} at ${thesis.source}.`)
+  }
+  if (output.chosenScenario !== thesis.chosenScenario) {
+    throw new Error('Trade plan must preserve the thesis chosenScenario.')
+  }
+  if (output.status === 'plan_ready' && output.orders.length === 0) {
+    throw new Error('Trade plan with status "plan_ready" must include at least one order.')
+  }
+}
+
+function validateTradeExecuteOutput(plan: TraderTradePlanReadyResult, output: { source: string; symbol: string }) {
+  if (output.source !== plan.source || output.symbol !== plan.symbol) {
+    throw new Error(`Trade execute output must stay on ${plan.symbol} at ${plan.source}.`)
+  }
+}
+
 function summarizePlannedOrder(order: TraderPlannedOrder): string {
   const size = order.qty !== undefined
     ? `qty=${order.qty}`
@@ -489,10 +600,10 @@ async function runCandidatePipeline(params: {
 
   let thesis
   try {
-    thesis = await runSkillStage({
+    thesis = await runTraderStageAgent({
       session,
       skillId: TRADER_SKILLS.tradeThesis,
-      prompt: buildTradeThesisPrompt(publicStrategy, publicCandidate, publicPreflightSnapshot),
+      task: buildTradeThesisTask(publicStrategy, publicCandidate, publicPreflightSnapshot),
       schema: traderTradeThesisSchema,
       deps,
       skillContext: createSkillContext({
@@ -501,6 +612,7 @@ async function runCandidatePipeline(params: {
         snapshot: publicPreflightSnapshot,
         stage: 'trade-thesis',
       }, sourceAliases),
+      requiredScriptCalls: buildTradeThesisRequiredScriptCalls(publicStrategy, publicCandidate),
     })
   } catch (error) {
     await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'failed', {
@@ -514,13 +626,14 @@ async function runCandidatePipeline(params: {
     toInternalSource(thesis.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
+  validateThesisOutput(candidate, thesisOutput)
 
   if (thesisOutput.status === 'no_trade') {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'skipped', thesisOutput)
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'skipped', attachAgentTrace(thesisOutput, thesis.trace))
     updateBrainIfPresent(deps, ...thesisOutput.contextNotes)
     return buildSkipResult(thesisOutput.rationale, thesis.rawText)
   }
-  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'completed', thesisOutput)
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-thesis', 'completed', attachAgentTrace(thesisOutput, thesis.trace))
 
   // Risk review must use a fresh account snapshot because the earlier AI stages may take minutes.
   const riskSnapshot = await buildPreflightSnapshot(strategy, deps)
@@ -537,10 +650,10 @@ async function runCandidatePipeline(params: {
 
   let risk
   try {
-    risk = await runSkillStage({
+    risk = await runTraderStageAgent({
       session,
       skillId: TRADER_SKILLS.riskCheck,
-      prompt: buildRiskCheckPrompt(publicStrategy, publicThesis, publicRiskSnapshot),
+      task: buildRiskCheckTask(publicStrategy, publicThesis, publicRiskSnapshot),
       schema: traderRiskCheckSchema,
       deps,
       skillContext: createSkillContext({
@@ -549,6 +662,7 @@ async function runCandidatePipeline(params: {
         snapshot: publicRiskSnapshot,
         stage: 'risk-check',
       }, sourceAliases),
+      requiredScriptCalls: buildSingleSourceRequiredScriptCall(publicThesis.source, 'risk-check'),
     })
   } catch (error) {
     await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'failed', {
@@ -562,20 +676,21 @@ async function runCandidatePipeline(params: {
     toInternalSource(risk.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
+  validateRiskOutput(thesisOutput, riskOutput)
 
   if (riskOutput.verdict !== 'pass') {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'skipped', riskOutput)
+    await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'skipped', attachAgentTrace(riskOutput, risk.trace))
     return buildSkipResult(riskOutput.rationale, risk.rawText)
   }
-  await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'completed', riskOutput)
+  await appendTraderStageEvent(deps, meta, strategy.id, 'risk-check', 'completed', attachAgentTrace(riskOutput, risk.trace))
   const publicRisk = toPublicSource(riskOutput, sourceAliases)
 
   let plan
   try {
-    plan = await runSkillStage({
+    plan = await runTraderStageAgent({
       session,
       skillId: TRADER_SKILLS.tradePlan,
-      prompt: buildTradePlanPrompt(publicStrategy, publicThesis, publicRisk),
+      task: buildTradePlanTask(publicStrategy, publicThesis, publicRisk),
       schema: traderTradePlanSchema,
       deps,
       skillContext: createSkillContext({
@@ -584,6 +699,7 @@ async function runCandidatePipeline(params: {
         risk: publicRisk,
         stage: 'trade-plan',
       }, sourceAliases),
+      requiredScriptCalls: buildSingleSourceRequiredScriptCall(publicThesis.source, 'trade-plan'),
     })
   } catch (error) {
     await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'failed', {
@@ -597,32 +713,33 @@ async function runCandidatePipeline(params: {
     toInternalSource(plan.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
+  validateTradePlanOutput(thesisOutput, planOutput)
 
   if (planOutput.status !== 'plan_ready' || planOutput.orders.length === 0) {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', planOutput)
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', attachAgentTrace(planOutput, plan.trace))
     updateBrainIfPresent(deps, planOutput.brainUpdate)
     return buildSkipResult(planOutput.rationale, plan.rawText)
   }
 
   const hardRiskBlock = getHardRiskBudgetViolation(strategy, riskSnapshot, planOutput)
   if (hardRiskBlock) {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', {
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'skipped', attachAgentTrace({
       ...planOutput,
       rationale: hardRiskBlock,
       gate: 'hard-risk-budget',
-    })
+    }, plan.trace))
     updateBrainIfPresent(deps, planOutput.brainUpdate)
     return buildSkipResult(hardRiskBlock, plan.rawText)
   }
-  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'completed', planOutput)
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-plan', 'completed', attachAgentTrace(planOutput, plan.trace))
   const publicPlan = toPublicSource(planOutput, sourceAliases)
 
   let execute
   try {
-    execute = await runSkillStage({
+    execute = await runTraderStageAgent({
       session,
       skillId: TRADER_SKILLS.tradeExecute,
-      prompt: buildTradeExecutePrompt(publicStrategy, publicPlan),
+      task: buildTradeExecuteTask(publicStrategy, publicPlan),
       schema: traderTradeExecuteSchema,
       deps,
       skillContext: createSkillContext({
@@ -643,13 +760,14 @@ async function runCandidatePipeline(params: {
     toInternalSource(execute.output, sourceAliases),
     (text) => replaceSourceReferences(text, sourceAliases, false),
   )
+  validateTradeExecuteOutput(planOutput, executeOutput)
 
   if (executeOutput.status !== 'execute') {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'skipped', executeOutput)
+    await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'skipped', attachAgentTrace(executeOutput, execute.trace))
     updateBrainIfPresent(deps, executeOutput.brainUpdate)
     return buildSkipResult(executeOutput.rationale, execute.rawText)
   }
-  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'completed', executeOutput)
+  await appendTraderStageEvent(deps, meta, strategy.id, 'trade-execute', 'completed', attachAgentTrace(executeOutput, execute.trace))
 
   const executeScript = getSkillScript('trader-execute-plan')
   if (!executeScript) {
@@ -726,7 +844,7 @@ async function runCandidatePipeline(params: {
   }
 }
 
-export async function runTraderJob(
+async function runTraderJobImpl(
   params: { jobId: string; strategyId: string; session: SessionStore; runId?: string; jobName?: string },
   deps: TraderRunnerDeps,
 ): Promise<TraderRunnerResult> {
@@ -754,10 +872,10 @@ export async function runTraderJob(
 
   let scan
   try {
-    scan = await runSkillStage({
+    scan = await runTraderStageAgent({
       session: params.session,
       skillId: TRADER_SKILLS.marketScan,
-      prompt: buildMarketScanPrompt(publicStrategy, publicSnapshot),
+      task: buildMarketScanTask(publicStrategy, publicSnapshot),
       schema: traderMarketScanSchema,
       deps,
       skillContext: createSkillContext({
@@ -765,6 +883,7 @@ export async function runTraderJob(
         snapshot: publicSnapshot,
         stage: 'market-scan',
       }, sourceAliases),
+      requiredScriptCalls: buildMarketScanRequiredScriptCalls(publicStrategy),
     })
   } catch (error) {
     await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'failed', {
@@ -783,16 +902,17 @@ export async function runTraderJob(
       (text) => replaceSourceReferences(text, sourceAliases, false),
     )),
   }
+  validateMarketScanOutput(strategy, scanOutput)
 
   if (scanOutput.candidates.length === 0) {
-    await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'skipped', scanOutput)
+    await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'skipped', attachAgentTrace(scanOutput, scan.trace))
     return externalizeRunnerResult({
       status: 'skip',
       reason: resolveEmptyMarketScanReason(strategy, scanOutput.summary, scanOutput.evaluations),
       rawText: scan.rawText,
     }, presentation)
   }
-  await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'completed', scanOutput)
+  await appendTraderStageEvent(deps, meta, strategy.id, 'market-scan', 'completed', attachAgentTrace(scanOutput, scan.trace))
 
   let lastSkip: TraderRunnerResult = {
     status: 'skip',
@@ -823,7 +943,7 @@ export async function runTraderJob(
   return externalizeRunnerResult(lastSkip, presentation)
 }
 
-export async function runTraderReview(
+async function runTraderReviewImpl(
   strategyId: string | undefined,
   deps: TraderRunnerDeps,
   meta?: { trigger?: 'manual' | 'scheduled'; jobId?: string; jobName?: string },
@@ -910,4 +1030,34 @@ export async function runTraderReview(
     patchSummary,
     yamlDiff,
   }
+}
+
+export class TraderOrchestrator {
+  constructor(private readonly deps: TraderRunnerDeps) {}
+
+  runJob(params: { jobId: string; strategyId: string; session: SessionStore; runId?: string; jobName?: string }) {
+    return runTraderJobImpl(params, this.deps)
+  }
+
+  runReview(
+    strategyId: string | undefined,
+    meta?: { trigger?: 'manual' | 'scheduled'; jobId?: string; jobName?: string },
+  ) {
+    return runTraderReviewImpl(strategyId, this.deps, meta)
+  }
+}
+
+export async function runTraderJob(
+  params: { jobId: string; strategyId: string; session: SessionStore; runId?: string; jobName?: string },
+  deps: TraderRunnerDeps,
+): Promise<TraderRunnerResult> {
+  return new TraderOrchestrator(deps).runJob(params)
+}
+
+export async function runTraderReview(
+  strategyId: string | undefined,
+  deps: TraderRunnerDeps,
+  meta?: { trigger?: 'manual' | 'scheduled'; jobId?: string; jobName?: string },
+): Promise<TraderReviewResult> {
+  return new TraderOrchestrator(deps).runReview(strategyId, meta)
 }

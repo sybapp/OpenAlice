@@ -266,6 +266,12 @@ describe('runTraderJob', () => {
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
     deps.engine.askWithSession.mockResolvedValueOnce(complete({
       candidates: [],
+      evaluations: [{
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        verdict: 'skip',
+        reason: 'Current structure violates the mean-reversion entry rules.',
+      }],
       summary: 'BTC/USDT:USDT is the only symbol, but current structure violates the mean-reversion entry rules.',
     }))
 
@@ -279,6 +285,45 @@ describe('runTraderJob', () => {
       status: 'skip',
       reason: 'BTC/USDT:USDT is the only symbol, but current structure violates the mean-reversion entry rules.',
     })
+  })
+
+  it('rejects an all-empty market-scan payload', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [],
+      evaluations: [],
+      summary: '',
+    }))
+
+    await expect(runTraderJob({
+      jobId: 'job-empty-scan',
+      strategyId: 'momentum',
+      session: { id: 'session-empty-scan' } as SessionStore,
+    }, deps)).rejects.toThrow('Market scan cannot return an all-empty payload.')
+  })
+
+  it('rejects single-symbol scans that skip the explicit evaluation', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      id: 'mean-revert',
+      label: 'Mean Revert',
+      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
+      evaluations: [],
+      summary: 'single symbol looks interesting',
+    }))
+
+    await expect(runTraderJob({
+      jobId: 'job-single-missing-eval',
+      strategyId: 'mean-revert',
+      session: { id: 'session-single-missing-eval' } as SessionStore,
+    }, deps)).rejects.toThrow('Market scan is missing explicit evaluations for: ccxt-main::BTC/USDT:USDT')
   })
 
   it('rebuilds the account snapshot before the risk-check stage', async () => {

@@ -10,6 +10,12 @@ import { getSessionSkillId } from './session-skill.js'
 import { getSkillScript, listSkillScripts, type SkillScriptContext } from './script-registry.js'
 import { omitHiddenInvocationFields } from '../core/source-alias.js'
 
+interface RequiredScriptCall {
+  id: string
+  match?: Record<string, unknown>
+  rationale?: string
+}
+
 const skillLoopEnvelope = {
   requestScripts: {
     type: 'request_scripts',
@@ -139,6 +145,34 @@ function normalizeLoopResponse(parsed: unknown): Record<string, unknown> {
   }
 
   throw new Error(`Unsupported skill loop response: ${JSON.stringify(parsed)}`)
+}
+
+function matchesRequiredShape(actual: unknown, expected: unknown): boolean {
+  if (expected === undefined) return true
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length < expected.length) return false
+    return expected.every((value, index) => matchesRequiredShape(actual[index], value))
+  }
+  if (expected && typeof expected === 'object') {
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false
+    return Object.entries(expected as Record<string, unknown>).every(([key, value]) =>
+      matchesRequiredShape((actual as Record<string, unknown>)[key], value),
+    )
+  }
+  return actual === expected
+}
+
+function getMissingRequiredScriptCalls(
+  invocation: Record<string, unknown>,
+  scriptResults: Array<{ id: string; input: unknown; output: unknown }>,
+): RequiredScriptCall[] {
+  const required = Array.isArray(invocation.requiredScriptCalls)
+    ? invocation.requiredScriptCalls.filter((value): value is RequiredScriptCall => Boolean(value) && typeof value === 'object' && typeof (value as RequiredScriptCall).id === 'string')
+    : []
+
+  return required.filter((call) => !scriptResults.some((entry) => (
+    entry.id === call.id && matchesRequiredShape(entry.input, call.match)
+  )))
 }
 
 function buildSkillLoopPrompt(params: {
@@ -272,6 +306,19 @@ export class SkillLoopRunner {
       }
 
       if (parsed.type === 'complete') {
+        const missingRequiredCalls = getMissingRequiredScriptCalls(invocation, scriptResults)
+        if (missingRequiredCalls.length > 0) {
+          await workingSession.appendSystem(
+            [
+              'Completion rejected: required evidence is still missing.',
+              'Request the missing scripts before finalizing:',
+              ...missingRequiredCalls.map((call) => `- ${call.id}${call.match ? ` ${JSON.stringify(call.match)}` : ''}${call.rationale ? ` — ${call.rationale}` : ''}`),
+            ].join('\n'),
+            'engine',
+            { kind: 'skill_loop_requirement_feedback', skillId: skill.id },
+          )
+          continue
+        }
         const output = completionSchema ? completionSchema.parse(parsed.output) : parsed.output
         const finalResult = renderCompletion(skill, output)
         await session.appendAssistant(finalResult.text, 'engine', {

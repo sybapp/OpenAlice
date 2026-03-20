@@ -204,4 +204,84 @@ describe('SkillLoopRunner', () => {
     expect(prompt).not.toContain('__sourceAliases')
     expect(prompt).not.toContain('paper-1')
   })
+
+  it('rejects early completion until required script calls are satisfied', async () => {
+    const askWithSession = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          complete: {
+            type: 'complete',
+            output: { text: 'too early' },
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          requestScripts: {
+            type: 'request_scripts',
+            calls: [
+              { id: 'analysis-brooks', input: { symbol: 'BTC/USDT:USDT' } },
+            ],
+          },
+        }),
+        media: [],
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          complete: {
+            type: 'complete',
+            output: { text: 'done' },
+          },
+        }),
+        media: [],
+      })
+
+    const runner = new SkillLoopRunner(
+      { askWithSession } as never,
+      {
+        config: {} as never,
+        eventLog: {} as never,
+        brain: {} as never,
+        accountManager: {} as never,
+        marketData: {} as never,
+        ohlcvStore: {} as never,
+        newsStore: {} as never,
+        getAccountGit: vi.fn(),
+      },
+    )
+
+    const skill: SkillPack = {
+      id: 'ta-brooks',
+      label: 'Brooks',
+      description: 'Brooks analysis',
+      runtime: 'script-loop',
+      userInvocable: true,
+      preferredTools: [],
+      toolAllow: undefined,
+      toolDeny: undefined,
+      allowedScripts: ['analysis-brooks'],
+      outputSchema: 'ChatResponse',
+      decisionWindowBars: 10,
+      analysisMode: 'tool-first',
+      whenToUse: '',
+      instructions: '',
+      safetyNotes: '',
+      examples: '',
+      resources: [],
+      body: '',
+      sourcePath: '/tmp/SKILL.md',
+    }
+    vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
+
+    const result = await runner.run('analyze BTC', makeSession(), {
+      skillContext: {
+        requiredScriptCalls: [{ id: 'analysis-brooks', match: { symbol: 'BTC/USDT:USDT' } }],
+      },
+    })
+
+    expect(result).toEqual({ text: 'done', media: [] })
+    expect(askWithSession).toHaveBeenCalledTimes(3)
+  })
 })

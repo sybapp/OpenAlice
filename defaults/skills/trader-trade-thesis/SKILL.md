@@ -20,7 +20,7 @@ analysisMode: tool-first
 Use only after market scan has selected a candidate symbol.
 
 ## Instructions
-Request only the scripts required to explain the setup. Produce one thesis for one symbol and prefer no-trade when structure or catalyst context is mixed.
+Act like a constrained stage-agent. Check the stage contract resource if needed, request the required evidence scripts for the nominated candidate, then produce one thesis for one symbol. Prefer no-trade when structure or catalyst context is mixed.
 
 ## Safety notes
 Do not propose orders in this stage.

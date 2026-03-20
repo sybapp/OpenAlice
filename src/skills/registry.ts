@@ -223,13 +223,26 @@ async function listSkillResources(filePath: string) {
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith('.md') && entry.name !== SKILL_FILE_NAME)
     .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b))
+
+  const referencesDir = join(skillDir, 'references')
+  try {
+    const referenceEntries = await readdir(referencesDir, { withFileTypes: true })
+    for (const entry of referenceEntries) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        files.push(join('references', entry.name))
+      }
+    }
+  } catch {
+    // Skill has no references directory.
+  }
+
+  files.sort((a, b) => a.localeCompare(b))
 
   const resources = await Promise.all(files.map(async (name) => {
     const path = resolve(skillDir, name)
     const content = await readFile(path, 'utf-8')
     return {
-      id: basename(name, '.md'),
+      id: name.replace(/\.md$/i, '').replace(/\\/g, '/'),
       path,
       content,
     }
