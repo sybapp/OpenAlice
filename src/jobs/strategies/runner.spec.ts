@@ -211,6 +211,56 @@ describe('runTraderJob', () => {
     expect(mocks.setSessionSkill).not.toHaveBeenCalled()
   })
 
+  it('reports a specific reason when single-symbol market-scan returns empty candidates and summary', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      id: 'mean-revert',
+      label: 'Mean Revert',
+      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({ candidates: [], summary: '' }))
+
+    const result = await runTraderJob({
+      jobId: 'job-single-symbol-empty-scan',
+      strategyId: 'mean-revert',
+      session: { id: 'session-single-symbol-empty-scan' } as SessionStore,
+    }, deps)
+
+    expect(result).toEqual({
+      status: 'skip',
+      reason: 'Market scan returned no candidates for single-symbol strategy BTC/USDT:USDT; return that symbol or explain why it is not tradable.',
+      rawText: JSON.stringify({ type: 'complete', output: { candidates: [], summary: '' } }),
+    })
+  })
+
+  it('preserves an explicit single-symbol market-scan summary when no candidates are returned', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      id: 'mean-revert',
+      label: 'Mean Revert',
+      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [],
+      summary: 'BTC/USDT:USDT is the only symbol, but current structure violates the mean-reversion entry rules.',
+    }))
+
+    const result = await runTraderJob({
+      jobId: 'job-single-symbol-summary',
+      strategyId: 'mean-revert',
+      session: { id: 'session-single-symbol-summary' } as SessionStore,
+    }, deps)
+
+    expect(result).toMatchObject({
+      status: 'skip',
+      reason: 'BTC/USDT:USDT is the only symbol, but current structure violates the mean-reversion entry rules.',
+    })
+  })
+
   it('rebuilds the account snapshot before the risk-check stage', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()

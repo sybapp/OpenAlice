@@ -87,12 +87,15 @@ export function buildMarketScanPrompt(strategy: TraderStrategy, snapshot: Trader
     JSON.stringify(snapshot, null, 2),
     '',
     'Goal: identify the best candidate symbols to study next. Use scripts, not OpenAlice tools.',
+    strategy.universe.symbols.length === 1
+      ? `Single-symbol rule: either return at least one candidate for ${strategy.universe.symbols[0]} or provide a non-empty summary explaining why it is not tradable.`
+      : null,
     'When you send the final complete envelope, its output field must match this shape exactly:',
     JSON.stringify({
       candidates: [{ source: strategy.sources[0] ?? 'source-id', symbol: strategy.universe.symbols[0] ?? 'BTC/USDT', reason: 'short reason' }],
       summary: 'short overview',
     } satisfies TraderMarketScanResult, null, 2),
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 export function buildTradeThesisPrompt(strategy: TraderStrategy, candidate: { source: string; symbol: string }, snapshot: TraderPreflightSnapshot): string {

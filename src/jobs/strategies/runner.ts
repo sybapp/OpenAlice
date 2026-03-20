@@ -168,6 +168,16 @@ function externalizeRunnerResult(
   }
 }
 
+function resolveEmptyMarketScanReason(strategy: TraderStrategy, summary: string): string {
+  const normalizedSummary = summary.trim()
+  if (normalizedSummary) return normalizedSummary
+  if (strategy.universe.symbols.length === 1) {
+    const symbol = strategy.universe.symbols[0]
+    return `Market scan returned no candidates for single-symbol strategy ${symbol}; return that symbol or explain why it is not tradable.`
+  }
+  return 'No tradable candidate found.'
+}
+
 function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(10_000, value)) : 0
 }
@@ -647,7 +657,7 @@ export async function runTraderJob(
   if (scanOutput.candidates.length === 0) {
     return externalizeRunnerResult({
       status: 'skip',
-      reason: scanOutput.summary || 'No tradable candidate found.',
+      reason: resolveEmptyMarketScanReason(strategy, scanOutput.summary),
       rawText: scan.rawText,
     }, presentation)
   }
