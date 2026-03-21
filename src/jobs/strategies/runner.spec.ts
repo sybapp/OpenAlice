@@ -764,6 +764,7 @@ describe('runTraderJob', () => {
       jobId: 'job-hard-risk',
       strategyId: 'momentum',
       session: { id: 'session-hard-risk' } as SessionStore,
+      runId: 'run-hard-risk',
     }, deps)
 
     expect(result.status).toBe('skip')
@@ -771,6 +772,27 @@ describe('runTraderJob', () => {
     expect(deps.engine.askWithSession).toHaveBeenCalledTimes(4)
     expect(mocks.getSkillScript).not.toHaveBeenCalled()
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not overtrade a full book.')
+
+    const stageEvents = deps.eventLog.append.mock.calls
+      .filter(([type]) => type === 'trader.stage')
+      .map(([, payload]) => payload)
+
+    expect(stageEvents.map((payload: any) => `${payload.stage}:${payload.status}`)).toEqual([
+      'market-scan:completed',
+      'trade-thesis:completed',
+      'risk-check:completed',
+      'trade-plan:skipped',
+    ])
+    expect(stageEvents[3]).toMatchObject({
+      stage: 'trade-plan',
+      status: 'skipped',
+      data: {
+        previousWorkflowState: 'risk-check',
+        workflowState: 'trade-plan',
+        nextAllowedStages: ['trade-thesis', 'trade-execute'],
+        gate: 'hard-risk-budget',
+      },
+    })
   })
 
   it('treats the same symbol on another source as a new position for maxPositions', async () => {

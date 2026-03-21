@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   createTraderWorkflowAgentStageDefinitions,
   interpretTraderWorkflowStageTransitions,
-  resolveTradeExecuteScriptRoute,
   resolveTraderWorkflowStageRoute,
 } from './workflow-stages.js'
 
@@ -155,18 +154,95 @@ describe('trader workflow stage transitions', () => {
     })
   })
 
-  it('marks all-rejected execution scripts as a terminal stop', () => {
-    const route = resolveTradeExecuteScriptRoute({
-      source: 'ccxt-main',
-      symbol: 'BTC/USDT:USDT',
-      commitMessage: 'momentum: breakout BTC/USDT:USDT',
-      executionOutcome: {
-        rationale: 'Execution failed: 1 order(s) were rejected.',
-        filledCount: 0,
-        pendingCount: 0,
-        rejectedCount: 1,
+  it('routes hard-risk plan overrides to the next candidate', () => {
+    const stages = makeStages()
+    const definition = stages.tradePlan(
+      {
+        status: 'thesis_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'long',
+        chosenScenario: 'breakout',
+        alternateScenario: 'range failure',
+        rationale: 'Trend is aligned.',
+        invalidation: ['lost level'],
+        confidence: 0.74,
+        contextNotes: [],
       },
-      executionResult: { pushed: { rejected: [{ status: 'rejected' }] } },
+      {
+        verdict: 'pass',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Budget available.',
+        maxRiskPercent: 0.5,
+      },
+    )
+
+    const route = resolveTraderWorkflowStageRoute(definition, {
+      output: {
+        status: 'plan_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'breakout',
+        rationale: 'Structured plan.',
+        invalidation: ['lost level'],
+        brainUpdate: 'Do not overtrade a full book.',
+        commitMessage: 'momentum: breakout BTC/USDT:USDT',
+        orders: [{ aliceId: 'btc-1', symbol: 'BTC/USDT:USDT', side: 'buy', type: 'stop', qty: 1, stopPrice: 100, timeInForce: 'day' }],
+      },
+      rawText: 'raw plan',
+      eventData: { source: 'ccxt-main', symbol: 'BTC/USDT:USDT' },
+      runtime: {
+        hardRiskBlock: 'Hard risk gate blocked execution: current positions 1 already meet/exceed maxPositions 1.',
+      },
+    })
+
+    expect(route).toMatchObject({
+      status: 'skipped',
+      decision: 'next-candidate',
+      runnerResult: {
+        status: 'skip',
+        reason: 'Hard risk gate blocked execution: current positions 1 already meet/exceed maxPositions 1.',
+        rawText: 'raw plan',
+      },
+      brainUpdates: ['Do not overtrade a full book.'],
+      eventData: {
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        gate: 'hard-risk-budget',
+      },
+    })
+  })
+
+  it('marks all-rejected execution scripts as a terminal stop', () => {
+    const stages = makeStages()
+    const definition = stages.tradeExecuteScript()
+
+    const route = resolveTraderWorkflowStageRoute(definition, {
+      output: {
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        commitMessage: 'momentum: breakout BTC/USDT:USDT',
+        outcome: {
+          rationale: 'Execution failed: 1 order(s) were rejected.',
+          filledCount: 0,
+          pendingCount: 0,
+          rejectedCount: 1,
+        },
+        result: { pushed: { rejected: [{ status: 'rejected' }] } },
+      },
+      eventData: {
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        commitMessage: 'momentum: breakout BTC/USDT:USDT',
+        outcome: {
+          rationale: 'Execution failed: 1 order(s) were rejected.',
+          filledCount: 0,
+          pendingCount: 0,
+          rejectedCount: 1,
+        },
+        result: { pushed: { rejected: [{ status: 'rejected' }] } },
+      },
       rawText: '{"pushed":{"rejected":[{"status":"rejected"}]}}',
     })
 
