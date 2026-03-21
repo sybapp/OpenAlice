@@ -1237,6 +1237,102 @@ describe('runTraderJob', () => {
     ])
   })
 
+  it('stops the run after a terminal trade-execute-script rejection', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({
+        commit: { hash: 'deadbeef' },
+        pushed: { filled: [], pending: [], rejected: [{ status: 'rejected', error: 'broker rejected order' }] },
+        commitDetails: { results: [{ status: 'rejected', error: 'broker rejected order' }] },
+      })),
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession
+      .mockResolvedValueOnce(complete({
+        candidates: [
+          { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' },
+          { source: 'ccxt-main', symbol: 'ETH/USDT:USDT', reason: 'backup setup' },
+        ],
+        evaluations: [
+          { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', verdict: 'candidate', reason: 'best setup' },
+          { source: 'ccxt-main', symbol: 'ETH/USDT:USDT', verdict: 'candidate', reason: 'backup setup' },
+        ],
+        summary: 'two candidates',
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'thesis_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        bias: 'long',
+        chosenScenario: 'primary breakout continuation',
+        alternateScenario: 'range failure',
+        rationale: 'Trend and pullback context align.',
+        invalidation: ['loss of breakout level'],
+        confidence: 0.74,
+        contextNotes: [],
+      }))
+      .mockResolvedValueOnce(complete({
+        verdict: 'pass',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Risk budget is available.',
+        maxRiskPercent: 0.5,
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'plan_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'primary breakout continuation',
+        rationale: 'Trend and pullback context align.',
+        invalidation: ['loss of breakout level'],
+        commitMessage: 'momentum: primary breakout continuation BTC/USDT:USDT',
+        brainUpdate: 'Respect the breakout only after follow-through closes.',
+        orders: [{
+          aliceId: 'bybit-BTCUSDT',
+          symbol: 'BTC/USDT:USDT',
+          side: 'buy',
+          type: 'stop',
+          qty: 1,
+          stopPrice: 100,
+          timeInForce: 'day',
+        }],
+      }))
+      .mockResolvedValueOnce(complete({
+        status: 'execute',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        rationale: 'Confirm execution.',
+        brainUpdate: 'Execute only if the plan still matches structure.',
+      }))
+
+    const result = await runTraderJob({
+      jobId: 'job-terminal-reject',
+      strategyId: 'momentum',
+      session: { id: 'session-terminal-reject' } as SessionStore,
+      runId: 'run-terminal-reject',
+    }, deps)
+
+    expect(result).toMatchObject({
+      status: 'skip',
+      reason: 'Execution failed: 1 order(s) were rejected.',
+    })
+    expect(deps.engine.askWithSession).toHaveBeenCalledTimes(5)
+
+    const stageEvents = deps.eventLog.append.mock.calls
+      .filter(([type]) => type === 'trader.stage')
+      .map(([, payload]) => payload)
+
+    expect(stageEvents.map((payload: any) => `${payload.stage}:${payload.status}`)).toEqual([
+      'market-scan:completed',
+      'trade-thesis:completed',
+      'risk-check:completed',
+      'trade-plan:completed',
+      'trade-execute:completed',
+      'trade-execute-script:skipped',
+    ])
+  })
+
   it('passes the previous workflow state into each stage-agent context', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     mocks.getSkillScript.mockReturnValue({
