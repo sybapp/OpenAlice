@@ -20,10 +20,8 @@ import {
   buildTraderSkipResult,
   createTraderWorkflowAgentStageDefinitions,
   resolveEmptyMarketScanReason,
-  resolveHardRiskBudgetRoute,
   resolveTraderWorkflowStageRoute,
   resolveRiskSnapshotFailureRoute,
-  resolveTradeExecuteScriptRoute,
   TRADER_SKILLS,
   type TraderWorkflowAgentStageDefinition,
   type TraderWorkflowStageTransitionRoute,
@@ -617,6 +615,11 @@ class TraderWorkflowRun {
       output: plan.output,
       rawText: plan.rawText,
       eventData: attachAgentTrace(plan.output, plan.trace),
+      runtime: {
+        hardRiskBlock: plan.output.status === 'plan_ready'
+          ? getHardRiskBudgetViolation(this.strategy, riskSnapshot, plan.output)
+          : undefined,
+      },
     })
     if (!planRoute) {
       throw new Error('Trade plan stage is missing workflow transitions.')
@@ -629,21 +632,6 @@ class TraderWorkflowRun {
       }
     }
     const planOutput = plan.output
-
-    const hardRiskBlock = getHardRiskBudgetViolation(this.strategy, riskSnapshot, planOutput)
-    if (hardRiskBlock) {
-      const route = resolveHardRiskBudgetRoute(
-        planOutput,
-        hardRiskBlock,
-        plan.rawText,
-        attachAgentTrace(planOutput, plan.trace),
-      )
-      await this.applyStageRoute('trade-plan', route)
-      return {
-        decision: route.decision,
-        result: route.runnerResult ?? buildTraderSkipResult(hardRiskBlock, plan.rawText),
-      }
-    }
     await this.applyStageRoute(planDefinition.stage, planRoute)
 
     const executeDefinition = this.stages.tradeExecute(planOutput)
@@ -691,14 +679,27 @@ class TraderWorkflowRun {
 
     const executionOutcome = buildExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
     const executionRawText = JSON.stringify(executionResult, null, 2)
-    const executeScriptRoute = resolveTradeExecuteScriptRoute({
-      source: planOutput.source,
-      symbol: planOutput.symbol,
-      commitMessage: planOutput.commitMessage,
-      executionOutcome,
-      executionResult,
+    const executeScriptDefinition = this.stages.tradeExecuteScript()
+    const executeScriptRoute = resolveTraderWorkflowStageRoute(executeScriptDefinition, {
+      output: {
+        source: planOutput.source,
+        symbol: planOutput.symbol,
+        commitMessage: planOutput.commitMessage,
+        outcome: executionOutcome,
+        result: executionResult,
+      },
       rawText: executionRawText,
+      eventData: {
+        source: planOutput.source,
+        symbol: planOutput.symbol,
+        commitMessage: planOutput.commitMessage,
+        outcome: executionOutcome,
+        result: executionResult,
+      },
     })
+    if (!executeScriptRoute) {
+      throw new Error('Trade execute script stage is missing workflow transitions.')
+    }
     await this.applyStageRoute('trade-execute-script', executeScriptRoute)
     if (executeScriptRoute.decision !== 'advance') {
       return {
