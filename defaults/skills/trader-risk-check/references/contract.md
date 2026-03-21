@@ -1,6 +1,5 @@
 # Risk Check Contract
 
-- Re-read the latest account state for the thesis source before finalizing.
-- Keep business limits deterministic: strategy limits and current account state are code-owned facts.
-- Return only `pass`, `fail`, or `reduce` for the nominated thesis.
-- Do not create orders or alter the trade thesis in this stage.
+- Decide only whether the supplied thesis may proceed under the live risk budget.
+- Use fresh account evidence for the matching source before returning a verdict.
+- Return only `pass`, `fail`, or `reduce` for this thesis.

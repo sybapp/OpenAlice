@@ -66,6 +66,24 @@ describe('skill registry', () => {
       allowedScripts: expect.arrayContaining(['analysis-brooks', 'analysis-ict-smc']),
       instructions: expect.stringContaining('highlights agreement, disagreement'),
     })
+    expect(skills.find((skill) => skill.id === 'trader-market-scan')).toMatchObject({
+      resources: expect.arrayContaining([
+        expect.objectContaining({ id: 'references/checklist' }),
+        expect.objectContaining({ id: 'references/coverage-contract' }),
+      ]),
+    })
+    expect(skills.find((skill) => skill.id === 'trader-trade-thesis')).toMatchObject({
+      resources: expect.arrayContaining([
+        expect.objectContaining({ id: 'references/checklist' }),
+        expect.objectContaining({ id: 'references/contract' }),
+      ]),
+    })
+    expect(skills.find((skill) => skill.id === 'trader-risk-check')).toMatchObject({
+      resources: expect.arrayContaining([
+        expect.objectContaining({ id: 'references/checklist' }),
+        expect.objectContaining({ id: 'references/contract' }),
+      ]),
+    })
     expect(skills.find((skill) => skill.id === 'trader-trade-plan')).toMatchObject({
       resources: expect.arrayContaining([
         expect.objectContaining({ id: 'references/checklist' }),

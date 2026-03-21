@@ -584,6 +584,22 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string; resourc
       instructions: 'Scan the configured universe, request only the scripts needed to rank candidates, and return a small list of the best symbols to study next.',
       safetyNotes: 'Do not build orders or execute trades in this stage.',
     }),
+    resources: {
+      'references/coverage-contract.md': [
+        '# Market Scan Coverage Contract',
+        '',
+        '- Evaluate every configured symbol for every configured source in scope.',
+        '- Return explicit coverage judgments, not only a winner.',
+        '- Rank only the strongest candidates that are worth deeper thesis work.',
+      ].join('\n'),
+      'references/checklist.md': [
+        '# Market Scan Checklist',
+        '',
+        '- Check fresh account state for each configured source before ranking setups.',
+        '- Request only the structure or catalyst scripts needed to judge the shortlist.',
+        '- Return a concise ranked candidate list plus full coverage evaluations.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'trader-trade-thesis',
@@ -599,6 +615,22 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string; resourc
       instructions: 'Request only the scripts required to explain the setup. Produce one thesis for one symbol and prefer no-trade when structure or catalyst context is mixed.',
       safetyNotes: 'Do not propose orders in this stage.',
     }),
+    resources: {
+      'references/contract.md': [
+        '# Trade Thesis Contract',
+        '',
+        '- Produce exactly one thesis for the nominated candidate.',
+        '- Keep source, symbol, and scenario anchored to the nominated candidate.',
+        '- Prefer `no_trade` when structure, catalyst, or execution context is mixed.',
+      ].join('\n'),
+      'references/checklist.md': [
+        '# Trade Thesis Checklist',
+        '',
+        '- Gather only the evidence needed to explain bias, rationale, and invalidation.',
+        '- Preserve the nominated source and symbol exactly.',
+        '- Keep the thesis constrained enough for downstream risk and planning stages.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'trader-risk-check',
@@ -614,6 +646,22 @@ const DEFAULT_SKILL_TEMPLATES: Array<{ dirName: string; content: string; resourc
       instructions: 'Use fresh account state and the strategy risk card to decide pass, fail, or reduce. Be conservative when exposure is already stretched.',
       safetyNotes: 'Do not create or execute orders in this stage.',
     }),
+    resources: {
+      'references/contract.md': [
+        '# Risk Check Contract',
+        '',
+        '- Decide only whether the supplied thesis may proceed under the live risk budget.',
+        '- Use fresh account evidence for the matching source before returning a verdict.',
+        '- Return only `pass`, `fail`, or `reduce` for this thesis.',
+      ].join('\n'),
+      'references/checklist.md': [
+        '# Risk Check Checklist',
+        '',
+        '- Confirm current exposure, position count, and any obvious account warnings.',
+        '- Stay conservative when limits are tight or freshness is uncertain.',
+        '- Do not design orders or restate the thesis beyond what risk needs.',
+      ].join('\n'),
+    },
   },
   {
     dirName: 'trader-trade-plan',
