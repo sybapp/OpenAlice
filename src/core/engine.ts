@@ -13,21 +13,27 @@
 
 import type { MediaAttachment } from './types.js'
 import type { SessionStore } from './session.js'
-import { StreamableResult, type AskOptions, type ProviderEvent } from './ai-provider.js'
+import { StreamableResult, streamFromResult, type ProviderEvent } from './ai-provider.js'
 import type { AgentCenter } from './agent-center.js'
-import type { LocalCommandContext } from './commands/types.js'
 import { type LocalCommandRouter } from './commands/router.js'
-import type { SkillLoopRunner } from '../skills/skill-loop.js'
+import {
+  createDefaultEngineSessionHandlers,
+  type EngineSessionHandler,
+  type EngineSessionRouteOptions,
+  type SkillLoopRuntime,
+} from './engine-runtime.js'
 
 // ==================== Types ====================
 
 export interface EngineOpts {
-  /** The AgentCenter that owns provider routing. */
-  agentCenter: AgentCenter
-  /** Handles slash-style local commands before provider routing. */
-  commandRouter: LocalCommandRouter
-  /** Handles script-loop skills before provider routing. */
-  skillLoopRunner?: SkillLoopRunner
+  /** Explicit session runtime pipeline. */
+  sessionHandlers?: EngineSessionHandler[]
+  /** The AgentCenter that owns provider routing when using the default pipeline. */
+  agentCenter?: AgentCenter
+  /** Handles slash-style local commands before provider routing when using the default pipeline. */
+  commandRouter?: LocalCommandRouter
+  /** Handles AgentSkill/script-loop execution when using the default pipeline. */
+  skillLoopRunner?: SkillLoopRuntime
 }
 
 export interface EngineResult {
@@ -36,29 +42,42 @@ export interface EngineResult {
   media: MediaAttachment[]
 }
 
-export interface EngineAskOptions extends AskOptions {
-  commandContext?: Omit<LocalCommandContext, 'session'>
-  skillContext?: Record<string, unknown>
-}
+export interface EngineAskOptions extends EngineSessionRouteOptions {}
 
 // ==================== Engine ====================
 
 export class Engine {
-  private agentCenter: AgentCenter
-  private commandRouter: LocalCommandRouter
-  private skillLoopRunner: SkillLoopRunner | null
+  private readonly sessionHandlers: EngineSessionHandler[]
 
   constructor(opts: EngineOpts) {
-    this.agentCenter = opts.agentCenter
-    this.commandRouter = opts.commandRouter
-    this.skillLoopRunner = opts.skillLoopRunner ?? null
+    if (opts.sessionHandlers) {
+      this.sessionHandlers = opts.sessionHandlers
+      return
+    }
+
+    if (!opts.agentCenter || !opts.commandRouter) {
+      throw new Error('Engine requires either sessionHandlers or the default routing dependencies.')
+    }
+
+    this.sessionHandlers = createDefaultEngineSessionHandlers({
+      agentCenter: opts.agentCenter,
+      commandRouter: opts.commandRouter,
+      skillLoopRunner: opts.skillLoopRunner ?? null,
+    })
   }
 
   // ==================== Public API ====================
 
   /** Simple prompt (no session context). Routed through the configured AI provider. */
   async ask(prompt: string): Promise<EngineResult> {
-    return this.agentCenter.ask(prompt)
+    const lastHandler = this.sessionHandlers[this.sessionHandlers.length - 1]
+    if (!lastHandler || lastHandler.id !== 'provider-route') {
+      throw new Error('Engine.ask requires a provider-route terminal handler.')
+    }
+    if (!lastHandler.handleStateless) {
+      throw new Error('Engine.ask requires stateless provider support.')
+    }
+    return lastHandler.handleStateless(prompt)
   }
 
   /** Prompt with session — routed through the configured AI provider. */
@@ -66,35 +85,16 @@ export class Engine {
     const self = this
 
     async function* generate(): AsyncGenerator<ProviderEvent> {
-      const { commandContext, ...providerOpts } = opts ?? {}
-      const localCommand = await self.commandRouter.handle(prompt, {
-        session,
-        ...commandContext,
-      })
-      if (localCommand.handled) {
-        yield {
-          type: 'done',
-          result: {
-            text: localCommand.text ?? '',
-            media: localCommand.media,
-          },
-        }
+      for (const handler of self.sessionHandlers) {
+        const handled = handler.handle({ prompt, session, opts })
+        const result = handled instanceof StreamableResult ? handled : await handled
+        if (!result) continue
+        const stream = result instanceof StreamableResult ? result : streamFromResult(result)
+        yield* stream
         return
       }
 
-      const activeSkill = self.skillLoopRunner
-        ? await self.skillLoopRunner.getActiveScriptSkill(session)
-        : null
-      if (activeSkill && self.skillLoopRunner) {
-        const result = await self.skillLoopRunner.run(prompt, session, opts)
-        yield {
-          type: 'done',
-          result,
-        }
-        return
-      }
-
-      yield* self.agentCenter.askWithSession(prompt, session, providerOpts)
+      throw new Error('Engine session pipeline ended without a terminal handler.')
     }
 
     return new StreamableResult(generate())

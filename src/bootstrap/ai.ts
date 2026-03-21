@@ -11,6 +11,7 @@ import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
+import { createDefaultEngineSessionHandlers } from '../core/engine-runtime.js'
 import { SkillLoopRunner } from '../skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
@@ -58,18 +59,21 @@ export function initAIProviders(
   const router = new ProviderRouter(vercelProvider, claudeCodeProvider, codexCliProvider)
 
   const agentCenter = new AgentCenter(router)
+  const skillLoopRunner = new SkillLoopRunner(agentCenter, {
+    config,
+    brain: skillRuntime.brain,
+    eventLog: skillRuntime.eventLog,
+    accountManager: skillRuntime.accountManager,
+    marketData: skillRuntime.marketData,
+    ohlcvStore: skillRuntime.ohlcvStore,
+    newsStore: skillRuntime.newsStore,
+    getAccountGit: skillRuntime.getAccountGit,
+  })
   const engine = new Engine({
-    agentCenter,
-    commandRouter: createLocalCommandRouter(),
-    skillLoopRunner: new SkillLoopRunner(agentCenter, {
-      config,
-      brain: skillRuntime.brain,
-      eventLog: skillRuntime.eventLog,
-      accountManager: skillRuntime.accountManager,
-      marketData: skillRuntime.marketData,
-      ohlcvStore: skillRuntime.ohlcvStore,
-      newsStore: skillRuntime.newsStore,
-      getAccountGit: skillRuntime.getAccountGit,
+    sessionHandlers: createDefaultEngineSessionHandlers({
+      agentCenter,
+      commandRouter: createLocalCommandRouter(),
+      skillLoopRunner,
     }),
   })
 

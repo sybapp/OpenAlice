@@ -5,6 +5,7 @@ import { Engine } from './engine.js'
 import { AgentCenter } from './agent-center.js'
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from './compaction.js'
 import { createLocalCommandRouter } from './commands/router.js'
+import { streamFromResult, type StreamableResult } from './ai-provider.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { createModelFromConfig } from './model-factory.js'
 import type { SessionStore, SessionEntry } from './session.js'
@@ -298,6 +299,35 @@ describe('Engine', () => {
       expect(skillLoopRunner.getActiveScriptSkill).toHaveBeenCalledWith(session)
       expect(skillLoopRunner.run).toHaveBeenCalledWith('analyze btc', session, undefined)
       expect(askSpy).not.toHaveBeenCalled()
+    })
+
+    it('uses explicit session handlers in order and stops at the first match', async () => {
+      const session = makeSessionMock()
+      const first = vi.fn(async (): Promise<StreamableResult | null> => null)
+      const second = vi.fn(async () => streamFromResult({ text: 'handler result', media: [] }))
+      const third = vi.fn(async () => streamFromResult({ text: 'should not run', media: [] }))
+
+      const engine = new Engine({
+        sessionHandlers: [
+          { id: 'first', handle: first },
+          { id: 'second', handle: second },
+          { id: 'third', handle: third },
+        ],
+      })
+
+      const result = await engine.askWithSession('pipeline prompt', session, {
+        skillContext: { mode: 'test' },
+      })
+
+      expect(result).toEqual({ text: 'handler result', media: [] })
+      expect(first).toHaveBeenCalledOnce()
+      expect(second).toHaveBeenCalledOnce()
+      expect(third).not.toHaveBeenCalled()
+      expect(first).toHaveBeenCalledWith({
+        prompt: 'pipeline prompt',
+        session,
+        opts: { skillContext: { mode: 'test' } },
+      })
     })
 
     it('returns the generated text and empty media', async () => {
