@@ -127,6 +127,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
 
     const plugin = new WebPlugin({ host: '127.0.0.1', port: 3200, authToken: 'secret' })
@@ -164,6 +165,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
 
     const plugin = new WebPlugin({ host: '127.0.0.1', port: 3201 })
@@ -220,6 +222,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
     const unregister = vi.fn()
     const close = vi.fn()
@@ -266,6 +269,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never)
 
     const sseClients = (plugin as unknown as { sseClients: Map<string, { send: () => void }> }).sseClients
@@ -320,6 +324,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
 
     await plugin.start(ctx)
@@ -373,6 +378,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
 
     await plugin.start(ctx)
@@ -413,6 +419,7 @@ describe('WebPlugin', () => {
       toolCenter: {},
       config: {},
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never
 
     mocks.serve

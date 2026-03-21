@@ -66,7 +66,7 @@ describe('McpServerConnector', () => {
       host: '127.0.0.1',
       port: 3401,
     })
-    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {} } as never
+    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {}, runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} } } as never
 
     await plugin.start(ctx)
 
@@ -93,7 +93,7 @@ describe('McpServerConnector', () => {
       host: '127.0.0.1',
       port: 3403,
     })
-    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {} } as never
+    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {}, runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} } } as never
 
     await plugin.start(ctx)
     await plugin.stop()
@@ -127,7 +127,7 @@ describe('McpServerConnector', () => {
       host: '127.0.0.1',
       port: 3404,
     })
-    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {} } as never
+    const ctx = { toolCenter: {}, connectorCenter: {}, config: {}, engine: {}, runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} } } as never
 
     await plugin.start(ctx)
 

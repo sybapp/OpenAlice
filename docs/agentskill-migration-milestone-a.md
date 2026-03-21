@@ -30,10 +30,17 @@ After this slice:
 - provider routing is the terminal runtime step
 - bootstrap decides the concrete pipeline composition
 
-## What Milestone A does not finish
+## Milestone A status
 
-This milestone does **not** yet make the entire project AgentSkill-native. It leaves these follow-ups:
-- cron/heartbeat now use an explicit provider-only job runtime instead of the default interactive pipeline
-- trader and trader-review now use an explicit trader runtime profile (`agent-skill` + `provider-route`) instead of inheriting the chat pipeline
-- reduce remaining provider-specific assumptions in higher-level runtime entrypoints
-- continue migrating skill registry/runtime metadata toward project-wide ownership boundaries
+Milestone A is complete for its target boundary. The project now has:
+- an explicit session runtime pipeline in `Engine`
+- canonical `agent-skill` runtime terminology and metadata
+- a shared runtime catalog that names the main runtime profiles (`interactive`, `providerOnlyJob`, `trader`)
+- higher-level entrypoints selecting runtime profiles explicitly instead of depending on the default interactive engine by convention
+
+## Next after Milestone A
+
+The next migration work should move beyond runtime-boundary cleanup into broader project-native adoption, including:
+- reducing remaining provider-specific assumptions in higher-level product flows
+- continuing to migrate skill registry/runtime metadata toward project-wide ownership boundaries
+- expanding explicit AgentSkill-native contracts beyond the current runtime composition layer

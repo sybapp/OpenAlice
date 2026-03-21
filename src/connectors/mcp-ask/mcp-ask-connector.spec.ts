@@ -53,6 +53,7 @@ describe('McpAskConnector', () => {
     await plugin.start({
       connectorCenter: { register },
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never)
 
     let stopped = false
@@ -82,6 +83,7 @@ describe('McpAskConnector', () => {
     await expect(plugin.start({
       connectorCenter: { register },
       engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
     } as never)).rejects.toThrow('port busy')
 
     expect(register).toHaveBeenCalledOnce()
@@ -112,6 +114,7 @@ describe('McpAskConnector', () => {
       await plugin.start({
         connectorCenter: { register },
         engine: {},
+      runtimeCatalog: { interactive: {}, providerOnlyJob: {}, trader: {} },
       } as never)
 
       expect(fetchHandler).toBeDefined()

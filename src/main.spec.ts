@@ -44,8 +44,8 @@ const registerAllTools = vi.fn(async () => ({}))
 const providerOnlyJobRuntime = { askWithSession: vi.fn() }
 const traderRuntime = { askWithSession: vi.fn() }
 const interactiveEngine = { askWithSession: vi.fn(), ask: vi.fn() }
-const runtimeProfiles = { interactive: interactiveEngine, providerOnlyJob: providerOnlyJobRuntime, trader: traderRuntime }
-const initAIProviders = vi.fn(() => ({ engine: interactiveEngine, runtimeProfiles, backtest: {} }))
+const runtimeCatalog = { interactive: interactiveEngine, providerOnlyJob: providerOnlyJobRuntime, trader: traderRuntime }
+const initAIProviders = vi.fn(() => ({ engine: interactiveEngine, runtimeCatalog, backtest: {} }))
 
 const coreConnector = { name: 'core', start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
 const initConnectors = vi.fn(() => ({

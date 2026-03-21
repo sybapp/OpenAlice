@@ -39,6 +39,17 @@ describe('createChatRoutes', () => {
             yield { type: 'done' as const, result: { text: 'final answer', media: [] } }
           })())),
         },
+        runtimeCatalog: {
+          interactive: {
+            askWithSession: vi.fn(() => new StreamableResult((async function* () {
+              yield { type: 'tool_use' as const, id: 'tool-1', name: 'Read', input: { file: 'README.md' } }
+              yield { type: 'text' as const, text: 'partial answer' }
+              yield { type: 'done' as const, result: { text: 'final answer', media: [] } }
+            })())),
+          },
+          providerOnlyJob: {} as never,
+          trader: {} as never,
+        },
       } as never,
       session: session as never,
       sseClients,
@@ -103,6 +114,21 @@ describe('createChatRoutes', () => {
             }
           })())),
         },
+        runtimeCatalog: {
+          interactive: {
+            askWithSession: vi.fn(() => new StreamableResult((async function* () {
+              yield {
+                type: 'done' as const,
+                result: {
+                  text: 'final answer',
+                  media: [{ type: 'image' as const, path: '/tmp/chat-image.png' }],
+                },
+              }
+            })())),
+          },
+          providerOnlyJob: {} as never,
+          trader: {} as never,
+        },
       } as never,
       session: session as never,
       sseClients: new Map(),
@@ -132,6 +158,7 @@ describe('createChatRoutes', () => {
       ctx: {
         eventLog: { append: vi.fn() },
         engine: { askWithSession: vi.fn() },
+        runtimeCatalog: { interactive: { askWithSession: vi.fn() }, providerOnlyJob: {} as never, trader: {} as never },
       } as never,
       session: session as never,
       sseClients: new Map(),

@@ -70,6 +70,11 @@ vi.mock('../../../jobs/strategies/index.js', () => ({
 
 function makeCtx() {
   return {
+    runtimeCatalog: {
+      interactive: { ask: vi.fn(async () => ({ text: 'draft yaml', media: [] })) },
+      providerOnlyJob: {} as never,
+      trader: {} as never,
+    },
     trader: {
       list: vi.fn(() => [{ id: 'job-1', name: 'Momentum', strategyId: 'momentum' }]),
       add: vi.fn(async () => 'job-2'),

@@ -204,10 +204,11 @@ describe('TelegramPlugin', () => {
     const sendReply = vi.spyOn(plugin as any, 'sendReply').mockResolvedValue(undefined)
     const getSession = vi.spyOn(plugin as any, 'getSession').mockResolvedValue(session)
 
+    const askWithSession = vi.fn(async () => ({ text: 'Compacted.', media: [] }))
+
     await (plugin as any).handleCompactCommand(123, 5, {
-      engine: {
-        askWithSession: vi.fn(async () => ({ text: 'Compacted.', media: [] })),
-      },
+      engine: { askWithSession },
+      runtimeCatalog: { interactive: { askWithSession }, providerOnlyJob: {} as never, trader: {} as never },
       heartbeat: {},
       connectorCenter: {},
       eventLog: {},
@@ -239,6 +240,7 @@ describe('TelegramPlugin', () => {
 
     await (plugin as any).handleSkillCommand(123, 5, '/skill ta-brooks', {
       engine: { askWithSession },
+      runtimeCatalog: { interactive: { askWithSession }, providerOnlyJob: {} as never, trader: {} as never },
       heartbeat: {},
       connectorCenter: {},
       eventLog: {},
@@ -326,6 +328,7 @@ describe('TelegramPlugin', () => {
     await (plugin as any).handleMessage(
       {
         engine: { askWithSession },
+        runtimeCatalog: { interactive: { askWithSession }, providerOnlyJob: {} as never, trader: {} as never },
         eventLog,
       },
       {
@@ -379,6 +382,15 @@ describe('TelegramPlugin', () => {
             throw new Error('provider offline')
           }),
         },
+        runtimeCatalog: {
+          interactive: {
+            askWithSession: vi.fn(async () => {
+              throw new Error('provider offline')
+            }),
+          },
+          providerOnlyJob: {} as never,
+          trader: {} as never,
+        },
         eventLog: {
           append: vi.fn(async () => ({ ts: 20 })),
         },
@@ -407,6 +419,7 @@ describe('TelegramPlugin', () => {
       connectorCenter: { register },
       heartbeat: { isEnabled: vi.fn(() => true), setEnabled: vi.fn(async () => undefined) },
       engine: { askWithSession: vi.fn() },
+      runtimeCatalog: { interactive: { askWithSession: vi.fn() }, providerOnlyJob: {} as never, trader: {} as never },
       eventLog: { append: vi.fn() },
       cronEngine: {},
       trader: {},
@@ -457,6 +470,7 @@ describe('TelegramPlugin', () => {
       connectorCenter: { register: vi.fn(() => vi.fn()) },
       heartbeat: { isEnabled: vi.fn(() => true), setEnabled },
       engine: { askWithSession: vi.fn() },
+      runtimeCatalog: { interactive: { askWithSession: vi.fn() }, providerOnlyJob: {} as never, trader: {} as never },
       eventLog: { append: vi.fn() },
       cronEngine: {},
       trader: {},
