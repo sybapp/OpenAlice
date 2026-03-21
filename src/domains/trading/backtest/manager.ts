@@ -1,4 +1,5 @@
 import { createEventLog } from '../../../core/event-log.js'
+import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SessionStore } from '../../../core/session.js'
@@ -161,7 +162,7 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
     const accountLabel = config.accountLabel ?? 'Backtest Paper'
     const mode = config.strategy.mode
     const artifactDir = storage.getRunPaths(runId).runDir
-    const session = mode === 'ai' ? new SessionStore(`backtest/${runId}`) : null
+    const session = mode === 'ai' ? new SessionStore(createBacktestSessionId(runId, artifactDir)) : null
 
     return {
       runId,
@@ -394,6 +395,11 @@ export function createBacktestRunManager(options: BacktestRunManagerOptions): Ba
       return options.storage.readSessionEntries(runId)
     },
   }
+}
+
+function createBacktestSessionId(runId: string, artifactDir: string): string {
+  const artifactHash = createHash('sha1').update(artifactDir).digest('hex').slice(0, 12)
+  return `backtest/${runId}-${artifactHash}`
 }
 
 async function hasActiveRunClaim(claimPath: string): Promise<boolean> {
