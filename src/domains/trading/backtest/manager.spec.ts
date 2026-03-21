@@ -204,6 +204,46 @@ describe('createBacktestRunManager', () => {
     expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
   })
 
+  it('clears orphaned ai session history when a reused runId has no persisted manifest', async () => {
+    const storage = createBacktestStorage({ rootDir: tempDir('ai-orphan-session') })
+    const engine = {
+      ask: vi.fn(),
+      askWithSession: vi.fn().mockImplementation(async (prompt: string, session: SessionStore) => {
+        await session.appendUser(prompt, 'human')
+        await session.appendAssistant(JSON.stringify({ text: 'hold', operations: [] }), 'engine')
+        return {
+          text: JSON.stringify({ text: 'hold', operations: [] }),
+          media: [],
+        }
+      }),
+    } as unknown as Engine
+
+    const staleSession = new SessionStore('backtest/orphaned-ai-run')
+    await staleSession.appendUser('stale prompt', 'human')
+    await staleSession.appendAssistant(JSON.stringify({ text: 'stale', operations: [] }), 'engine')
+
+    const manager = createBacktestRunManager({ storage, engine })
+    const runId = 'orphaned-ai-run'
+
+    await manager.startRun({
+      runId,
+      initialCash: 10_000,
+      bars: makeBars(),
+      strategy: {
+        mode: 'ai',
+        prompt: 'Trade the replay cleanly.',
+      },
+    })
+    await expect(manager.waitForRun(runId)).resolves.toMatchObject({ status: 'completed' })
+
+    const sessionEntries = await manager.getSessionEntries(runId)
+
+    expect(engine.askWithSession).toHaveBeenCalledTimes(3)
+    expect(sessionEntries).toHaveLength(6)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'user')).toHaveLength(3)
+    expect(sessionEntries.filter((entry) => (entry as { type?: string }).type === 'assistant')).toHaveLength(3)
+  })
+
   it('returns the persisted failed manifest from waitForRun when execution crashes', async () => {
     const storage = createBacktestStorage({ rootDir: tempDir('failed-run') })
     const engine = {

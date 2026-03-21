@@ -85,7 +85,7 @@ export function createBacktestStorage(options?: BacktestStorageOptions): Backtes
     await mkdir(paths.runDir, { recursive: true })
     const existing = await readJson<BacktestRunManifest>(paths.manifestPath)
     const timestamp = `${process.pid}.${Date.now()}`
-    const backups = await backupExistingRunArtifacts(paths, existing, timestamp)
+    const backups = await backupExistingRunArtifacts(paths, existing, manifest, timestamp)
 
     try {
       await writeJson(paths.manifestPath, manifest)
@@ -269,20 +269,26 @@ async function readRunIndex(rootDir: string, runIndexPath: string): Promise<Back
 async function backupExistingRunArtifacts(
   paths: ReturnType<BacktestStorage['getRunPaths']>,
   existingManifest: BacktestRunManifest | null,
+  nextManifest: BacktestRunManifest,
   stamp: string,
 ): Promise<Array<{ path: string; backupPath: string }>> {
-  const candidates = [
+  const candidateSet = new Set([
     paths.manifestPath,
     paths.equityCurvePath,
     paths.eventLogPath,
     paths.summaryPath,
     paths.gitStatePath,
-  ]
+  ])
 
   if (existingManifest?.sessionId) {
-    candidates.push(getSessionPath(existingManifest.sessionId))
+    candidateSet.add(getSessionPath(existingManifest.sessionId))
   }
 
+  if (nextManifest.sessionId) {
+    candidateSet.add(getSessionPath(nextManifest.sessionId))
+  }
+
+  const candidates = [...candidateSet]
   const backups: Array<{ path: string; backupPath: string }> = []
   for (const filePath of candidates) {
     const backupPath = `${filePath}.${stamp}.bak`
