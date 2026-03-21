@@ -48,7 +48,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
@@ -97,7 +97,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
@@ -137,7 +137,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
@@ -178,7 +178,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
@@ -217,7 +217,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify: vi.fn() } as never,
       brain: {} as never,
@@ -274,7 +274,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify } as never,
       brain: {} as never,
@@ -321,7 +321,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify } as never,
       brain: {} as never,
@@ -359,7 +359,7 @@ describe('trader listener', () => {
 
     const listener = createTraderListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       connectorCenter: { notify } as never,
       brain: {} as never,

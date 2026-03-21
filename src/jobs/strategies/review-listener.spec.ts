@@ -47,7 +47,7 @@ describe('trader review listener', () => {
 
     const listener = createTraderReviewListener({
       config: {} as never,
-      engine: {} as never,
+      runtime: {} as never,
       eventLog,
       brain: {} as never,
       accountManager: {} as never,

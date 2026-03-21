@@ -301,6 +301,24 @@ describe('Engine', () => {
       expect(askSpy).not.toHaveBeenCalled()
     })
 
+    it('supports agent-skill-plus-provider runtime profiles without local commands', async () => {
+      const first = vi.fn(async ({ prompt }: { prompt: string }) => ({ text: `skill:${prompt}`, media: [] as [] }))
+      const provider = vi.fn(async ({ prompt }: { prompt: string }) => ({ text: `provider:${prompt}`, media: [] as [] }))
+      const engine = new Engine({
+        sessionHandlers: [
+          { id: 'agent-skill', handle: first as any },
+          { id: 'provider-route', handle: provider as any, handleStateless: vi.fn(async (prompt: string) => ({ text: `provider:${prompt}`, media: [] as [] })) },
+        ],
+      })
+      const session = makeSessionMock()
+
+      const result = await engine.askWithSession('scan BTC', session)
+
+      expect(result.text).toBe('skill:scan BTC')
+      expect(first).toHaveBeenCalledOnce()
+      expect(provider).not.toHaveBeenCalled()
+    })
+
     it('treats provider-only session runtimes as explicit terminal pipelines', async () => {
       const providerHandle = vi.fn(async ({ prompt }: { prompt: string }) => ({ text: `provider:${prompt}`, media: [] as [] }))
       const engine = new Engine({

@@ -41,9 +41,11 @@ const initServices = vi.fn(async () => ({
 }))
 
 const registerAllTools = vi.fn(async () => ({}))
-const jobEngine = { askWithSession: vi.fn() }
+const providerOnlyJobRuntime = { askWithSession: vi.fn() }
+const traderRuntime = { askWithSession: vi.fn() }
 const interactiveEngine = { askWithSession: vi.fn(), ask: vi.fn() }
-const initAIProviders = vi.fn(() => ({ engine: interactiveEngine, jobEngine, backtest: {} }))
+const runtimeProfiles = { interactive: interactiveEngine, providerOnlyJob: providerOnlyJobRuntime, trader: traderRuntime }
+const initAIProviders = vi.fn(() => ({ engine: interactiveEngine, runtimeProfiles, backtest: {} }))
 
 const coreConnector = { name: 'core', start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
 const initConnectors = vi.fn(() => ({
@@ -121,9 +123,10 @@ describe('main startup cleanup', () => {
     await import('./main.ts')
     await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
 
-    expect(createCronListener).toHaveBeenCalledWith(expect.objectContaining({ runtime: jobEngine }))
-    expect(createHeartbeat).toHaveBeenCalledWith(expect.objectContaining({ runtime: jobEngine }))
-    expect(createTraderListener).toHaveBeenCalledWith(expect.objectContaining({ engine: interactiveEngine }))
+    expect(createCronListener).toHaveBeenCalledWith(expect.objectContaining({ runtime: providerOnlyJobRuntime }))
+    expect(createHeartbeat).toHaveBeenCalledWith(expect.objectContaining({ runtime: providerOnlyJobRuntime }))
+    expect(createTraderListener).toHaveBeenCalledWith(expect.objectContaining({ runtime: traderRuntime }))
+    expect(createTraderReviewListener).toHaveBeenCalledWith(expect.objectContaining({ runtime: traderRuntime }))
 
     exitSpy.mockRestore()
     errorSpy.mockRestore()

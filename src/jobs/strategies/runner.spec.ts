@@ -34,7 +34,7 @@ function completeWrapped(output: unknown) {
 function makeDeps() {
   return {
     config: {} as any,
-    engine: {
+    runtime: {
       askWithSession: vi.fn(),
     },
     eventLog: {
@@ -129,7 +129,7 @@ function buildCoverageEvaluations(params: {
 }
 
   function queueHappyPath(deps: ReturnType<typeof makeDeps>, symbol = 'BTC/USDT:USDT') {
-  deps.engine.askWithSession
+  deps.runtime.askWithSession
     .mockResolvedValueOnce(complete({
       candidates: [{ source: 'ccxt-main', symbol, reason: 'best setup' }],
       evaluations: buildCoverageEvaluations({
@@ -214,7 +214,7 @@ describe('runTraderJob', () => {
       status: 'skip',
       reason: 'Unknown strategy: missing',
     })
-    expect(deps.engine.askWithSession).not.toHaveBeenCalled()
+    expect(deps.runtime.askWithSession).not.toHaveBeenCalled()
   })
 
   it('skips when a configured source is unavailable', async () => {
@@ -242,7 +242,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [],
       evaluations: [{
         source: 'ccxt-main',
@@ -285,7 +285,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [],
       evaluations: [{
         source: 'ccxt-main',
@@ -317,7 +317,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [],
       evaluations: [{
         source: 'ccxt-main',
@@ -356,7 +356,7 @@ describe('runTraderJob', () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [],
       evaluations: [],
       summary: '',
@@ -373,7 +373,7 @@ describe('runTraderJob', () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
       evaluations: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', verdict: 'candidate', reason: 'best setup' }],
       summary: 'incomplete coverage',
@@ -395,7 +395,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+    deps.runtime.askWithSession.mockResolvedValueOnce(complete({
       candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
       evaluations: [],
       summary: 'single symbol looks interesting',
@@ -422,7 +422,7 @@ describe('runTraderJob', () => {
       getMarketClock: vi.fn().mockResolvedValue({ isOpen: true }),
     }
     deps.accountManager.getAccount.mockReturnValue(account)
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -463,8 +463,8 @@ describe('runTraderJob', () => {
     expect(account.getAccount).toHaveBeenCalledTimes(2)
     expect(account.getPositions).toHaveBeenCalledTimes(2)
     expect(account.getOrders).toHaveBeenCalledTimes(2)
-    expect(deps.engine.askWithSession.mock.calls[2][0]).toContain('"equity": 9600')
-    expect(deps.engine.askWithSession.mock.calls[2][0]).toContain('"marketValue": 1900')
+    expect(deps.runtime.askWithSession.mock.calls[2][0]).toContain('"equity": 9600')
+    expect(deps.runtime.askWithSession.mock.calls[2][0]).toContain('"marketValue": 1900')
   })
 
   it('masks real trading source ids before sending trader prompts to the model', async () => {
@@ -474,7 +474,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -504,14 +504,14 @@ describe('runTraderJob', () => {
 
     expect(result.status).toBe('skip')
 
-    const scanPrompt = String(deps.engine.askWithSession.mock.calls[0][0])
-    const thesisPrompt = String(deps.engine.askWithSession.mock.calls[1][0])
+    const scanPrompt = String(deps.runtime.askWithSession.mock.calls[0][0])
+    const thesisPrompt = String(deps.runtime.askWithSession.mock.calls[1][0])
     expect(scanPrompt).toContain('source-1')
     expect(scanPrompt).not.toContain('paper-1')
     expect(thesisPrompt).toContain('source-1')
     expect(thesisPrompt).not.toContain('paper-1')
 
-    const scanOptions = deps.engine.askWithSession.mock.calls[0][2]
+    const scanOptions = deps.runtime.askWithSession.mock.calls[0][2]
     expect(scanOptions.skillContext.strategy.sources).toEqual(['source-1'])
     expect(scanOptions.skillContext.__sourceAliases.aliasToReal).toEqual({ 'source-1': 'paper-1' })
   })
@@ -531,7 +531,7 @@ describe('runTraderJob', () => {
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'source-1', symbol: 'BTC/USDT:USDT', reason: 'best setup on source-1' }],
         evaluations: buildCoverageEvaluations({
@@ -616,7 +616,7 @@ describe('runTraderJob', () => {
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [
           { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'first setup' },
@@ -711,7 +711,7 @@ describe('runTraderJob', () => {
     deps.accountManager.getAccount.mockReturnValue(makeAccount({
       positions: [{ symbol: 'ETH/USDT:USDT', marketValue: 2_000, currentPrice: 2_000 }],
     }))
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -769,7 +769,7 @@ describe('runTraderJob', () => {
 
     expect(result.status).toBe('skip')
     expect(result.reason).toContain('Hard risk gate blocked execution')
-    expect(deps.engine.askWithSession).toHaveBeenCalledTimes(4)
+    expect(deps.runtime.askWithSession).toHaveBeenCalledTimes(4)
     expect(mocks.getSkillScript).not.toHaveBeenCalled()
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not overtrade a full book.')
 
@@ -813,7 +813,7 @@ describe('runTraderJob', () => {
       }
       return undefined
     })
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-hedge', symbol: 'BTC/USDT:USDT', reason: 'hedge venue has the setup' }],
         evaluations: [
@@ -877,7 +877,7 @@ describe('runTraderJob', () => {
 
     expect(result.status).toBe('skip')
     expect(result.reason).toContain('Hard risk gate blocked execution: current positions 1 already meet/exceed maxPositions 1.')
-    expect(deps.engine.askWithSession).toHaveBeenCalledTimes(4)
+    expect(deps.runtime.askWithSession).toHaveBeenCalledTimes(4)
     expect(mocks.getSkillScript).not.toHaveBeenCalled()
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not bypass the max position cap across venues.')
   })
@@ -926,7 +926,7 @@ describe('runTraderJob', () => {
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount({ positions: [] }))
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -1037,7 +1037,7 @@ describe('runTraderJob', () => {
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount({ positions: [] }))
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -1122,7 +1122,7 @@ describe('runTraderJob', () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -1159,7 +1159,7 @@ describe('runTraderJob', () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -1214,7 +1214,7 @@ describe('runTraderJob', () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(completeWrapped({
         candidates: [{ source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' }],
         evaluations: buildCoverageEvaluations({
@@ -1314,7 +1314,7 @@ describe('runTraderJob', () => {
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
-    deps.engine.askWithSession
+    deps.runtime.askWithSession
       .mockResolvedValueOnce(complete({
         candidates: [
           { source: 'ccxt-main', symbol: 'BTC/USDT:USDT', reason: 'best setup' },
@@ -1383,7 +1383,7 @@ describe('runTraderJob', () => {
       status: 'skip',
       reason: 'Execution failed: 1 order(s) were rejected.',
     })
-    expect(deps.engine.askWithSession).toHaveBeenCalledTimes(5)
+    expect(deps.runtime.askWithSession).toHaveBeenCalledTimes(5)
 
     const stageEvents = deps.eventLog.append.mock.calls
       .filter(([type]) => type === 'trader.stage')
@@ -1418,7 +1418,7 @@ describe('runTraderJob', () => {
       session: { id: 'session-stage-context' } as SessionStore,
     }, deps)
 
-    const skillContexts = deps.engine.askWithSession.mock.calls.map(([, , options]) => options.skillContext)
+    const skillContexts = deps.runtime.askWithSession.mock.calls.map(([, , options]) => options.skillContext)
     expect(skillContexts.map((context: any) => context.stage)).toEqual([
       'market-scan',
       'trade-thesis',
@@ -1445,7 +1445,7 @@ describe('runTraderReview', () => {
     const deps = makeDeps()
     deps.accountManager.listAccounts.mockReturnValue([{ id: 'paper-1' }])
     deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
-    deps.engine.askWithSession.mockResolvedValue(complete({
+    deps.runtime.askWithSession.mockResolvedValue(complete({
       summary: 'Review summary for source-1',
       brainUpdate: 'Stay selective on source-1 and keep sizing small after mixed outcomes.',
     }))
@@ -1487,7 +1487,7 @@ describe('runTraderReview', () => {
       sources: ['paper-1'],
     })
     deps.accountManager.getAccount.mockReturnValue(makeAccount({ label: 'Paper Alpha' }))
-    deps.engine.askWithSession.mockResolvedValue(complete({
+    deps.runtime.askWithSession.mockResolvedValue(complete({
       summary: 'Review summary for source-1',
       brainUpdate: 'Stay selective on source-1.',
       strategyPatch: {

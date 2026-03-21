@@ -34,6 +34,6 @@ After this slice:
 
 This milestone does **not** yet make the entire project AgentSkill-native. It leaves these follow-ups:
 - cron/heartbeat now use an explicit provider-only job runtime instead of the default interactive pipeline
-- finish propagating declarative runtime selection through the remaining job entrypoints beyond cron/heartbeat
+- trader and trader-review now use an explicit trader runtime profile (`agent-skill` + `provider-route`) instead of inheriting the chat pipeline
 - reduce remaining provider-specific assumptions in higher-level runtime entrypoints
 - continue migrating skill registry/runtime metadata toward project-wide ownership boundaries
