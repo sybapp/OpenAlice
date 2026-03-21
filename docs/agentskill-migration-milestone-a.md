@@ -33,7 +33,7 @@ After this slice:
 ## What Milestone A does not finish
 
 This milestone does **not** yet make the entire project AgentSkill-native. It leaves these follow-ups:
-- finish propagating AgentSkill-native runtime selection through cron/heartbeat and other job entrypoints
-- make cron/heartbeat/job execution choose runtime steps more declaratively
+- cron/heartbeat now use an explicit provider-only job runtime instead of the default interactive pipeline
+- finish propagating declarative runtime selection through the remaining job entrypoints beyond cron/heartbeat
 - reduce remaining provider-specific assumptions in higher-level runtime entrypoints
 - continue migrating skill registry/runtime metadata toward project-wide ownership boundaries

@@ -301,6 +301,25 @@ describe('Engine', () => {
       expect(askSpy).not.toHaveBeenCalled()
     })
 
+    it('treats provider-only session runtimes as explicit terminal pipelines', async () => {
+      const providerHandle = vi.fn(async ({ prompt }: { prompt: string }) => ({ text: `provider:${prompt}`, media: [] as [] }))
+      const engine = new Engine({
+        sessionHandlers: [
+          {
+            id: 'provider-route',
+            handle: providerHandle as any,
+            handleStateless: vi.fn(async (prompt: string) => ({ text: `provider:${prompt}`, media: [] as [] })),
+          },
+        ],
+      })
+      const session = makeSessionMock()
+
+      const result = await engine.askWithSession('/skill list', session)
+
+      expect(result.text).toBe('provider:/skill list')
+      expect(providerHandle).toHaveBeenCalledWith({ prompt: '/skill list', session, opts: undefined })
+    })
+
     it('uses explicit session handlers in order and stops at the first match', async () => {
       const session = makeSessionMock()
       const first = vi.fn(async (): Promise<StreamableResult | null> => null)

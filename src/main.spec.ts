@@ -41,7 +41,9 @@ const initServices = vi.fn(async () => ({
 }))
 
 const registerAllTools = vi.fn(async () => ({}))
-const initAIProviders = vi.fn(() => ({ engine: {}, backtest: {} }))
+const jobEngine = { askWithSession: vi.fn() }
+const interactiveEngine = { askWithSession: vi.fn(), ask: vi.fn() }
+const initAIProviders = vi.fn(() => ({ engine: interactiveEngine, jobEngine, backtest: {} }))
 
 const coreConnector = { name: 'core', start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
 const initConnectors = vi.fn(() => ({
@@ -110,6 +112,21 @@ describe('main startup cleanup', () => {
     vi.resetModules()
     vi.clearAllMocks()
     startPlugins.mockImplementation(async () => undefined)
+  })
+
+  it('uses the explicit job runtime for cron and heartbeat entrypoints', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await import('./main.ts')
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+
+    expect(createCronListener).toHaveBeenCalledWith(expect.objectContaining({ runtime: jobEngine }))
+    expect(createHeartbeat).toHaveBeenCalledWith(expect.objectContaining({ runtime: jobEngine }))
+    expect(createTraderListener).toHaveBeenCalledWith(expect.objectContaining({ engine: interactiveEngine }))
+
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
   })
 
   it('cleans up started runtime resources when connector startup fails', async () => {
