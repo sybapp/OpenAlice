@@ -57,6 +57,34 @@ describe('LocalCommandRouter', () => {
     expect(result).toEqual(UNHANDLED_LOCAL_COMMAND_RESULT)
   })
 
+
+  it('uses the interactive runtime catalog for manual compaction', async () => {
+    const router = new LocalCommandRouter([compactCommandHandler])
+    const session = makeSession([
+      {
+        type: 'user',
+        message: { role: 'user', content: 'Need summary' },
+        uuid: 'u-0',
+        parentUuid: null,
+        sessionId: 'session-1',
+        timestamp: new Date().toISOString(),
+      },
+    ])
+    const ask = vi.fn(async () => ({ text: '<summary>summarized</summary>', media: [] }))
+
+    const result = await router.handle('/compact', {
+      session,
+      engineContext: {
+        runtimeCatalog: { interactive: { ask }, providerOnlyJob: {} as never, trader: {} as never },
+        config: { agent: { claudeCode: { disallowedTools: [] }, evolutionMode: false } },
+      } as never,
+    })
+
+    expect(result.handled).toBe(true)
+    expect(result.text).toContain('Compacted. Pre-compaction: ~')
+    expect(ask).toHaveBeenCalledOnce()
+  })
+
   it('returns a runtime-context error for /compact when engine context is missing', async () => {
     const router = new LocalCommandRouter([compactCommandHandler])
     const session = makeSession()
