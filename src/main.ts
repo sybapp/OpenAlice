@@ -116,7 +116,7 @@ async function main() {
   const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
 
   // ---- AI Providers & Engine ----
-  const { engine, jobEngine, backtest } = initAIProviders(config, toolCenter, instructions, {
+  const { engine, runtimeProfiles, backtest } = initAIProviders(config, toolCenter, instructions, {
     brain,
     eventLog,
     accountManager,
@@ -134,11 +134,11 @@ async function main() {
   await traderReview.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
-  cronListener = createCronListener({ connectorCenter, eventLog, runtime: jobEngine, session: cronSession })
+  cronListener = createCronListener({ connectorCenter, eventLog, runtime: runtimeProfiles.providerOnlyJob, session: cronSession })
   cronListener.start()
   traderListener = createTraderListener({
     config,
-    engine,
+    runtime: runtimeProfiles.trader,
     eventLog,
     connectorCenter,
     brain,
@@ -151,7 +151,7 @@ async function main() {
   traderListener.start()
   traderReviewListener = createTraderReviewListener({
     config,
-    engine,
+    runtime: runtimeProfiles.trader,
     eventLog,
     brain,
     accountManager,
@@ -165,7 +165,7 @@ async function main() {
   // ---- Heartbeat ----
   heartbeat = createHeartbeat({
     config: config.heartbeat,
-    connectorCenter, cronEngine, eventLog, runtime: jobEngine,
+    connectorCenter, cronEngine, eventLog, runtime: runtimeProfiles.providerOnlyJob,
   })
   await heartbeat.start()
   if (config.heartbeat.enabled) {
@@ -205,7 +205,7 @@ async function main() {
     reconnectConnectors,
     runTraderReview: (strategyId) => runTraderReview(strategyId, {
       config,
-      engine,
+      runtime: runtimeProfiles.trader,
       eventLog,
       brain,
       accountManager,

@@ -11,7 +11,11 @@ import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
-import { createDefaultEngineSessionHandlers, createProviderRouteOnlySessionHandlers } from '../core/engine-runtime.js'
+import {
+  createAgentSkillProviderSessionHandlers,
+  createDefaultEngineSessionHandlers,
+  createProviderRouteOnlySessionHandlers,
+} from '../core/engine-runtime.js'
 import { AgentSkillRuntime } from '../skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
@@ -25,9 +29,15 @@ import type { MarketDataBridge } from '../core/types.js'
 import type { INewsProvider } from '../domains/research/news-collector/index.js'
 import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
+export interface AIRuntimeProfiles {
+  interactive: Engine
+  providerOnlyJob: Engine
+  trader: Engine
+}
+
 export interface AIResult {
   engine: Engine
-  jobEngine: Engine
+  runtimeProfiles: AIRuntimeProfiles
   agentCenter: AgentCenter
   router: ProviderRouter
   backtest: BacktestRunManager
@@ -70,19 +80,31 @@ export function initAIProviders(
     newsStore: skillRuntime.newsStore,
     getAccountGit: skillRuntime.getAccountGit,
   })
-  const engine = new Engine({
+  const interactive = new Engine({
     sessionHandlers: createDefaultEngineSessionHandlers({
       agentCenter,
       commandRouter: createLocalCommandRouter(),
       agentSkillRuntime,
     }),
   })
-  const jobEngine = new Engine({
+  const providerOnlyJob = new Engine({
     sessionHandlers: createProviderRouteOnlySessionHandlers(agentCenter),
   })
+  const trader = new Engine({
+    sessionHandlers: createAgentSkillProviderSessionHandlers({
+      agentCenter,
+      agentSkillRuntime,
+    }),
+  })
+
+  const runtimeProfiles: AIRuntimeProfiles = {
+    interactive,
+    providerOnlyJob,
+    trader,
+  }
 
   const backtestStorage = createBacktestStorage()
-  const backtest = createBacktestRunManager({ storage: backtestStorage, engine })
+  const backtest = createBacktestRunManager({ storage: backtestStorage, engine: runtimeProfiles.interactive })
 
-  return { engine, jobEngine, agentCenter, router, backtest }
+  return { engine: runtimeProfiles.interactive, runtimeProfiles, agentCenter, router, backtest }
 }

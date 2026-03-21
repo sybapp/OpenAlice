@@ -70,20 +70,32 @@ export function createProviderRouteEngineHandler(agentCenter: AgentCenter): Engi
   }
 }
 
-export function createDefaultEngineSessionHandlers(params: {
+export function createAgentSkillProviderSessionHandlers(params: {
   agentCenter: AgentCenter
-  commandRouter: LocalCommandRouter
-agentSkillRuntime?: AgentSkillRuntime | null
+  agentSkillRuntime?: AgentSkillRuntime | null
 }): EngineSessionHandler[] {
-  const handlers: EngineSessionHandler[] = [
-    createLocalCommandEngineHandler(params.commandRouter),
-  ]
+  const handlers: EngineSessionHandler[] = []
   if (params.agentSkillRuntime) {
     handlers.push(createAgentSkillEngineHandler(params.agentSkillRuntime))
   }
   handlers.push(createProviderRouteEngineHandler(params.agentCenter))
   return handlers
 }
+
+export function createDefaultEngineSessionHandlers(params: {
+  agentCenter: AgentCenter
+  commandRouter: LocalCommandRouter
+  agentSkillRuntime?: AgentSkillRuntime | null
+}): EngineSessionHandler[] {
+  return [
+    createLocalCommandEngineHandler(params.commandRouter),
+    ...createAgentSkillProviderSessionHandlers({
+      agentCenter: params.agentCenter,
+      agentSkillRuntime: params.agentSkillRuntime,
+    }),
+  ]
+}
+
 export function createProviderRouteOnlySessionHandlers(agentCenter: AgentCenter): EngineSessionHandler[] {
   return [createProviderRouteEngineHandler(agentCenter)]
 }

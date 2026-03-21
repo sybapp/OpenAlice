@@ -1,7 +1,8 @@
 import type { Brain } from '../../domains/cognition/brain/index.js'
 import type { AccountManager } from '../../domains/trading/index.js'
 import type { ITradingGit } from '../../domains/trading/index.js'
-import type { Engine } from '../../core/engine.js'
+import type { EngineAskOptions } from '../../core/engine.js'
+import type { StreamableResult } from '../../core/ai-provider.js'
 import type { EventLog } from '../../core/event-log.js'
 import type { Config, MarketDataBridge } from '../../core/types.js'
 import type { CronSchedule } from '../cron/engine.js'
@@ -258,9 +259,13 @@ export interface TraderRunnerResult {
   rawText?: string
 }
 
+export interface TraderSessionRuntime {
+  askWithSession(prompt: string, session: SessionStore, opts?: EngineAskOptions): StreamableResult
+}
+
 export interface TraderRunnerDeps {
   config: Config
-  engine: Engine
+  runtime: TraderSessionRuntime
   eventLog: EventLog
   brain: Brain
   accountManager: AccountManager

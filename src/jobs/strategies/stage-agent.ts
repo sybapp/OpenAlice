@@ -90,7 +90,7 @@ export async function runTraderStageAgent<T>(params: {
     resources: [],
     scriptCalls: [],
   }
-  const result = await params.deps.engine.askWithSession(params.task, params.session, {
+  const result = await params.deps.runtime.askWithSession(params.task, params.session, {
     historyPreamble: 'The following is the prior structured skill-loop history for this trader session.',
     maxHistoryEntries: 30,
     skillContext: {
