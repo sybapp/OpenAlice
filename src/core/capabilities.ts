@@ -2,8 +2,8 @@ import { tool, type Tool } from 'ai'
 import { z } from 'zod'
 import type { EngineContext } from './types.js'
 import type { ToolCenter, ToolInventoryItem } from './tool-center.js'
-import { listSkillPacks, type SkillRuntime } from '../skills/registry.js'
-import { listSkillScripts } from '../skills/script-registry.js'
+import type { SkillRuntime } from '../skills/registry.js'
+import { buildSkillCatalog } from '../skills/catalog.js'
 import { invokeAgentSkill } from '../skills/service.js'
 import type { SessionEntry } from './session.js'
 
@@ -108,41 +108,16 @@ function isInvocableAgentSkill(skill: { runtime: SkillRuntime; userInvocable: bo
   return skill.runtime === 'agent-skill' && skill.userInvocable
 }
 
-function buildScriptUsageMap(skills: Awaited<ReturnType<typeof listSkillPacks>>) {
-  const scriptToSkills = new Map<string, string[]>()
-
-  for (const skill of skills) {
-    for (const scriptId of skill.allowedScripts) {
-      const usedBy = scriptToSkills.get(scriptId) ?? []
-      usedBy.push(skill.id)
-      scriptToSkills.set(scriptId, usedBy)
-    }
-  }
-
-  return scriptToSkills
-}
-
 export async function buildCapabilityInventory(toolCenter: ToolCenter): Promise<CapabilityInventory> {
   const systemTools = toolCenter.getInventory()
-  const skills = await listSkillPacks()
-  const scripts = listSkillScripts()
-  const scriptToSkills = buildScriptUsageMap(skills)
+  const catalog = await buildSkillCatalog()
 
-  const skillItems: SkillCapabilityInventoryItem[] = skills.map((skill) => ({
-    id: skill.id,
-    label: skill.label,
-    description: skill.description,
-    runtime: skill.runtime,
-    userInvocable: skill.userInvocable,
-    ...(skill.stage ? { stage: skill.stage } : {}),
-    resources: skill.resources.map((resource) => resource.id),
-    allowedScripts: [...skill.allowedScripts],
-  }))
+  const skillItems: SkillCapabilityInventoryItem[] = catalog.skills.map((skill) => ({ ...skill }))
 
-  const scriptItems: ScriptCapabilityInventoryItem[] = scripts.map((script) => ({
+  const scriptItems: ScriptCapabilityInventoryItem[] = catalog.scripts.map((script) => ({
     id: script.id,
     description: script.description,
-    usedBy: scriptToSkills.get(script.id) ?? [],
+    usedBy: [...script.usedBy],
   }))
 
   const mcpExposed: McpCapabilityInventoryItem[] = [
@@ -169,12 +144,10 @@ export async function buildCapabilityInventory(toolCenter: ToolCenter): Promise<
 }
 
 export async function createMcpCapabilityTools(ctx: EngineContext): Promise<Record<string, Tool>> {
-  const skills = await listSkillPacks()
+  const { mcpExposedSkills } = await buildSkillCatalog()
   const result: Record<string, Tool> = {}
 
-  for (const skill of skills) {
-    if (!isInvocableAgentSkill(skill)) continue
-
+  for (const skill of mcpExposedSkills) {
     result[getMcpSkillToolName(skill.id)] = tool({
       description: skill.description,
       inputSchema: z.object({

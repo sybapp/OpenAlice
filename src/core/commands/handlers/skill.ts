@@ -1,4 +1,4 @@
-import { getSkillPack, listSkillPacks } from '../../../skills/registry.js'
+import { buildSkillCatalog, getUserInvocableSkill } from '../../../skills/catalog.js'
 import { getSessionSkillId, setSessionSkill } from '../../../skills/session-skill.js'
 import { handledLocalCommand, type LocalCommandHandler } from '../types.js'
 
@@ -20,7 +20,7 @@ export const skillCommandHandler: LocalCommandHandler = {
     }
 
     if (subcommand === 'list') {
-      const packs = (await listSkillPacks()).filter((pack) => pack.userInvocable !== false)
+      const { userInvocableSkills: packs } = await buildSkillCatalog()
       const text = packs.length === 0
         ? 'No skill packs available.'
         : ['Available skills:', ...packs.map((pack) => `- ${pack.id}: ${pack.label}`)].join('\n')
@@ -32,12 +32,9 @@ export const skillCommandHandler: LocalCommandHandler = {
       return handledLocalCommand('Skill mode disabled.')
     }
 
-    const pack = await getSkillPack(subcommand)
+    const pack = await getUserInvocableSkill(subcommand)
     if (!pack) {
       return handledLocalCommand(`Unknown skill: ${subcommand}`)
-    }
-    if (pack.userInvocable === false) {
-      return handledLocalCommand(`Skill ${pack.id} is pipeline-only and cannot be enabled manually.`)
     }
 
     await setSessionSkill(context.session, pack.id)

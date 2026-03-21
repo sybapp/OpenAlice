@@ -7,7 +7,7 @@ import {
   resolveSourceAlias,
 } from '../../core/source-alias.js'
 import { traderTradeReviewSchema } from './workflow-stages.js'
-import { getSkillScript } from '../../skills/script-registry.js'
+import { executeSkillScript } from '../../skills/script-service.js'
 import {
   buildTraderReviewPrompt,
 } from './prompt.js'
@@ -518,37 +518,42 @@ class TraderWorkflowRun {
     }
     const executeOutput = execute.output
 
-    const executeScript = getSkillScript('trader-execute-plan')
-    if (!executeScript) {
+    const brainUpdate = updateBrainIfPresent(this.deps, planOutput.brainUpdate, executeOutput.brainUpdate)
+
+    let executionResult: unknown
+    try {
+      const execution = await executeSkillScript({
+        scriptId: 'trader-execute-plan',
+        context: {
+          config: this.deps.config,
+          eventLog: this.deps.eventLog,
+          brain: this.deps.brain,
+          accountManager: this.deps.accountManager,
+          marketData: this.deps.marketData,
+          ohlcvStore: this.deps.ohlcvStore,
+          newsStore: this.deps.newsStore,
+          getAccountGit: this.deps.getAccountGit,
+          invocation: {
+            strategy: this.strategy,
+            plan: planOutput,
+            stage: 'trade-execute-script',
+          },
+        },
+        input: {
+          source: planOutput.source,
+          commitMessage: planOutput.commitMessage,
+          orders: planOutput.orders,
+        },
+      })
+      executionResult = execution.output
+    } catch (error) {
       await this.appendStageEvent('trade-execute-script', 'failed', {
         source: planOutput.source,
         symbol: planOutput.symbol,
-        error: 'Missing trader-execute-plan script',
+        error: error instanceof Error ? error.message : String(error),
       })
-      throw new Error('Missing trader-execute-plan script')
+      throw error
     }
-
-    const brainUpdate = updateBrainIfPresent(this.deps, planOutput.brainUpdate, executeOutput.brainUpdate)
-
-    const executionResult = await executeScript.run({
-      config: this.deps.config,
-      eventLog: this.deps.eventLog,
-      brain: this.deps.brain,
-      accountManager: this.deps.accountManager,
-      marketData: this.deps.marketData,
-      ohlcvStore: this.deps.ohlcvStore,
-      newsStore: this.deps.newsStore,
-      getAccountGit: this.deps.getAccountGit,
-      invocation: {
-        strategy: this.strategy,
-        plan: planOutput,
-        stage: 'trade-execute-script',
-      },
-    }, {
-      source: planOutput.source,
-      commitMessage: planOutput.commitMessage,
-      orders: planOutput.orders,
-    })
 
     const executionOutcome = buildTradeExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
     const executionRawText = JSON.stringify(executionResult, null, 2)

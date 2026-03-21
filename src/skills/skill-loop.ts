@@ -7,8 +7,9 @@ import { getCompletionSchema } from './completion-schemas.js'
 import type { SkillPack } from './registry.js'
 import { getSkillPack } from './registry.js'
 import { getSessionSkillId } from './session-skill.js'
-import { getSkillScript, listSkillScripts, type SkillScriptContext } from './script-registry.js'
+import { listSkillScripts, type SkillScriptContext } from './script-registry.js'
 import { omitHiddenInvocationFields } from '../core/source-alias.js'
+import { executeSkillScript } from './script-service.js'
 
 interface RequiredScriptCall {
   id: string
@@ -309,13 +310,12 @@ export class AgentSkillRuntime {
           if (!allowedScripts.includes(id)) {
             throw new Error(`Skill ${skill.id} cannot execute script: ${id}`)
           }
-          const script = getSkillScript(id)
-          if (!script) {
-            throw new Error(`Unknown script requested: ${id}`)
-          }
-          const parsedInput = script.inputSchema.parse(input)
-          const output = await script.run({ ...this.baseContext, invocation }, parsedInput)
-          scriptResults.push({ id, input: parsedInput, output })
+          const execution = await executeSkillScript({
+            scriptId: id,
+            context: { ...this.baseContext, invocation },
+            input,
+          })
+          scriptResults.push({ id, input: execution.parsedInput, output: execution.output })
         }
         continue
       }
