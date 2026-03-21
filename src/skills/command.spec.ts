@@ -3,16 +3,16 @@ import { handleSkillCommand } from './command.js'
 import { getSessionSkillIdFromEntries } from './session-skill.js'
 import type { SessionEntry, SessionStore } from '../core/session.js'
 
-vi.mock('./registry.js', () => ({
-  listSkillPacks: vi.fn(async () => [
-    { id: 'ta-brooks', label: 'Brooks Price Action', userInvocable: true },
-    { id: 'ta-ict-smc', label: 'ICT / SMC', userInvocable: true },
-    { id: 'trader-risk-check', label: 'Trader Risk Check', userInvocable: false },
-  ]),
-  getSkillPack: vi.fn(async (id: string) => {
-    if (id === 'ta-brooks') return { id: 'ta-brooks', label: 'Brooks Price Action', userInvocable: true }
-    if (id === 'ta-ict-smc') return { id: 'ta-ict-smc', label: 'ICT / SMC', userInvocable: true }
-    if (id === 'trader-risk-check') return { id: 'trader-risk-check', label: 'Trader Risk Check', userInvocable: false }
+vi.mock('./catalog.js', () => ({
+  buildSkillCatalog: vi.fn(async () => ({
+    userInvocableSkills: [
+      { id: 'ta-brooks', label: 'Brooks Price Action', description: 'Brooks', runtime: 'agent-skill', userInvocable: true, resources: [], allowedScripts: [] },
+      { id: 'ta-ict-smc', label: 'ICT / SMC', description: 'ICT', runtime: 'agent-skill', userInvocable: true, resources: [], allowedScripts: [] },
+    ],
+  })),
+  getUserInvocableSkill: vi.fn(async (id: string) => {
+    if (id === 'ta-brooks') return { id: 'ta-brooks', label: 'Brooks Price Action', description: 'Brooks', runtime: 'agent-skill', userInvocable: true, resources: [], allowedScripts: [] }
+    if (id === 'ta-ict-smc') return { id: 'ta-ict-smc', label: 'ICT / SMC', description: 'ICT', runtime: 'agent-skill', userInvocable: true, resources: [], allowedScripts: [] }
     return null
   }),
 }))
@@ -77,13 +77,13 @@ describe('skill command', () => {
     expect(getSessionSkillIdFromEntries(await session.readAll())).toBe('ta-ict-smc')
   })
 
-  it('rejects pipeline-only skills from manual activation', async () => {
+  it('rejects unknown skills from manual activation', async () => {
     const session = makeSession()
 
     const result = await handleSkillCommand('/skill trader-risk-check', session)
 
     expect(result.handled).toBe(true)
-    expect(result.text).toContain('pipeline-only')
+    expect(result.text).toContain('Unknown skill: trader-risk-check')
     expect(getSessionSkillIdFromEntries(await session.readAll())).toBeNull()
   })
 })

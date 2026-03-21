@@ -5,15 +5,15 @@ const mocks = vi.hoisted(() => ({
   setSessionSkill: vi.fn(),
   getTraderStrategy: vi.fn(),
   applyTraderStrategyPatch: vi.fn(),
-  getSkillScript: vi.fn(),
+  executeSkillScript: vi.fn(),
 }))
 
 vi.mock('../../skills/session-skill.js', () => ({
   setSessionSkill: mocks.setSessionSkill,
 }))
 
-vi.mock('../../skills/script-registry.js', () => ({
-  getSkillScript: mocks.getSkillScript,
+vi.mock('../../skills/script-service.js', () => ({
+  executeSkillScript: mocks.executeSkillScript,
 }))
 
 vi.mock('./strategy.js', () => ({
@@ -521,12 +521,12 @@ describe('runTraderJob', () => {
       ...baseStrategy,
       sources: ['paper-1'],
     })
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }], pending: [], rejected: [] },
         commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }] },
-      })),
+      },
     })
 
     const deps = makeDeps()
@@ -606,12 +606,12 @@ describe('runTraderJob', () => {
 
   it('tries later scan candidates when the first one is rejected upstream', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: { filled: [{ status: 'filled', orderId: 'ord-2', filledPrice: 100 }], pending: [], rejected: [] },
         commitDetails: { results: [{ status: 'filled', orderId: 'ord-2', filledPrice: 100 }] },
-      })),
+      },
     })
 
     const deps = makeDeps()
@@ -770,7 +770,7 @@ describe('runTraderJob', () => {
     expect(result.status).toBe('skip')
     expect(result.reason).toContain('Hard risk gate blocked execution')
     expect(deps.runtime.askWithSession).toHaveBeenCalledTimes(4)
-    expect(mocks.getSkillScript).not.toHaveBeenCalled()
+    expect(mocks.executeSkillScript).not.toHaveBeenCalled()
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not overtrade a full book.')
 
     const stageEvents = deps.eventLog.append.mock.calls
@@ -878,17 +878,13 @@ describe('runTraderJob', () => {
     expect(result.status).toBe('skip')
     expect(result.reason).toContain('Hard risk gate blocked execution: current positions 1 already meet/exceed maxPositions 1.')
     expect(deps.runtime.askWithSession).toHaveBeenCalledTimes(4)
-    expect(mocks.getSkillScript).not.toHaveBeenCalled()
+    expect(mocks.executeSkillScript).not.toHaveBeenCalled()
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Do not bypass the max position cap across venues.')
   })
 
   it('persists the combined brain update before the execution script runs', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => {
-        throw new Error('exchange refused the batch')
-      }),
-    })
+    mocks.executeSkillScript.mockRejectedValue(new Error('exchange refused the batch'))
 
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
@@ -907,8 +903,8 @@ describe('runTraderJob', () => {
 
   it('reports actual execution results instead of echoing the planned orders', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: {
           filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }],
@@ -921,7 +917,7 @@ describe('runTraderJob', () => {
             { status: 'rejected', orderId: 'ord-2', error: 'post only would cross' },
           ],
         },
-      })),
+      },
     })
 
     const deps = makeDeps()
@@ -1015,8 +1011,8 @@ describe('runTraderJob', () => {
 
   it('returns skip when deterministic execution rejects every order', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: {
           filled: [],
@@ -1032,7 +1028,7 @@ describe('runTraderJob', () => {
             { status: 'rejected', orderId: 'ord-2', error: 'insufficient margin' },
           ],
         },
-      })),
+      },
     })
 
     const deps = makeDeps()
@@ -1207,7 +1203,7 @@ describe('runTraderJob', () => {
     expect(result.status).toBe('skip')
     expect(result.reason).toBe('Trigger is not confirmed yet.')
     expect(deps.brain.updateFrontalLobe).toHaveBeenCalledWith('Wait for confirmation.')
-    expect(mocks.getSkillScript).not.toHaveBeenCalled()
+    expect(mocks.executeSkillScript).not.toHaveBeenCalled()
   })
 
   it('parses skill-loop responses wrapped under text.complete output', async () => {
@@ -1250,12 +1246,12 @@ describe('runTraderJob', () => {
 
   it('records ordered stage events with workflow state through execution', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }], pending: [], rejected: [] },
         commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }] },
-      })),
+      },
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
@@ -1305,12 +1301,12 @@ describe('runTraderJob', () => {
 
   it('stops the run after a terminal trade-execute-script rejection', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'deadbeef' },
         pushed: { filled: [], pending: [], rejected: [{ status: 'rejected', error: 'broker rejected order' }] },
         commitDetails: { results: [{ status: 'rejected', error: 'broker rejected order' }] },
-      })),
+      },
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
@@ -1401,12 +1397,12 @@ describe('runTraderJob', () => {
 
   it('passes the previous workflow state into each stage-agent context', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
-    mocks.getSkillScript.mockReturnValue({
-      run: vi.fn(async () => ({
+    mocks.executeSkillScript.mockResolvedValue({
+      output: {
         commit: { hash: 'abc12345' },
         pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }], pending: [], rejected: [] },
         commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }] },
-      })),
+      },
     })
     const deps = makeDeps()
     deps.accountManager.getAccount.mockReturnValue(makeAccount())
