@@ -17,8 +17,15 @@ import {
   type TraderStageRequiredScriptCall,
 } from './stage-agent.js'
 import {
+  buildTraderSkipResult,
   createTraderWorkflowAgentStageDefinitions,
+  interpretTraderWorkflowStageTransitions,
+  resolveHardRiskBudgetRoute,
+  resolveRiskSnapshotFailureRoute,
+  resolveTradeExecuteScriptRoute,
   TRADER_SKILLS,
+  type TraderWorkflowAgentStageDefinition,
+  type TraderWorkflowStageTransitionRoute,
 } from './workflow-stages.js'
 import { applyTraderStrategyPatch, getTraderStrategy } from './strategy.js'
 import { TraderWorkflowStateMachine } from './workflow-state.js'
@@ -31,7 +38,11 @@ import type {
   TraderRunnerResult,
   TraderStrategy,
   TraderTradePlanReadyResult,
+  TraderTradePlanResult,
   TraderPreflightSnapshot,
+  TraderRiskCheckResult,
+  TraderTradeExecuteResult,
+  TraderTradeThesisResult,
   TraderWorkflowStage,
   TraderWorkflowStageEventPayload,
 } from './types.js'
@@ -237,14 +248,6 @@ function updateBrainIfPresent(deps: TraderRunnerDeps, ...updates: Array<string |
   return combined
 }
 
-function buildSkipResult(reason: string, rawText: string): TraderRunnerResult {
-  return {
-    status: 'skip',
-    reason,
-    rawText,
-  }
-}
-
 async function appendTraderStageEvent(
   deps: TraderRunnerDeps,
   meta: TraderRunMeta,
@@ -403,15 +406,10 @@ interface CandidatePipelineResultDone extends TraderRunnerResult {
   status: 'done'
 }
 
-interface CandidatePipelineResultSkip extends TraderRunnerResult {
-  status: 'skip'
-}
-
-interface CandidatePipelineResultFatal {
-  fatal: TraderRunnerResult
-}
-
-type CandidatePipelineResult = CandidatePipelineResultDone | CandidatePipelineResultSkip | CandidatePipelineResultFatal
+type CandidatePipelineResult =
+  | { decision: 'done'; result: CandidatePipelineResultDone }
+  | { decision: 'next-candidate'; result: TraderRunnerResult }
+  | { decision: 'stop-run'; result: TraderRunnerResult }
 
 interface TraderStageRunResult<T> {
   output: T
@@ -476,13 +474,10 @@ class TraderWorkflowRun {
 
     for (const candidate of scan.candidates) {
       const result = await this.runCandidatePipeline(candidate, snapshot)
-      if ('fatal' in result) {
-        return this.externalize(result.fatal)
+      if (result.decision === 'done' || result.decision === 'stop-run') {
+        return this.externalize(result.result)
       }
-      if (result.status === 'done') {
-        return this.externalize(result)
-      }
-      lastSkip = result
+      lastSkip = result.result
     }
 
     return this.externalize(lastSkip)
@@ -519,6 +514,38 @@ class TraderWorkflowRun {
       nextAllowedStages: record.allowedNextStages,
       ...((data ?? {}) as Record<string, unknown>),
     })
+  }
+
+  private async applyStageRoute(
+    stage: TraderWorkflowStage,
+    route: TraderWorkflowStageTransitionRoute<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.appendStageEvent(stage, route.status, route.eventData)
+    if (route.brainUpdates?.length) {
+      updateBrainIfPresent(this.deps, ...route.brainUpdates)
+    }
+    if (route.completeWorkflow) {
+      this.complete()
+    }
+  }
+
+  private async routeAgentStage<TPublic, TInternal extends Record<string, unknown>>(
+    definition: TraderWorkflowAgentStageDefinition<TPublic, TInternal>,
+    result: TraderStageRunResult<TInternal>,
+  ): Promise<TraderWorkflowStageTransitionRoute<Record<string, unknown>> | null> {
+    if (!definition.transitions) return null
+
+    const route = interpretTraderWorkflowStageTransitions(
+      definition.stage,
+      result.output,
+      {
+        rawText: result.rawText,
+        eventData: attachAgentTrace(result.output, result.trace),
+      },
+      definition.transitions,
+    )
+    await this.applyStageRoute(definition.stage, route)
+    return route
   }
 
   private async runAgentStage<TPublic, TInternal>(params: {
@@ -559,33 +586,6 @@ class TraderWorkflowRun {
     }
   }
 
-  private async runTradeThesisStage(
-    candidate: TraderMarketCandidate,
-    preflightSnapshot: TraderPreflightSnapshot,
-  ): Promise<TraderStageRunResult<TraderTradeThesisResult>> {
-    return this.runAgentStage(this.stages.tradeThesis(candidate, preflightSnapshot))
-  }
-
-  private async runRiskCheckStage(
-    thesisOutput: TraderTradeThesisResult,
-    riskSnapshot: TraderPreflightSnapshot,
-  ): Promise<TraderStageRunResult<TraderRiskCheckResult>> {
-    return this.runAgentStage(this.stages.riskCheck(thesisOutput, riskSnapshot))
-  }
-
-  private async runTradePlanStage(
-    thesisOutput: TraderTradeThesisResult,
-    riskOutput: TraderRiskCheckResult,
-  ): Promise<TraderStageRunResult<TraderTradePlanResult>> {
-    return this.runAgentStage(this.stages.tradePlan(thesisOutput, riskOutput))
-  }
-
-  private async runTradeExecuteStage(
-    planOutput: TraderTradePlanReadyResult,
-  ): Promise<TraderStageRunResult<TraderTradeExecuteResult>> {
-    return this.runAgentStage(this.stages.tradeExecute(planOutput))
-  }
-
   private async runMarketScan(preflightSnapshot: TraderPreflightSnapshot) {
     const scan = await this.runAgentStage(this.stages.marketScan(preflightSnapshot))
     const scanOutput = { ...scan.output, rawText: scan.rawText }
@@ -602,62 +602,83 @@ class TraderWorkflowRun {
     candidate: TraderMarketCandidate,
     preflightSnapshot: TraderPreflightSnapshot,
   ): Promise<CandidatePipelineResult> {
-    const thesis = await this.runTradeThesisStage(candidate, preflightSnapshot)
-    const thesisOutput = thesis.output
-
-    if (thesisOutput.status === 'no_trade') {
-      await this.appendStageEvent('trade-thesis', 'skipped', attachAgentTrace(thesisOutput, thesis.trace))
-      updateBrainIfPresent(this.deps, ...thesisOutput.contextNotes)
-      return buildSkipResult(thesisOutput.rationale, thesis.rawText)
+    const thesisDefinition = this.stages.tradeThesis(candidate, preflightSnapshot)
+    const thesis = await this.runAgentStage(thesisDefinition)
+    const thesisRoute = await this.routeAgentStage(thesisDefinition, thesis)
+    if (thesisRoute && thesisRoute.decision !== 'advance') {
+      return {
+        decision: thesisRoute.decision,
+        result: thesisRoute.runnerResult ?? buildTraderSkipResult('Trade thesis stopped the pipeline.', thesis.rawText),
+      }
     }
-    await this.appendStageEvent('trade-thesis', 'completed', attachAgentTrace(thesisOutput, thesis.trace))
+    const thesisOutput = thesis.output
 
     const riskSnapshot = await buildPreflightSnapshot(this.strategy, this.deps)
     if (riskSnapshot.warnings.some((warning) => warning.includes('not available'))) {
-      await this.appendStageEvent('risk-check', 'failed', {
-        source: thesisOutput.source,
-        symbol: thesisOutput.symbol,
-        error: riskSnapshot.warnings.join(' '),
-      })
-      return { fatal: buildSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText) }
+      const route = resolveRiskSnapshotFailureRoute(thesisOutput, riskSnapshot.warnings, thesis.rawText)
+      await this.applyStageRoute('risk-check', route)
+      return {
+        decision: route.decision,
+        result: route.runnerResult ?? buildTraderSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText),
+      }
     }
-    const risk = await this.runRiskCheckStage(thesisOutput, riskSnapshot)
+    const riskDefinition = this.stages.riskCheck(thesisOutput, riskSnapshot)
+    const risk = await this.runAgentStage(riskDefinition)
+    const riskRoute = await this.routeAgentStage(riskDefinition, risk)
+    if (riskRoute && riskRoute.decision !== 'advance') {
+      return {
+        decision: riskRoute.decision,
+        result: riskRoute.runnerResult ?? buildTraderSkipResult('Risk check stopped the pipeline.', risk.rawText),
+      }
+    }
     const riskOutput = risk.output
 
-    if (riskOutput.verdict !== 'pass') {
-      await this.appendStageEvent('risk-check', 'skipped', attachAgentTrace(riskOutput, risk.trace))
-      return buildSkipResult(riskOutput.rationale, risk.rawText)
+    const planDefinition = this.stages.tradePlan(thesisOutput, riskOutput)
+    const plan = await this.runAgentStage(planDefinition)
+    const planRoute = interpretTraderWorkflowStageTransitions(
+      planDefinition.stage,
+      plan.output,
+      {
+        rawText: plan.rawText,
+        eventData: attachAgentTrace(plan.output, plan.trace),
+      },
+      planDefinition.transitions ?? [],
+    )
+    if (planRoute.decision !== 'advance') {
+      await this.applyStageRoute(planDefinition.stage, planRoute)
+      return {
+        decision: planRoute.decision,
+        result: planRoute.runnerResult ?? buildTraderSkipResult('Trade plan stopped the pipeline.', plan.rawText),
+      }
     }
-    await this.appendStageEvent('risk-check', 'completed', attachAgentTrace(riskOutput, risk.trace))
-    const plan = await this.runTradePlanStage(thesisOutput, riskOutput)
     const planOutput = plan.output
-
-    if (planOutput.status !== 'plan_ready' || planOutput.orders.length === 0) {
-      await this.appendStageEvent('trade-plan', 'skipped', attachAgentTrace(planOutput, plan.trace))
-      updateBrainIfPresent(this.deps, planOutput.brainUpdate)
-      return buildSkipResult(planOutput.rationale, plan.rawText)
-    }
 
     const hardRiskBlock = getHardRiskBudgetViolation(this.strategy, riskSnapshot, planOutput)
     if (hardRiskBlock) {
-      await this.appendStageEvent('trade-plan', 'skipped', attachAgentTrace({
-        ...planOutput,
-        rationale: hardRiskBlock,
-        gate: 'hard-risk-budget',
-      }, plan.trace))
-      updateBrainIfPresent(this.deps, planOutput.brainUpdate)
-      return buildSkipResult(hardRiskBlock, plan.rawText)
+      const route = resolveHardRiskBudgetRoute(
+        planOutput,
+        hardRiskBlock,
+        plan.rawText,
+        attachAgentTrace(planOutput, plan.trace),
+      )
+      await this.applyStageRoute('trade-plan', route)
+      return {
+        decision: route.decision,
+        result: route.runnerResult ?? buildTraderSkipResult(hardRiskBlock, plan.rawText),
+      }
     }
-    await this.appendStageEvent('trade-plan', 'completed', attachAgentTrace(planOutput, plan.trace))
-    const execute = await this.runTradeExecuteStage(planOutput)
-    const executeOutput = execute.output
+    await this.applyStageRoute(planDefinition.stage, planRoute)
 
-    if (executeOutput.status !== 'execute') {
-      await this.appendStageEvent('trade-execute', 'skipped', attachAgentTrace(executeOutput, execute.trace))
-      updateBrainIfPresent(this.deps, executeOutput.brainUpdate)
-      return buildSkipResult(executeOutput.rationale, execute.rawText)
+    const executeDefinition = this.stages.tradeExecute(planOutput)
+    const execute = await this.runAgentStage(executeDefinition)
+    const executeRoute = await this.routeAgentStage(executeDefinition, execute)
+    if (executeRoute && executeRoute.decision !== 'advance') {
+      return {
+        decision: executeRoute.decision,
+        result: executeRoute.runnerResult ?? buildTraderSkipResult('Trade execute stopped the pipeline.', execute.rawText),
+      }
     }
-    await this.appendStageEvent('trade-execute', 'completed', attachAgentTrace(executeOutput, execute.trace))
+    const executeOutput = execute.output
 
     const executeScript = getSkillScript('trader-execute-plan')
     if (!executeScript) {
@@ -692,29 +713,22 @@ class TraderWorkflowRun {
     })
 
     const executionOutcome = buildExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
-    if (executionOutcome.rejectedCount > 0 && executionOutcome.filledCount === 0 && executionOutcome.pendingCount === 0) {
-      await this.appendStageEvent('trade-execute-script', 'skipped', {
-        source: planOutput.source,
-        symbol: planOutput.symbol,
-        commitMessage: planOutput.commitMessage,
-        outcome: executionOutcome,
-        result: executionResult,
-      })
-      this.complete()
-      return {
-        status: 'skip',
-        reason: executionOutcome.rationale,
-        rawText: JSON.stringify(executionResult, null, 2),
-      }
-    }
-    await this.appendStageEvent('trade-execute-script', 'completed', {
+    const executionRawText = JSON.stringify(executionResult, null, 2)
+    const executeScriptRoute = resolveTradeExecuteScriptRoute({
       source: planOutput.source,
       symbol: planOutput.symbol,
       commitMessage: planOutput.commitMessage,
-      outcome: executionOutcome,
-      result: executionResult,
+      executionOutcome,
+      executionResult,
+      rawText: executionRawText,
     })
-    this.complete()
+    await this.applyStageRoute('trade-execute-script', executeScriptRoute)
+    if (executeScriptRoute.decision !== 'advance') {
+      return {
+        decision: executeScriptRoute.decision,
+        result: executeScriptRoute.runnerResult ?? buildTraderSkipResult(executionOutcome.rationale, executionRawText),
+      }
+    }
 
     const decision: TraderDecision = {
       status: 'trade',
@@ -729,10 +743,13 @@ class TraderWorkflowRun {
     }
 
     return {
-      status: 'done',
-      reason: decision.rationale,
-      decision,
-      rawText: JSON.stringify(executionResult, null, 2),
+      decision: 'done',
+      result: {
+        status: 'done',
+        reason: decision.rationale,
+        decision,
+        rawText: executionRawText,
+      },
     }
   }
 }

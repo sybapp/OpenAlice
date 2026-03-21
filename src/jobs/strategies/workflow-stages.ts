@@ -18,6 +18,7 @@ import type {
   TraderMarketCandidate,
   TraderMarketScanResult,
   TraderPreflightSnapshot,
+  TraderRunnerResult,
   TraderRiskCheckResult,
   TraderStrategy,
   TraderTradeExecuteResult,
@@ -25,6 +26,7 @@ import type {
   TraderTradePlanResult,
   TraderTradeThesisResult,
   TraderWorkflowStage,
+  TraderWorkflowStageStatus,
 } from './types.js'
 
 export const TRADER_SKILLS = {
@@ -59,6 +61,124 @@ export interface TraderWorkflowAgentStageDefinition<TPublic, TInternal> {
   transform: (output: TPublic) => TInternal
   validate?: (output: TInternal) => void
   onError?: (error: unknown) => Record<string, unknown>
+  transitions?: readonly TraderWorkflowStageTransitionRule<TInternal, Record<string, unknown>>[]
+}
+
+export type TraderWorkflowTransitionDecision = 'advance' | 'next-candidate' | 'stop-run'
+
+export interface TraderWorkflowStageTransitionRoute<TData = Record<string, unknown>> {
+  status: TraderWorkflowStageStatus
+  decision: TraderWorkflowTransitionDecision
+  eventData: TData
+  runnerResult?: TraderRunnerResult
+  brainUpdates?: string[]
+  completeWorkflow?: boolean
+}
+
+export interface TraderWorkflowStageTransitionRule<TOutput, TData = Record<string, unknown>> {
+  when: (output: TOutput) => boolean
+  resolve: (
+    output: TOutput,
+    context: { rawText: string; eventData: TData },
+  ) => TraderWorkflowStageTransitionRoute<TData>
+}
+
+export function buildTraderSkipResult(reason: string, rawText: string): TraderRunnerResult {
+  return {
+    status: 'skip',
+    reason,
+    rawText,
+  }
+}
+
+export function interpretTraderWorkflowStageTransitions<TOutput, TData>(
+  stage: TraderWorkflowStage,
+  output: TOutput,
+  context: { rawText: string; eventData: TData },
+  rules: readonly TraderWorkflowStageTransitionRule<TOutput, TData>[],
+): TraderWorkflowStageTransitionRoute<TData> {
+  const rule = rules.find((entry) => entry.when(output))
+  if (!rule) {
+    throw new Error(`No trader workflow transition matched stage ${stage}.`)
+  }
+  return rule.resolve(output, context)
+}
+
+export function resolveRiskSnapshotFailureRoute(
+  thesisOutput: TraderTradeThesisResult,
+  warnings: string[],
+  rawText: string,
+): TraderWorkflowStageTransitionRoute<Record<string, unknown>> {
+  const error = warnings.join(' ')
+  return {
+    status: 'failed',
+    decision: 'stop-run',
+    eventData: {
+      source: thesisOutput.source,
+      symbol: thesisOutput.symbol,
+      error,
+    },
+    runnerResult: buildTraderSkipResult(error, rawText),
+  }
+}
+
+export function resolveHardRiskBudgetRoute(
+  planOutput: TraderTradePlanResult,
+  hardRiskBlock: string,
+  rawText: string,
+  eventData: Record<string, unknown>,
+): TraderWorkflowStageTransitionRoute<Record<string, unknown>> {
+  return {
+    status: 'skipped',
+    decision: 'next-candidate',
+    eventData: {
+      ...eventData,
+      rationale: hardRiskBlock,
+      gate: 'hard-risk-budget',
+    },
+    runnerResult: buildTraderSkipResult(hardRiskBlock, rawText),
+    brainUpdates: 'brainUpdate' in planOutput && typeof planOutput.brainUpdate === 'string'
+      ? [planOutput.brainUpdate]
+      : [],
+  }
+}
+
+export function resolveTradeExecuteScriptRoute(params: {
+  source: string
+  symbol: string
+  commitMessage: string
+  executionOutcome: {
+    rationale: string
+    filledCount: number
+    pendingCount: number
+    rejectedCount: number
+  }
+  executionResult: unknown
+  rawText: string
+}): TraderWorkflowStageTransitionRoute<Record<string, unknown>> {
+  const eventData = {
+    source: params.source,
+    symbol: params.symbol,
+    commitMessage: params.commitMessage,
+    outcome: params.executionOutcome,
+    result: params.executionResult,
+  }
+  if (params.executionOutcome.rejectedCount > 0 && params.executionOutcome.filledCount === 0 && params.executionOutcome.pendingCount === 0) {
+    return {
+      status: 'skipped',
+      decision: 'stop-run',
+      eventData,
+      runnerResult: buildTraderSkipResult(params.executionOutcome.rationale, params.rawText),
+      completeWorkflow: true,
+    }
+  }
+
+  return {
+    status: 'completed',
+    decision: 'advance',
+    eventData,
+    completeWorkflow: true,
+  }
 }
 
 interface TraderWorkflowStageFactoryContext {
@@ -220,6 +340,26 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
           symbol: candidate.symbol,
           error: error instanceof Error ? error.message : String(error),
         }),
+        transitions: [
+          {
+            when: (output) => output.status === 'no_trade',
+            resolve: (output, routeContext) => ({
+              status: 'skipped',
+              decision: 'next-candidate',
+              eventData: routeContext.eventData,
+              runnerResult: buildTraderSkipResult(output.rationale, routeContext.rawText),
+              brainUpdates: output.contextNotes,
+            }),
+          },
+          {
+            when: () => true,
+            resolve: (_output, routeContext) => ({
+              status: 'completed',
+              decision: 'advance',
+              eventData: routeContext.eventData,
+            }),
+          },
+        ],
       }
     },
 
@@ -247,6 +387,25 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
           symbol: thesisOutput.symbol,
           error: error instanceof Error ? error.message : String(error),
         }),
+        transitions: [
+          {
+            when: (output) => output.verdict !== 'pass',
+            resolve: (output, routeContext) => ({
+              status: 'skipped',
+              decision: 'next-candidate',
+              eventData: routeContext.eventData,
+              runnerResult: buildTraderSkipResult(output.rationale, routeContext.rawText),
+            }),
+          },
+          {
+            when: () => true,
+            resolve: (_output, routeContext) => ({
+              status: 'completed',
+              decision: 'advance',
+              eventData: routeContext.eventData,
+            }),
+          },
+        ],
       }
     },
 
@@ -274,6 +433,26 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
           symbol: thesisOutput.symbol,
           error: error instanceof Error ? error.message : String(error),
         }),
+        transitions: [
+          {
+            when: (output) => output.status !== 'plan_ready' || output.orders.length === 0,
+            resolve: (output, routeContext) => ({
+              status: 'skipped',
+              decision: 'next-candidate',
+              eventData: routeContext.eventData,
+              runnerResult: buildTraderSkipResult(output.rationale, routeContext.rawText),
+              brainUpdates: [output.brainUpdate],
+            }),
+          },
+          {
+            when: () => true,
+            resolve: (_output, routeContext) => ({
+              status: 'completed',
+              decision: 'advance',
+              eventData: routeContext.eventData,
+            }),
+          },
+        ],
       }
     },
 
@@ -297,6 +476,26 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
           symbol: planOutput.symbol,
           error: error instanceof Error ? error.message : String(error),
         }),
+        transitions: [
+          {
+            when: (output) => output.status !== 'execute',
+            resolve: (output, routeContext) => ({
+              status: 'skipped',
+              decision: 'next-candidate',
+              eventData: routeContext.eventData,
+              runnerResult: buildTraderSkipResult(output.rationale, routeContext.rawText),
+              brainUpdates: [output.brainUpdate],
+            }),
+          },
+          {
+            when: () => true,
+            resolve: (_output, routeContext) => ({
+              status: 'completed',
+              decision: 'advance',
+              eventData: routeContext.eventData,
+            }),
+          },
+        ],
       }
     },
   }
