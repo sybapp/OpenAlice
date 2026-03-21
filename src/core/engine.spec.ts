@@ -54,8 +54,8 @@ function makeEngine(overrides: MakeEngineOpts = {}): Engine {
   return new Engine({ agentCenter, commandRouter: createLocalCommandRouter() })
 }
 
-function makeEngineWithSkillLoop(skillLoopRunner: {
-  getActiveScriptSkill: (session: SessionStore) => Promise<unknown>
+function makeEngineWithAgentSkillRuntime(agentSkillRuntime: {
+  getActiveAgentSkill: (session: SessionStore) => Promise<unknown>
   run: (prompt: string, session: SessionStore, opts?: unknown) => Promise<{ text: string; media: [] }>
 }, overrides: MakeEngineOpts = {}): Engine {
   const model = overrides.model ?? makeMockModel()
@@ -71,7 +71,7 @@ function makeEngineWithSkillLoop(skillLoopRunner: {
   return new Engine({
     agentCenter,
     commandRouter: createLocalCommandRouter(),
-    skillLoopRunner: skillLoopRunner as any,
+    agentSkillRuntime: agentSkillRuntime as any,
   })
 }
 
@@ -284,19 +284,19 @@ describe('Engine', () => {
       expect(session.appendAssistant).toHaveBeenCalledWith('assistant reply', 'engine')
     })
 
-    it('routes active script-loop skills through the skill loop runner', async () => {
+    it('routes active agent-skill sessions through the agent-skill runtime', async () => {
       const skillLoopRunner = {
-        getActiveScriptSkill: vi.fn(async () => ({ id: 'ta-brooks', runtime: 'script-loop' })),
-        run: vi.fn(async () => ({ text: 'script-loop result', media: [] as [] })),
+        getActiveAgentSkill: vi.fn(async () => ({ id: 'ta-brooks', runtime: 'agent-skill' })),
+        run: vi.fn(async () => ({ text: 'agent-skill result', media: [] as [] })),
       }
-      const engine = makeEngineWithSkillLoop(skillLoopRunner)
+      const engine = makeEngineWithAgentSkillRuntime(skillLoopRunner)
       const session = makeSessionMock()
       const askSpy = vi.spyOn(AgentCenter.prototype, 'askWithSession')
 
       const result = await engine.askWithSession('analyze btc', session)
 
-      expect(result.text).toBe('script-loop result')
-      expect(skillLoopRunner.getActiveScriptSkill).toHaveBeenCalledWith(session)
+      expect(result.text).toBe('agent-skill result')
+      expect(skillLoopRunner.getActiveAgentSkill).toHaveBeenCalledWith(session)
       expect(skillLoopRunner.run).toHaveBeenCalledWith('analyze btc', session, undefined)
       expect(askSpy).not.toHaveBeenCalled()
     })

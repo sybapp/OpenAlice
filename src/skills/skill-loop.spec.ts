@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SkillLoopRunner } from './skill-loop.js'
+import { AgentSkillRuntime } from './skill-loop.js'
 import type { SkillPack } from './registry.js'
 import type { SessionEntry, SessionStore } from '../core/session.js'
 
@@ -73,7 +73,7 @@ function makeSession(entries: SessionEntry[] = []): SessionStore {
   } as unknown as SessionStore
 }
 
-describe('SkillLoopRunner', () => {
+describe('AgentSkillRuntime', () => {
   it('accepts wrapped requestScripts envelopes and continues the loop', async () => {
     const askWithSession = vi
       .fn()
@@ -99,7 +99,7 @@ describe('SkillLoopRunner', () => {
         media: [],
       })
 
-    const runner = new SkillLoopRunner(
+    const runner = new AgentSkillRuntime(
       { askWithSession } as never,
       {
         config: {} as never,
@@ -117,7 +117,7 @@ describe('SkillLoopRunner', () => {
       id: 'ta-brooks',
       label: 'Brooks',
       description: 'Brooks analysis',
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       userInvocable: true,
       preferredTools: [],
       toolAllow: undefined,
@@ -134,7 +134,7 @@ describe('SkillLoopRunner', () => {
       body: '',
       sourcePath: '/tmp/SKILL.md',
     }
-    vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
+    vi.spyOn(runner, 'getActiveAgentSkill').mockResolvedValue(skill)
 
     const session = makeSession()
     const result = await runner.run('analyze BTC', session)
@@ -172,7 +172,7 @@ describe('SkillLoopRunner', () => {
       media: [],
     })
 
-    const runner = new SkillLoopRunner(
+    const runner = new AgentSkillRuntime(
       { askWithSession } as never,
       {
         config: {} as never,
@@ -190,7 +190,7 @@ describe('SkillLoopRunner', () => {
       id: 'ta-brooks',
       label: 'Brooks',
       description: 'Brooks analysis',
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       userInvocable: true,
       preferredTools: [],
       toolAllow: undefined,
@@ -207,7 +207,7 @@ describe('SkillLoopRunner', () => {
       body: '',
       sourcePath: '/tmp/SKILL.md',
     }
-    vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
+    vi.spyOn(runner, 'getActiveAgentSkill').mockResolvedValue(skill)
 
     await runner.run('analyze BTC', makeSession(), {
       skillContext: {
@@ -258,7 +258,7 @@ describe('SkillLoopRunner', () => {
         media: [],
       })
 
-    const runner = new SkillLoopRunner(
+    const runner = new AgentSkillRuntime(
       { askWithSession } as never,
       {
         config: {} as never,
@@ -276,7 +276,7 @@ describe('SkillLoopRunner', () => {
       id: 'ta-brooks',
       label: 'Brooks',
       description: 'Brooks analysis',
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       userInvocable: true,
       preferredTools: [],
       toolAllow: undefined,
@@ -293,7 +293,7 @@ describe('SkillLoopRunner', () => {
       body: '',
       sourcePath: '/tmp/SKILL.md',
     }
-    vi.spyOn(runner, 'getActiveScriptSkill').mockResolvedValue(skill)
+    vi.spyOn(runner, 'getActiveAgentSkill').mockResolvedValue(skill)
 
     const session = makeSession()
     const result = await runner.run('analyze BTC', session, {

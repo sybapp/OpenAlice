@@ -18,7 +18,7 @@ Each step receives the same session request contract and may either:
 
 Before this slice, `Engine` directly knew about:
 - slash/local commands
-- script-loop skill execution
+- legacy script-loop / canonical agent-skill execution
 - provider fallback
 
 That made the core runtime feel like a hybrid with one special skill-loop side path.
@@ -26,14 +26,14 @@ That made the core runtime feel like a hybrid with one special skill-loop side p
 After this slice:
 - `Engine` owns orchestration of a session runtime pipeline
 - local command handling is one runtime step
-- AgentSkill/script-loop execution is one runtime step
+- AgentSkill execution is one runtime step
 - provider routing is the terminal runtime step
 - bootstrap decides the concrete pipeline composition
 
 ## What Milestone A does not finish
 
 This milestone does **not** yet make the entire project AgentSkill-native. It leaves these follow-ups:
-- unify script-loop naming and contracts with broader AgentSkill terminology
+- finish propagating AgentSkill-native runtime selection through cron/heartbeat and other job entrypoints
 - make cron/heartbeat/job execution choose runtime steps more declaratively
 - reduce remaining provider-specific assumptions in higher-level runtime entrypoints
 - continue migrating skill registry/runtime metadata toward project-wide ownership boundaries

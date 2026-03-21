@@ -47,7 +47,7 @@ describe('skill registry', () => {
     expect(skills.every((skill) => skill.sourcePath.endsWith('/SKILL.md'))).toBe(true)
     expect(skills.find((skill) => skill.id === 'ta-brooks')).toMatchObject({
       label: 'Brooks Price Action',
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       allowedScripts: expect.arrayContaining(['analysis-brooks', 'analysis-indicator', 'research-market-search']),
       outputSchema: 'ChatResponse',
       analysisMode: 'tool-first',
@@ -56,13 +56,13 @@ describe('skill registry', () => {
       safetyNotes: expect.stringContaining('Do not place trades'),
     })
     expect(skills.find((skill) => skill.id === 'ta-ict-smc')).toMatchObject({
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       allowedScripts: expect.arrayContaining(['analysis-ict-smc', 'analysis-indicator', 'research-market-search']),
       instructions: expect.stringContaining('Request analysis-ict-smc first'),
     })
     expect(skills.find((skill) => skill.id === 'ta-brooks-ict-smc')).toMatchObject({
       label: 'Brooks + ICT / SMC Confluence',
-      runtime: 'script-loop',
+      runtime: 'agent-skill',
       allowedScripts: expect.arrayContaining(['analysis-brooks', 'analysis-ict-smc']),
       instructions: expect.stringContaining('highlights agreement, disagreement'),
     })
@@ -234,12 +234,40 @@ plugin safe
     })
   })
 
+  it('normalizes legacy script-loop runtime metadata to agent-skill', async () => {
+    await mkdir(join(tempDir, 'runtime/skills/legacy-skill'), { recursive: true })
+    await writeFile(join(tempDir, 'runtime/skills/legacy-skill/SKILL.md'), `---
+id: legacy-skill
+label: Legacy Skill
+description: Legacy runtime metadata
+runtime: script-loop
+user-invocable: true
+outputSchema: AnalysisReport
+---
+
+# Legacy Skill
+
+## whenToUse
+Use for regression coverage.
+
+## instructions
+Do the thing.
+`)
+
+    const skill = await getSkillPack('legacy-skill')
+
+    expect(skill).toMatchObject({
+      id: 'legacy-skill',
+      runtime: 'agent-skill',
+    })
+  })
+
   it('loads markdown resources from a skill references directory', async () => {
     await mkdir(join(tempDir, 'runtime/skills/ref-skill/references'), { recursive: true })
     await writeFile(join(tempDir, 'runtime/skills/ref-skill/SKILL.md'), `---
 name: ref-skill
 description: Reference demo
-runtime: script-loop
+runtime: agent-skill
 scripts:
   - trader-account-state
 outputSchema: ChatResponse
@@ -265,7 +293,7 @@ read a resource if needed
 
     const content = await readFile(join(tempDir, 'defaults/skills/ta-brooks/SKILL.md'), 'utf-8')
     expect(content).toContain('name: ta-brooks')
-    expect(content).toContain('runtime: script-loop')
+    expect(content).toContain('runtime: agent-skill')
     expect(content).toContain('scripts:')
     expect(content).toContain('# Brooks Price Action')
     expect(content).not.toContain('id: ta-brooks')
