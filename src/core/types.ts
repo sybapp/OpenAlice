@@ -44,10 +44,17 @@ export interface MarketDataBridge {
   }>>
 }
 
+export interface EngineRuntimeCatalog {
+  interactive: Engine
+  providerOnlyJob: Engine
+  trader: Engine
+}
+
 export interface EngineContext {
   config: Config
   connectorCenter: ConnectorCenter
   engine: Engine
+  runtimeCatalog: EngineRuntimeCatalog
   eventLog: EventLog
   brain: Brain
   heartbeat: Heartbeat

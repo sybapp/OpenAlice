@@ -299,7 +299,7 @@ export class TelegramPlugin implements Plugin {
       try {
         // Route through unified provider (Engine → ProviderRouter → Vercel or Claude Code)
         const session = await this.getSession(message.from.id)
-        const result = await engineCtx.engine.askWithSession(prompt, session, {
+        const result = await engineCtx.runtimeCatalog.interactive.askWithSession(prompt, session, {
           historyPreamble: 'The following is the recent conversation from this Telegram chat. Use it as context if the user references earlier messages.',
           commandContext: this.buildCommandContext(engineCtx, message.from.id, 'telegram-chat'),
         })
@@ -334,7 +334,7 @@ export class TelegramPlugin implements Plugin {
     const session = await this.getSession(userId)
     await this.sendReply(chatId, '> Compacting session...')
 
-    const result = await engineCtx.engine.askWithSession('/compact', session, {
+    const result = await engineCtx.runtimeCatalog.interactive.askWithSession('/compact', session, {
       commandContext: this.buildCommandContext(engineCtx, userId, 'telegram-command'),
     })
     await this.sendReply(chatId, result.text)
@@ -342,7 +342,7 @@ export class TelegramPlugin implements Plugin {
 
   private async handleSkillCommand(chatId: number, userId: number, prompt: string, engineCtx: EngineContext) {
     const session = await this.getSession(userId)
-    const result = await engineCtx.engine.askWithSession(prompt, session, {
+    const result = await engineCtx.runtimeCatalog.interactive.askWithSession(prompt, session, {
       commandContext: this.buildCommandContext(engineCtx, userId, 'telegram-command'),
     })
     await this.sendReply(chatId, result.text)

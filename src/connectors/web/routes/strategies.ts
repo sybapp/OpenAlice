@@ -99,7 +99,7 @@ export function createStrategiesRoutes(ctx: EngineContext) {
       if (!body.templateId) {
         return c.json({ error: 'templateId is required' }, { status: 400 })
       }
-      return c.json(await generateTraderStrategyDraft(ctx.engine, {
+      return c.json(await generateTraderStrategyDraft(ctx.runtimeCatalog.interactive, {
         templateId: body.templateId,
         request: body.request ?? '',
       }))

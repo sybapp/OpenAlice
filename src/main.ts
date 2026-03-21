@@ -116,7 +116,7 @@ async function main() {
   const getConnectors = () => [...coreConnectors, ...optionalConnectors.values()]
 
   // ---- AI Providers & Engine ----
-  const { engine, runtimeProfiles, backtest } = initAIProviders(config, toolCenter, instructions, {
+  const { engine, runtimeCatalog, backtest } = initAIProviders(config, toolCenter, instructions, {
     brain,
     eventLog,
     accountManager,
@@ -134,11 +134,11 @@ async function main() {
   await traderReview.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
-  cronListener = createCronListener({ connectorCenter, eventLog, runtime: runtimeProfiles.providerOnlyJob, session: cronSession })
+  cronListener = createCronListener({ connectorCenter, eventLog, runtime: runtimeCatalog.providerOnlyJob, session: cronSession })
   cronListener.start()
   traderListener = createTraderListener({
     config,
-    runtime: runtimeProfiles.trader,
+    runtime: runtimeCatalog.trader,
     eventLog,
     connectorCenter,
     brain,
@@ -151,7 +151,7 @@ async function main() {
   traderListener.start()
   traderReviewListener = createTraderReviewListener({
     config,
-    runtime: runtimeProfiles.trader,
+    runtime: runtimeCatalog.trader,
     eventLog,
     brain,
     accountManager,
@@ -165,7 +165,7 @@ async function main() {
   // ---- Heartbeat ----
   heartbeat = createHeartbeat({
     config: config.heartbeat,
-    connectorCenter, cronEngine, eventLog, runtime: runtimeProfiles.providerOnlyJob,
+    connectorCenter, cronEngine, eventLog, runtime: runtimeCatalog.providerOnlyJob,
   })
   await heartbeat.start()
   if (config.heartbeat.enabled) {
@@ -197,7 +197,7 @@ async function main() {
 
   // ---- Engine Context ----
   ctx = {
-    config, connectorCenter, engine, eventLog, brain, heartbeat, cronEngine, trader, traderReview, toolCenter,
+    config, connectorCenter, engine, runtimeCatalog, eventLog, brain, heartbeat, cronEngine, trader, traderReview, toolCenter,
     accountManager, backtest, marketData,
     getAccountGit,
     reconnectAccount,
@@ -205,7 +205,7 @@ async function main() {
     reconnectConnectors,
     runTraderReview: (strategyId) => runTraderReview(strategyId, {
       config,
-      runtime: runtimeProfiles.trader,
+      runtime: runtimeCatalog.trader,
       eventLog,
       brain,
       accountManager,

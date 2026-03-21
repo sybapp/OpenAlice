@@ -25,19 +25,13 @@ import type { AccountManager, BacktestRunManager } from '../domains/trading/inde
 import type { Brain } from '../domains/cognition/brain/index.js'
 import type { EventLog } from '../core/event-log.js'
 import type { ITradingGit } from '../domains/trading/index.js'
-import type { MarketDataBridge } from '../core/types.js'
+import type { EngineRuntimeCatalog, MarketDataBridge } from '../core/types.js'
 import type { INewsProvider } from '../domains/research/news-collector/index.js'
 import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/index.js'
 
-export interface AIRuntimeProfiles {
-  interactive: Engine
-  providerOnlyJob: Engine
-  trader: Engine
-}
-
 export interface AIResult {
   engine: Engine
-  runtimeProfiles: AIRuntimeProfiles
+  runtimeCatalog: EngineRuntimeCatalog
   agentCenter: AgentCenter
   router: ProviderRouter
   backtest: BacktestRunManager
@@ -97,14 +91,14 @@ export function initAIProviders(
     }),
   })
 
-  const runtimeProfiles: AIRuntimeProfiles = {
+  const runtimeCatalog: EngineRuntimeCatalog = {
     interactive,
     providerOnlyJob,
     trader,
   }
 
   const backtestStorage = createBacktestStorage()
-  const backtest = createBacktestRunManager({ storage: backtestStorage, engine: runtimeProfiles.interactive })
+  const backtest = createBacktestRunManager({ storage: backtestStorage, engine: runtimeCatalog.interactive })
 
-  return { engine: runtimeProfiles.interactive, runtimeProfiles, agentCenter, router, backtest }
+  return { engine: runtimeCatalog.interactive, runtimeCatalog, agentCenter, router, backtest }
 }

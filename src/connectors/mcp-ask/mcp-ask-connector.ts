@@ -72,7 +72,7 @@ export class McpAskPlugin implements Plugin {
         async ({ message, sessionId }) => {
           const session = await plugin.getSession(sessionId)
 
-          const result = await ctx.engine.askWithSession(message, session, {
+          const result = await ctx.runtimeCatalog.interactive.askWithSession(message, session, {
             historyPreamble: 'The following is the conversation from an external MCP client. Use it as context if the caller references earlier messages.',
           })
 

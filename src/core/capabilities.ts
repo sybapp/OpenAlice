@@ -184,7 +184,7 @@ export async function createMcpCapabilityTools(ctx: EngineContext): Promise<Reco
       execute: async ({ task, invocation }) => {
         const session = new MemorySessionStore(`mcp/${skill.id}/${crypto.randomUUID().slice(0, 8)}`)
         await setSessionSkill(session as never, skill.id)
-        const stream = ctx.engine.askWithSession(task, session as never, {
+        const stream = ctx.runtimeCatalog.trader.askWithSession(task, session as never, {
           skillContext: invocation ?? {},
         })
         const result = await stream
