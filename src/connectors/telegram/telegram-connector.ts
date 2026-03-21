@@ -8,15 +8,10 @@ import { buildParsedMessage } from './helpers.js'
 import { MediaGroupMerger } from './media-group.js'
 import { SessionStore } from '../../core/session'
 import { readAIConfig, writeAIConfig, type AIBackend } from '../../core/config.js'
+import { AI_BACKEND_LABELS, AI_BACKEND_OPTIONS, isAIBackend } from '../../core/ai-backends.js'
 import type { ConnectorCenter, Connector } from '../../core/connector-center.js'
 
 const MAX_MESSAGE_LENGTH = 4096
-
-const BACKEND_LABELS: Record<AIBackend, string> = {
-  'claude-code': 'Claude Code',
-  'codex-cli': 'Codex CLI',
-  'vercel-ai-sdk': 'Vercel AI SDK',
-}
 
 export class TelegramPlugin implements Plugin {
   name = 'telegram'
@@ -83,7 +78,7 @@ export class TelegramPlugin implements Plugin {
     // ── Commands ──
     bot.command('status', async (ctx) => {
       const aiConfig = await readAIConfig()
-      await this.sendReply(ctx.chat.id, `Engine is running. Provider: ${BACKEND_LABELS[aiConfig.backend]}`)
+      await this.sendReply(ctx.chat.id, `Engine is running. Provider: ${AI_BACKEND_LABELS[aiConfig.backend]}`)
     })
 
     bot.command('settings', async (ctx) => {
@@ -112,21 +107,20 @@ export class TelegramPlugin implements Plugin {
       const data = ctx.callbackQuery.data
       try {
         if (data.startsWith('provider:')) {
-          const backend = data.slice('provider:'.length) as AIBackend
+          const backend = data.slice('provider:'.length)
+          if (!isAIBackend(backend)) return
           await writeAIConfig(backend)
-          await ctx.answerCallbackQuery({ text: `Switched to ${BACKEND_LABELS[backend]}` })
+          await ctx.answerCallbackQuery({ text: `Switched to ${AI_BACKEND_LABELS[backend]}` })
 
           // Edit the original settings message in-place
-          const ccLabel = backend === 'claude-code' ? '> Claude Code' : 'Claude Code'
-          const codexLabel = backend === 'codex-cli' ? '> Codex CLI' : 'Codex CLI'
-          const aiLabel = backend === 'vercel-ai-sdk' ? '> Vercel AI SDK' : 'Vercel AI SDK'
-          const keyboard = new InlineKeyboard()
-            .text(ccLabel, 'provider:claude-code')
-            .text(codexLabel, 'provider:codex-cli')
-            .row()
-            .text(aiLabel, 'provider:vercel-ai-sdk')
+          const keyboard = AI_BACKEND_OPTIONS.reduce((kb, option, index) => {
+            const label = option.id === backend ? `> ${option.label}` : option.label
+            kb.text(label, `provider:${option.id}`)
+            if (index === 1) kb.row()
+            return kb
+          }, new InlineKeyboard())
           await ctx.editMessageText(
-            `Current provider: ${BACKEND_LABELS[backend]}\n\nChoose default AI provider:`,
+            `Current provider: ${AI_BACKEND_LABELS[backend]}\n\nChoose default AI provider:`,
             { reply_markup: keyboard },
           )
         } else if (data.startsWith('heartbeat:')) {
@@ -350,19 +344,16 @@ export class TelegramPlugin implements Plugin {
 
   private async sendSettingsMenu(chatId: number) {
     const aiConfig = await readAIConfig()
-    const ccLabel = aiConfig.backend === 'claude-code' ? '> Claude Code' : 'Claude Code'
-    const codexLabel = aiConfig.backend === 'codex-cli' ? '> Codex CLI' : 'Codex CLI'
-    const aiLabel = aiConfig.backend === 'vercel-ai-sdk' ? '> Vercel AI SDK' : 'Vercel AI SDK'
-
-    const keyboard = new InlineKeyboard()
-      .text(ccLabel, 'provider:claude-code')
-      .text(codexLabel, 'provider:codex-cli')
-      .row()
-      .text(aiLabel, 'provider:vercel-ai-sdk')
+    const keyboard = AI_BACKEND_OPTIONS.reduce((kb, option, index) => {
+      const label = option.id === aiConfig.backend ? `> ${option.label}` : option.label
+      kb.text(label, `provider:${option.id}`)
+      if (index === 1) kb.row()
+      return kb
+    }, new InlineKeyboard())
 
     await this.bot!.api.sendMessage(
       chatId,
-      `Current provider: ${BACKEND_LABELS[aiConfig.backend]}\n\nChoose default AI provider:`,
+      `Current provider: ${AI_BACKEND_LABELS[aiConfig.backend]}\n\nChoose default AI provider:`,
       { reply_markup: keyboard },
     )
   }

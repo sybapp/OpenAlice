@@ -1,4 +1,3 @@
-import { askClaudeCode } from '../../../ai-providers/claude-code/index.js'
 import { forceCompact } from '../../compaction.js'
 import { handledLocalCommand, type LocalCommandHandler } from '../types.js'
 
@@ -16,11 +15,7 @@ export const compactCommandHandler: LocalCommandHandler = {
     const result = await forceCompact(
       context.session,
       async (summarizePrompt) => {
-        const response = await askClaudeCode(summarizePrompt, {
-          disallowedTools: engineContext.config.agent.claudeCode.disallowedTools,
-          evolutionMode: engineContext.config.agent.evolutionMode,
-          maxTurns: 1,
-        })
+        const response = await engineContext.runtimeCatalog.interactive.ask(summarizePrompt)
         return response.text
       },
     )

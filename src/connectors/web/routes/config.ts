@@ -18,6 +18,7 @@ import {
   withSecretPresence,
 } from './secret-fields.js'
 import { getValidationErrorPayload } from './zod-error.js'
+import { getAIBackendErrorMessage, isAIBackend } from '../../../core/ai-backends.js'
 
 interface ConfigRouteOpts {
   onConnectorsChange?: () => Promise<void>
@@ -163,8 +164,8 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
     try {
       const body = await c.req.json<{ backend?: string }>()
       const backend = body.backend
-      if (backend !== 'claude-code' && backend !== 'codex-cli' && backend !== 'vercel-ai-sdk') {
-        return c.json({ error: 'Invalid backend. Must be "claude-code", "codex-cli", or "vercel-ai-sdk".' }, 400)
+      if (!isAIBackend(backend)) {
+        return c.json({ error: getAIBackendErrorMessage() }, 400)
       }
       await writeAIConfig(backend as AIBackend)
       return c.json({ backend })

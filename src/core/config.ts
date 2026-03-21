@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
 import { resolve } from 'path'
 import { newsCollectorSchema } from '../domains/research/news-collector/config.js'
 import { CONFIG_DIR, HEARTBEAT_DEFAULT_FILE, HEARTBEAT_FILE } from './paths.js'
+import { AI_BACKENDS, type AIBackendId } from './ai-backends.js'
 
 // ==================== Individual Schemas ====================
 
@@ -13,7 +14,7 @@ const engineSchema = z.object({
 })
 
 export const aiProviderSchema = z.object({
-  backend: z.enum(['claude-code', 'codex-cli', 'vercel-ai-sdk']).default('claude-code'),
+  backend: z.enum(AI_BACKENDS).default('claude-code'),
   provider: z.string().default('anthropic'),
   model: z.string().default('claude-sonnet-4-6'),
   baseUrl: z.string().min(1).optional(),
@@ -186,7 +187,7 @@ export type Config = {
   tools: z.infer<typeof toolsSchema>
 }
 
-export type AIBackend = z.infer<typeof aiProviderSchema>['backend']
+export type AIBackend = AIBackendId
 
 // ==================== Loader ====================
 
