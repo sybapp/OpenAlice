@@ -54,7 +54,7 @@ export const TRADER_WORKFLOW_ALLOWED_TRANSITIONS: Record<TraderWorkflowRuntimeSt
   completed: [],
 }
 
-export interface TraderWorkflowAgentStageDefinition<TPublic, TInternal> {
+export interface TraderWorkflowAgentStageDefinition<TPublic, TInternal, TEventData = TInternal, TRuntime = Record<string, unknown> | undefined> {
   stage: TraderWorkflowStage
   skillId: string
   task: string
@@ -64,7 +64,7 @@ export interface TraderWorkflowAgentStageDefinition<TPublic, TInternal> {
   transform: (output: TPublic) => TInternal
   validate?: (output: TInternal) => void
   onError?: (error: unknown) => Record<string, unknown>
-  transitions?: readonly TraderWorkflowStageTransitionRule<TInternal, Record<string, unknown>, Record<string, unknown> | undefined>[]
+  transitions?: readonly TraderWorkflowStageTransitionRule<TInternal, TEventData, TRuntime>[]
 }
 
 export interface TraderWorkflowStageDefinition<TOutput, TData = Record<string, unknown>, TRuntime = Record<string, unknown> | undefined> {
@@ -114,11 +114,11 @@ export function resolveEmptyMarketScanReason(
   return 'No tradable candidate found.'
 }
 
-export function interpretTraderWorkflowStageTransitions<TOutput, TData>(
+export function interpretTraderWorkflowStageTransitions<TOutput, TData, TRuntime>(
   stage: TraderWorkflowStage,
   output: TOutput,
-  context: { rawText: string; eventData: TData; runtime?: Record<string, unknown> | undefined },
-  rules: readonly TraderWorkflowStageTransitionRule<TOutput, TData, Record<string, unknown> | undefined>[],
+  context: { rawText: string; eventData: TData; runtime?: TRuntime },
+  rules: readonly TraderWorkflowStageTransitionRule<TOutput, TData, TRuntime>[],
 ): TraderWorkflowStageTransitionRoute<TData> {
   const rule = rules.find((entry) => entry.when(output, context))
   if (!rule) {
@@ -127,9 +127,9 @@ export function interpretTraderWorkflowStageTransitions<TOutput, TData>(
   return rule.resolve(output, context)
 }
 
-export function resolveTraderWorkflowStageRoute<TOutput extends Record<string, unknown>, TData>(
-  definition: Pick<TraderWorkflowStageDefinition<TOutput, TData, Record<string, unknown> | undefined>, 'stage' | 'transitions'>,
-  result: { output: TOutput; rawText: string; eventData: TData; runtime?: Record<string, unknown> | undefined },
+export function resolveTraderWorkflowStageRoute<TOutput, TData, TRuntime>(
+  definition: Pick<TraderWorkflowStageDefinition<TOutput, TData, TRuntime>, 'stage' | 'transitions'>,
+  result: { output: TOutput; rawText: string; eventData: TData; runtime?: TRuntime },
 ): TraderWorkflowStageTransitionRoute<TData> | null {
   if (!definition.transitions) return null
   return interpretTraderWorkflowStageTransitions(
@@ -350,7 +350,7 @@ export function buildTradeExecutionRunnerResult(params: {
   outcome: TraderExecutionOutcome
   brainUpdate: string
   rawText: string
-}): TraderRunnerResult {
+}): TraderRunnerResult & { status: 'done' } {
   const decision: TraderDecision = {
     status: 'trade',
     strategyId: params.strategyId,
@@ -624,7 +624,7 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
     tradePlan(
       thesisOutput: TraderTradeThesisResult,
       riskOutput: TraderRiskCheckResult,
-    ): TraderWorkflowAgentStageDefinition<TraderTradePlanResult, TraderTradePlanResult> {
+    ): TraderWorkflowAgentStageDefinition<TraderTradePlanResult, TraderTradePlanResult, TraderTradePlanResult, TraderTradePlanRouteRuntime> {
       const publicThesis = ctx.toPublicSource(thesisOutput)
       const publicRisk = ctx.toPublicSource(riskOutput)
       return {
@@ -648,19 +648,23 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
         transitions: [
           {
             when: (_output, routeContext) => typeof (routeContext.runtime as TraderTradePlanRouteRuntime | undefined)?.hardRiskBlock === 'string',
-            resolve: (output, routeContext) => ({
-              status: 'skipped',
-              decision: 'next-candidate',
-              eventData: {
-                ...routeContext.eventData,
-                rationale: (routeContext.runtime as TraderTradePlanRouteRuntime).hardRiskBlock,
-                gate: 'hard-risk-budget',
-              },
-              runnerResult: buildTraderSkipResult((routeContext.runtime as TraderTradePlanRouteRuntime).hardRiskBlock!, routeContext.rawText),
-              brainUpdates: 'brainUpdate' in output && typeof output.brainUpdate === 'string'
-                ? [output.brainUpdate]
-                : [],
-            }),
+            resolve: (output, routeContext) => {
+              const hardRiskBlock = (routeContext.runtime as TraderTradePlanRouteRuntime | undefined)?.hardRiskBlock
+                ?? 'Hard risk gate blocked execution.'
+              return {
+                status: 'skipped',
+                decision: 'next-candidate',
+                eventData: {
+                  ...routeContext.eventData,
+                  rationale: hardRiskBlock,
+                  gate: 'hard-risk-budget',
+                },
+                runnerResult: buildTraderSkipResult(hardRiskBlock, routeContext.rawText),
+                brainUpdates: 'brainUpdate' in output && typeof output.brainUpdate === 'string'
+                  ? [output.brainUpdate]
+                  : [],
+              }
+            },
           },
           {
             when: (output) => output.status !== 'plan_ready' || output.orders.length === 0,

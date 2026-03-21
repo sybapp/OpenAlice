@@ -74,6 +74,28 @@ describe('WorkflowsPage', () => {
                 reason: 'No rejection candle on 5m.',
               },
             ],
+            agentTrace: {
+              skillId: 'trader-market-scan',
+              resources: ['checklist'],
+              requiredScriptCalls: [
+                {
+                  id: 'analysis-brooks',
+                  rationale: 'Need execution timeframe structure before deciding.',
+                },
+              ],
+              scriptCalls: [
+                {
+                  id: 'analysis-brooks',
+                  input: {
+                    asset: 'crypto',
+                    symbol: 'BTC/USDT:USDT',
+                    timeframes: { context: '1h', structure: '15m', execution: '5m' },
+                  },
+                },
+              ],
+              iterations: 2,
+              completionRejectedCount: 1,
+            },
           },
         },
       ],
@@ -96,6 +118,12 @@ describe('WorkflowsPage', () => {
     expect(screen.getByText('BTC/USDT:USDT')).toBeInTheDocument()
     expect(screen.getAllByText('Main Account').length).toBeGreaterThan(0)
     expect(screen.getByText('No rejection candle on 5m.')).toBeInTheDocument()
+    expect(screen.getByText('Agent Trace')).toBeInTheDocument()
+    expect(screen.getByText('2 iterations')).toBeInTheDocument()
+    expect(screen.getByText('1 completion retries')).toBeInTheDocument()
+    expect(screen.getAllByText('analysis-brooks').length).toBeGreaterThan(0)
+    expect(screen.getByText('Need execution timeframe structure before deciding.')).toBeInTheDocument()
+    expect(screen.getByText('Loaded Resources')).toBeInTheDocument()
     expect(screen.getByText('Terminal Event')).toBeInTheDocument()
   })
 
@@ -124,7 +152,7 @@ describe('WorkflowsPage', () => {
     render(<WorkflowsPage />)
     await screen.findByText('mean-revert')
 
-    await userEvent.click(screen.getByText('Raw JSON'))
+    await userEvent.click(await screen.findByText('Raw JSON'))
 
     const pre = await screen.findByText((content, node) =>
       node?.tagName.toLowerCase() === 'pre' && content.includes('"evaluations"'),

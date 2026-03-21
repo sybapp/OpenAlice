@@ -26,13 +26,19 @@ interface SkillLoopTraceMetadata {
   completionRejectedCount?: number
 }
 
+function isSkillLoopTraceMetadata(value: unknown, skillId: string): value is SkillLoopTraceMetadata {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return record.kind === 'skill_loop_trace' && record.skillId === skillId
+}
+
 async function readLatestSkillLoopTrace(session: SessionStore, skillId: string): Promise<SkillLoopTraceMetadata | null> {
   if (typeof session.readActive !== 'function') return null
   const entries = await session.readActive().catch(() => [])
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const metadata = entries[index]?.metadata as Record<string, unknown> | undefined
-    if (metadata?.kind !== 'skill_loop_trace' || metadata.skillId !== skillId) continue
-    return metadata as SkillLoopTraceMetadata
+    if (!isSkillLoopTraceMetadata(metadata, skillId)) continue
+    return metadata
   }
   return null
 }

@@ -246,11 +246,16 @@ async function appendTraderStageEvent(
   } satisfies TraderWorkflowStageEventPayload)
 }
 
-function attachAgentTrace<T extends Record<string, unknown>>(data: T, trace: TraderStageAgentTrace): T & { agentTrace: TraderStageAgentTrace } {
+function attachAgentTrace<T extends object>(data: T, trace: TraderStageAgentTrace): T & { agentTrace: TraderStageAgentTrace } {
   return {
     ...data,
     agentTrace: trace,
   }
+}
+
+function toEventDataRecord(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {}
+  return { ...(data as Record<string, unknown>) }
 }
 
 interface CandidatePipelineResultDone extends TraderRunnerResult {
@@ -364,13 +369,13 @@ class TraderWorkflowRun {
       previousWorkflowState: record.previousState,
       workflowState: record.workflowState,
       nextAllowedStages: record.allowedNextStages,
-      ...((data ?? {}) as Record<string, unknown>),
+      ...toEventDataRecord(data),
     })
   }
 
-  private async applyStageRoute(
+  private async applyStageRoute<TData>(
     stage: TraderWorkflowStage,
-    route: TraderWorkflowStageTransitionRoute<Record<string, unknown>>,
+    route: TraderWorkflowStageTransitionRoute<TData>,
   ): Promise<void> {
     await this.appendStageEvent(stage, route.status, route.eventData)
     if (route.brainUpdates?.length) {
@@ -381,21 +386,21 @@ class TraderWorkflowRun {
     }
   }
 
-  private async routeAgentStage<TPublic, TInternal extends Record<string, unknown>>(
-    definition: TraderWorkflowAgentStageDefinition<TPublic, TInternal>,
+  private async routeAgentStage<TPublic, TInternal extends object, TEventData = TInternal, TRuntime = Record<string, unknown> | undefined>(
+    definition: TraderWorkflowAgentStageDefinition<TPublic, TInternal, TEventData, TRuntime>,
     result: TraderStageRunResult<TInternal>,
-  ): Promise<TraderWorkflowStageTransitionRoute<Record<string, unknown>> | null> {
+  ): Promise<TraderWorkflowStageTransitionRoute<TEventData> | null> {
     const route = resolveTraderWorkflowStageRoute(definition, {
       output: result.output,
       rawText: result.rawText,
-      eventData: attachAgentTrace(result.output, result.trace),
+      eventData: attachAgentTrace(result.output, result.trace) as TEventData,
     })
     if (!route) return null
     await this.applyStageRoute(definition.stage, route)
     return route
   }
 
-  private async runAgentStage<TPublic, TInternal>(params: {
+  private async runAgentStage<TPublic, TInternal extends object>(params: {
     stage: TraderWorkflowStage
     skillId: string
     task: string
@@ -463,7 +468,7 @@ class TraderWorkflowRun {
     if (riskSnapshotFailureRoute) {
       await this.applyStageRoute('risk-check', riskSnapshotFailureRoute)
       return {
-        decision: riskSnapshotFailureRoute.decision,
+        decision: riskSnapshotFailureRoute.decision === 'next-candidate' ? 'next-candidate' : 'stop-run',
         result: riskSnapshotFailureRoute.runnerResult ?? buildTraderSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText),
       }
     }
@@ -495,6 +500,9 @@ class TraderWorkflowRun {
         decision: planRoute.decision,
         result: planRoute.runnerResult ?? buildTraderSkipResult('Trade plan stopped the pipeline.', plan.rawText),
       }
+    }
+    if (plan.output.status !== 'plan_ready') {
+      throw new Error('Trade plan advanced without a plan_ready payload.')
     }
     const planOutput = plan.output
     await this.applyStageRoute(planDefinition.stage, planRoute)

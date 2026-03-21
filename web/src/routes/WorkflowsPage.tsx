@@ -145,12 +145,108 @@ function renderOrders(data: Record<string, unknown>) {
   )
 }
 
+function renderAgentTrace(data: Record<string, unknown>) {
+  const trace = isRecord(data.agentTrace) ? data.agentTrace : null
+  if (!trace) return null
+
+  const resources = Array.isArray(trace.resources)
+    ? trace.resources.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : []
+  const scriptCalls = Array.isArray(trace.scriptCalls) ? trace.scriptCalls.filter(isRecord) : []
+  const requiredScriptCalls = Array.isArray(trace.requiredScriptCalls) ? trace.requiredScriptCalls.filter(isRecord) : []
+  const iterations = trace.iterations != null ? String(trace.iterations) : null
+  const rejected = trace.completionRejectedCount != null ? String(trace.completionRejectedCount) : null
+
+  if (resources.length === 0 && scriptCalls.length === 0 && requiredScriptCalls.length === 0 && !iterations && !rejected) {
+    return null
+  }
+
+  return (
+    <div className="rounded-2xl border border-accent/20 bg-accent/6 px-4 py-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-accent/35 bg-accent/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
+          Agent Trace
+        </span>
+        {iterations && (
+          <span className="rounded-full border border-border/60 bg-bg/70 px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-text-muted">
+            {iterations} iterations
+          </span>
+        )}
+        {rejected && rejected !== '0' && (
+          <span className="rounded-full border border-notification-border/40 bg-notification-bg/70 px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-notification-border">
+            {rejected} completion retries
+          </span>
+        )}
+      </div>
+
+      {requiredScriptCalls.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-muted">Required Evidence</div>
+          <div className="grid gap-3">
+            {requiredScriptCalls.map((call, index) => {
+              const match = 'match' in call ? call.match : undefined
+              const rationale = 'rationale' in call ? asString(call.rationale) : null
+              return (
+                <div key={`${asString(call.id) ?? 'required'}-${index}`} className="rounded-xl border border-border/60 bg-bg/70 px-3 py-3">
+                  <div className="text-sm font-semibold text-text">{asString(call.id) ?? 'Unknown script'}</div>
+                  {match !== undefined && (
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-text-muted">
+                      {JSON.stringify(match, null, 2)}
+                  </pre>
+                  )}
+                  {rationale && (
+                    <div className="mt-2 text-sm text-text">{rationale}</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {resources.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-muted">Loaded Resources</div>
+          <div className="flex flex-wrap gap-2">
+            {resources.map((resource) => (
+              <span key={resource} className="rounded-full border border-border/60 bg-bg/70 px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-text-muted">
+                {resource}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {scriptCalls.length > 0 && (
+        <div>
+          <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-text-muted">Script Calls</div>
+          <div className="grid gap-3">
+            {scriptCalls.map((call, index) => (
+              <div key={`${asString(call.id) ?? 'script'}-${index}`} className="rounded-xl border border-border/60 bg-bg/70 px-3 py-3">
+                <div className="text-sm font-semibold text-text">{asString(call.id) ?? 'Unknown script'}</div>
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-text-muted">
+                  {JSON.stringify(call.input ?? {}, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function renderStageData(stage: TraderWorkflowStageEntry): ReactNode {
   const data = isRecord(stage.data) ? stage.data : {}
 
   switch (stage.stage) {
     case 'market-scan':
-      return renderMarketScan(data)
+      return (
+        <div className="space-y-3">
+          {renderMarketScan(data)}
+          {renderAgentTrace(data)}
+        </div>
+      )
     case 'trade-thesis':
       return (
         <div className="space-y-3">
@@ -169,14 +265,20 @@ function renderStageData(stage: TraderWorkflowStageEntry): ReactNode {
               </div>
             </div>
           )}
+          {renderAgentTrace(data)}
         </div>
       )
     case 'risk-check':
-      return fieldGrid([
-        ['Verdict', asString(data.verdict)],
-        ['Rationale', asString(data.rationale)],
-        ['Max Risk %', data.maxRiskPercent != null ? String(data.maxRiskPercent) : null],
-      ]) ?? <div />
+      return (
+        <div className="space-y-3">
+          {fieldGrid([
+            ['Verdict', asString(data.verdict)],
+            ['Rationale', asString(data.rationale)],
+            ['Max Risk %', data.maxRiskPercent != null ? String(data.maxRiskPercent) : null],
+          ]) ?? <div />}
+          {renderAgentTrace(data)}
+        </div>
+      )
     case 'trade-plan':
       return (
         <div className="space-y-3">
@@ -187,14 +289,20 @@ function renderStageData(stage: TraderWorkflowStageEntry): ReactNode {
             ['Commit Message', asString(data.commitMessage)],
           ])}
           {renderOrders(data)}
+          {renderAgentTrace(data)}
         </div>
       )
     case 'trade-execute':
-      return fieldGrid([
-        ['Status', asString(data.status)],
-        ['Rationale', asString(data.rationale)],
-        ['Brain Update', asString(data.brainUpdate)],
-      ]) ?? <div />
+      return (
+        <div className="space-y-3">
+          {fieldGrid([
+            ['Status', asString(data.status)],
+            ['Rationale', asString(data.rationale)],
+            ['Brain Update', asString(data.brainUpdate)],
+          ]) ?? <div />}
+          {renderAgentTrace(data)}
+        </div>
+      )
     case 'trade-execute-script': {
       const outcome = isRecord(data.outcome) ? data.outcome : {}
       return (
@@ -216,6 +324,7 @@ function renderStageData(stage: TraderWorkflowStageEntry): ReactNode {
               </div>
             </div>
           )}
+          {renderAgentTrace(data)}
         </div>
       )
     }
