@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SessionStore } from '../../../core/session.js'
-import { setSessionSkill } from '../../../skills/session-skill.js'
 import type { Engine } from '../../../core/engine.js'
 import {
   traderMarketScanSchema,
@@ -41,6 +40,7 @@ import {
   buildTraderSystemPrompt,
 } from '../../../jobs/strategies/prompt.js'
 import type { TraderStrategy } from '../../../jobs/strategies/types.js'
+import { executeStructuredAgentSkill } from '../../../skills/service.js'
 
 const TRADER_SKILLS = {
   marketScan: 'trader-market-scan',
@@ -475,30 +475,6 @@ function buildAIBacktestPrompt(
   ].join('\n')
 }
 
-function extractJsonObject(text: string): string | null {
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)
-  if (fenced?.[1]) return fenced[1].trim()
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) return null
-  return trimmed.slice(start, end + 1)
-}
-
-function parseStageOutput<T>(text: string, schema: { parse: (value: unknown) => T }): T | null {
-  const candidate = extractJsonObject(text)
-  if (!candidate) return null
-
-  try {
-    const parsed = JSON.parse(candidate) as Record<string, unknown>
-    const output = parsed.type === 'complete' && 'output' in parsed ? parsed.output : parsed
-    return schema.parse(output)
-  } catch {
-    return null
-  }
-}
-
 function buildBacktestSkillContext(params: {
   strategy: TraderStrategy
   skillId: string
@@ -544,9 +520,15 @@ async function runTraderBacktestStage<T>(params: {
   }
   stageContext?: Record<string, unknown>
 }) {
-  await setSessionSkill(params.session, params.skillId)
-  const result = await params.engine.askWithSession(params.prompt, params.session, {
-    systemPrompt: buildTraderSystemPrompt(params.strategy),
+  return executeStructuredAgentSkill({
+    runtime: params.engine,
+    session: params.session,
+    skillId: params.skillId,
+    task: params.prompt,
+    schema: params.schema,
+    askOptions: {
+      systemPrompt: buildTraderSystemPrompt(params.strategy),
+    },
     historyPreamble: 'The following is the prior structured skill-loop history for this backtest run.',
     maxHistoryEntries: 30,
     skillContext: buildBacktestSkillContext({
@@ -560,11 +542,6 @@ async function runTraderBacktestStage<T>(params: {
       stageContext: params.stageContext,
     }),
   })
-  const output = parseStageOutput(result.text, params.schema)
-  if (!output) {
-    throw new Error(`Backtest skill ${params.skillId} did not return a valid completion payload`)
-  }
-  return { output, rawText: result.text }
 }
 
 function buildBacktestStage(params: {

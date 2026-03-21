@@ -4,7 +4,7 @@ import type { EngineContext } from './types.js'
 import type { ToolCenter, ToolInventoryItem } from './tool-center.js'
 import { listSkillPacks, type SkillRuntime } from '../skills/registry.js'
 import { listSkillScripts } from '../skills/script-registry.js'
-import { setSessionSkill } from '../skills/session-skill.js'
+import { invokeAgentSkill } from '../skills/service.js'
 import type { SessionEntry } from './session.js'
 
 export interface CapabilityInventoryItem {
@@ -183,11 +183,13 @@ export async function createMcpCapabilityTools(ctx: EngineContext): Promise<Reco
       }),
       execute: async ({ task, invocation }) => {
         const session = new MemorySessionStore(`mcp/${skill.id}/${crypto.randomUUID().slice(0, 8)}`)
-        await setSessionSkill(session as never, skill.id)
-        const stream = ctx.runtimeCatalog.trader.askWithSession(task, session as never, {
+        const result = await invokeAgentSkill({
+          runtime: ctx.runtimeCatalog.trader,
+          session: session as never,
+          skillId: skill.id,
+          task,
           skillContext: invocation ?? {},
         })
-        const result = await stream
         return {
           skillId: skill.id,
           text: result.text,
