@@ -84,3 +84,7 @@ agentSkillRuntime?: AgentSkillRuntime | null
   handlers.push(createProviderRouteEngineHandler(params.agentCenter))
   return handlers
 }
+export function createProviderRouteOnlySessionHandlers(agentCenter: AgentCenter): EngineSessionHandler[] {
+  return [createProviderRouteEngineHandler(agentCenter)]
+}
+

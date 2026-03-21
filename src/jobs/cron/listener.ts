@@ -13,7 +13,8 @@
  */
 
 import type { EventLog, EventLogEntry } from '../../core/event-log.js'
-import type { Engine } from '../../core/engine.js'
+import type { EngineAskOptions } from '../../core/engine.js'
+import type { StreamableResult } from '../../core/ai-provider.js'
 import { SessionStore } from '../../core/session.js'
 import type { ConnectorCenter } from '../../core/connector-center.js'
 import type { CronFirePayload } from './engine.js'
@@ -69,10 +70,14 @@ export function parseCronResponse(raw: string): ParsedCronResponse {
 
 // ==================== Types ====================
 
+export interface JobSessionRuntime {
+  askWithSession(prompt: string, session: SessionStore, opts?: EngineAskOptions): StreamableResult
+}
+
 export interface CronListenerOpts {
   connectorCenter: ConnectorCenter
   eventLog: EventLog
-  engine: Engine
+  runtime: JobSessionRuntime
   /** Optional: inject a session for testing. Otherwise creates a dedicated cron session. */
   session?: SessionStore
 }
@@ -85,7 +90,7 @@ export interface CronListener {
 // ==================== Factory ====================
 
 export function createCronListener(opts: CronListenerOpts): CronListener {
-  const { connectorCenter, eventLog, engine } = opts
+  const { connectorCenter, eventLog, runtime } = opts
   const session = opts.session ?? new SessionStore('cron/default')
 
   let unsubscribe: (() => void) | null = null
@@ -113,7 +118,7 @@ export function createCronListener(opts: CronListenerOpts): CronListener {
 
     try {
       // Ask the AI engine with the cron payload
-      const result = await engine.askWithSession(payload.payload, session, {
+      const result = await runtime.askWithSession(payload.payload, session, {
         historyPreamble: 'The following is the recent cron session conversation. This is an automated cron job execution.',
       })
 

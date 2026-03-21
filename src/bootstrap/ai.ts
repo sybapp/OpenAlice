@@ -11,7 +11,7 @@ import { Engine } from '../core/engine.js'
 import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
-import { createDefaultEngineSessionHandlers } from '../core/engine-runtime.js'
+import { createDefaultEngineSessionHandlers, createProviderRouteOnlySessionHandlers } from '../core/engine-runtime.js'
 import { AgentSkillRuntime } from '../skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
@@ -27,6 +27,7 @@ import type { OhlcvStore } from '../domains/technical-analysis/indicator-kit/ind
 
 export interface AIResult {
   engine: Engine
+  jobEngine: Engine
   agentCenter: AgentCenter
   router: ProviderRouter
   backtest: BacktestRunManager
@@ -76,9 +77,12 @@ export function initAIProviders(
       agentSkillRuntime,
     }),
   })
+  const jobEngine = new Engine({
+    sessionHandlers: createProviderRouteOnlySessionHandlers(agentCenter),
+  })
 
   const backtestStorage = createBacktestStorage()
   const backtest = createBacktestRunManager({ storage: backtestStorage, engine })
 
-  return { engine, agentCenter, router, backtest }
+  return { engine, jobEngine, agentCenter, router, backtest }
 }

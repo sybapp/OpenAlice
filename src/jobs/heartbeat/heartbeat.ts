@@ -16,7 +16,8 @@
  */
 
 import type { EventLog, EventLogEntry } from '../../core/event-log.js'
-import type { Engine } from '../../core/engine.js'
+import type { EngineAskOptions } from '../../core/engine.js'
+import type { StreamableResult } from '../../core/ai-provider.js'
 import { SessionStore } from '../../core/session.js'
 import type { ConnectorCenter } from '../../core/connector-center.js'
 import { writeConfigSection } from '../../core/config.js'
@@ -91,12 +92,16 @@ CONTENT: BTC just dropped 8% in the last hour — now at $87,200. This may trigg
 
 // ==================== Types ====================
 
+export interface HeartbeatSessionRuntime {
+  askWithSession(prompt: string, session: SessionStore, opts?: EngineAskOptions): StreamableResult
+}
+
 export interface HeartbeatOpts {
   config: HeartbeatConfig
   connectorCenter: ConnectorCenter
   cronEngine: CronEngine
   eventLog: EventLog
-  engine: Engine
+  runtime: HeartbeatSessionRuntime
   /** Optional: inject a session for testing. */
   session?: SessionStore
   /** Inject clock for testing. */
@@ -115,7 +120,7 @@ export interface Heartbeat {
 // ==================== Factory ====================
 
 export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
-  const { config, connectorCenter, cronEngine, eventLog, engine } = opts
+  const { config, connectorCenter, cronEngine, eventLog, runtime } = opts
   const session = opts.session ?? new SessionStore('heartbeat')
   const now = opts.now ?? Date.now
 
@@ -149,7 +154,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
 
       // 2. Call AI
       const guardedPrompt = appendRuntimeGuard(payload.payload)
-      const result = await engine.askWithSession(guardedPrompt, session, {
+      const result = await runtime.askWithSession(guardedPrompt, session, {
         historyPreamble: 'The following is the recent heartbeat conversation history.',
       })
       const durationMs = now() - startMs
