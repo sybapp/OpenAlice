@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   createTraderWorkflowAgentStageDefinitions,
-  resolveTradeExecuteScriptRoute,
   interpretTraderWorkflowStageTransitions,
+  resolveTradeExecuteScriptRoute,
+  resolveTraderWorkflowStageRoute,
 } from './workflow-stages.js'
 
 const strategy = {
@@ -37,6 +38,42 @@ function makeStages() {
 }
 
 describe('trader workflow stage transitions', () => {
+  it('routes empty market scans to a terminal skip', () => {
+    const stages = makeStages()
+    const definition = stages.marketScan({
+      frontalLobe: '',
+      warnings: [],
+      exposurePercent: 0,
+      totalPositions: 0,
+      sourceSnapshots: [],
+    })
+
+    const route = resolveTraderWorkflowStageRoute(definition, {
+      output: {
+        candidates: [],
+        evaluations: [{
+          source: 'ccxt-main',
+          symbol: 'BTC/USDT:USDT',
+          verdict: 'skip',
+          reason: 'No clean setup.',
+        }],
+        summary: '',
+      },
+      rawText: 'raw scan',
+      eventData: { summary: '' },
+    })
+
+    expect(route).toMatchObject({
+      status: 'skipped',
+      decision: 'stop-run',
+      runnerResult: {
+        status: 'skip',
+        reason: 'BTC/USDT:USDT on ccxt-main: No clean setup.',
+        rawText: 'raw scan',
+      },
+    })
+  })
+
   it('routes trade thesis no-trade outcomes to the next candidate', () => {
     const stages = makeStages()
     const definition = stages.tradeThesis(

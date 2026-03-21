@@ -308,6 +308,50 @@ describe('runTraderJob', () => {
     })
   })
 
+  it('records a skipped market-scan event with deterministic workflow metadata', async () => {
+    mocks.getTraderStrategy.mockResolvedValue({
+      ...baseStrategy,
+      id: 'mean-revert',
+      label: 'Mean Revert',
+      universe: { asset: 'crypto', symbols: ['BTC/USDT:USDT'] },
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    deps.engine.askWithSession.mockResolvedValueOnce(complete({
+      candidates: [],
+      evaluations: [{
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        verdict: 'skip',
+        reason: 'No confirmed rejection candle on 5m.',
+      }],
+      summary: '',
+    }))
+
+    await runTraderJob({
+      jobId: 'job-empty-scan-stage-event',
+      strategyId: 'mean-revert',
+      session: { id: 'session-empty-scan-stage-event' } as SessionStore,
+      runId: 'run-empty-scan-stage-event',
+    }, deps)
+
+    const stageEvents = deps.eventLog.append.mock.calls
+      .filter(([type]) => type === 'trader.stage')
+      .map(([, payload]) => payload)
+
+    expect(stageEvents).toHaveLength(1)
+    expect(stageEvents[0]).toMatchObject({
+      runId: 'run-empty-scan-stage-event',
+      stage: 'market-scan',
+      status: 'skipped',
+      data: {
+        previousWorkflowState: 'boot',
+        workflowState: 'market-scan',
+        nextAllowedStages: ['trade-thesis'],
+      },
+    })
+  })
+
   it('rejects an all-empty market-scan payload', async () => {
     mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
     const deps = makeDeps()
