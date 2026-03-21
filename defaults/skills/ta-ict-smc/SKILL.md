@@ -1,7 +1,7 @@
 ---
 name: ta-ict-smc
 description: Use this skill for ICT or SMC framing. It should request structure scripts, then explain liquidity, FVGs, BOS, CHOCH, premium/discount, and invalidation.
-runtime: script-loop
+runtime: agent-skill
 user-invocable: true
 scripts:
   - analysis-ict-smc

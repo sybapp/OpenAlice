@@ -20,7 +20,7 @@ import {
   createDefaultEngineSessionHandlers,
   type EngineSessionHandler,
   type EngineSessionRouteOptions,
-  type SkillLoopRuntime,
+  type AgentSkillRuntime,
 } from './engine-runtime.js'
 
 // ==================== Types ====================
@@ -32,8 +32,8 @@ export interface EngineOpts {
   agentCenter?: AgentCenter
   /** Handles slash-style local commands before provider routing when using the default pipeline. */
   commandRouter?: LocalCommandRouter
-  /** Handles AgentSkill/script-loop execution when using the default pipeline. */
-  skillLoopRunner?: SkillLoopRuntime
+  /** Handles AgentSkill execution when using the default pipeline. */
+  agentSkillRuntime?: AgentSkillRuntime
 }
 
 export interface EngineResult {
@@ -62,7 +62,7 @@ export class Engine {
     this.sessionHandlers = createDefaultEngineSessionHandlers({
       agentCenter: opts.agentCenter,
       commandRouter: opts.commandRouter,
-      skillLoopRunner: opts.skillLoopRunner ?? null,
+      agentSkillRuntime: opts.agentSkillRuntime ?? null,
     })
   }
 

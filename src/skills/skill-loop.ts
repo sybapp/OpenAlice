@@ -234,23 +234,27 @@ function renderCompletion(skill: SkillPack, output: unknown): EngineResult {
   return { text: JSON.stringify(output, null, 2), media: [] }
 }
 
-export class SkillLoopRunner {
+export class AgentSkillRuntime {
   constructor(
     private agentCenter: AgentCenter,
     private baseContext: Omit<SkillScriptContext, 'invocation'>,
   ) {}
 
-  async getActiveScriptSkill(session: SessionStore): Promise<SkillPack | null> {
+  async getActiveAgentSkill(session: SessionStore): Promise<SkillPack | null> {
     const skillId = await getSessionSkillId(session)
     if (!skillId) return null
     const skill = await getSkillPack(skillId)
-    return skill?.runtime === 'script-loop' ? skill : null
+    return skill?.runtime === 'agent-skill' ? skill : null
+  }
+
+  async getActiveScriptSkill(session: SessionStore): Promise<SkillPack | null> {
+    return this.getActiveAgentSkill(session)
   }
 
   async run(prompt: string, session: SessionStore, opts?: EngineAskOptions): Promise<EngineResult> {
-    const skill = await this.getActiveScriptSkill(session)
+    const skill = await this.getActiveAgentSkill(session)
     if (!skill) {
-      throw new Error('No active script-loop skill')
+      throw new Error('No active agent-skill')
     }
 
     const completionSchema = getCompletionSchema(skill.outputSchema)
@@ -357,3 +361,5 @@ export class SkillLoopRunner {
     throw new Error(`Skill loop exceeded ${maxIterations} iterations for ${skill.id}`)
   }
 }
+
+export { AgentSkillRuntime as SkillLoopRunner }

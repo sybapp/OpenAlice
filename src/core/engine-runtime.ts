@@ -23,8 +23,8 @@ export interface EngineSessionHandler {
   handleStateless?(prompt: string): Promise<ProviderResult>
 }
 
-export interface SkillLoopRuntime {
-  getActiveScriptSkill(session: SessionStore): Promise<unknown>
+export interface AgentSkillRuntime {
+  getActiveAgentSkill(session: SessionStore): Promise<unknown>
   run(prompt: string, session: SessionStore, opts?: EngineSessionRouteOptions): Promise<ProviderResult>
 }
 
@@ -46,13 +46,13 @@ export function createLocalCommandEngineHandler(commandRouter: LocalCommandRoute
   }
 }
 
-export function createSkillLoopEngineHandler(skillLoopRunner: SkillLoopRuntime): EngineSessionHandler {
+export function createAgentSkillEngineHandler(agentSkillRuntime: AgentSkillRuntime): EngineSessionHandler {
   return {
     id: 'agent-skill',
     async handle({ prompt, session, opts }) {
-      const activeSkill = await skillLoopRunner.getActiveScriptSkill(session)
+      const activeSkill = await agentSkillRuntime.getActiveAgentSkill(session)
       if (!activeSkill) return null
-      return streamFromResult(skillLoopRunner.run(prompt, session, opts))
+      return streamFromResult(agentSkillRuntime.run(prompt, session, opts))
     },
   }
 }
@@ -73,13 +73,13 @@ export function createProviderRouteEngineHandler(agentCenter: AgentCenter): Engi
 export function createDefaultEngineSessionHandlers(params: {
   agentCenter: AgentCenter
   commandRouter: LocalCommandRouter
-  skillLoopRunner?: SkillLoopRuntime | null
+agentSkillRuntime?: AgentSkillRuntime | null
 }): EngineSessionHandler[] {
   const handlers: EngineSessionHandler[] = [
     createLocalCommandEngineHandler(params.commandRouter),
   ]
-  if (params.skillLoopRunner) {
-    handlers.push(createSkillLoopEngineHandler(params.skillLoopRunner))
+  if (params.agentSkillRuntime) {
+    handlers.push(createAgentSkillEngineHandler(params.agentSkillRuntime))
   }
   handlers.push(createProviderRouteEngineHandler(params.agentCenter))
   return handlers

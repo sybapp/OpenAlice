@@ -2,7 +2,7 @@ import { tool, type Tool } from 'ai'
 import { z } from 'zod'
 import type { EngineContext } from './types.js'
 import type { ToolCenter, ToolInventoryItem } from './tool-center.js'
-import { listSkillPacks } from '../skills/registry.js'
+import { listSkillPacks, type SkillRuntime } from '../skills/registry.js'
 import { listSkillScripts } from '../skills/script-registry.js'
 import { setSessionSkill } from '../skills/session-skill.js'
 import type { SessionEntry } from './session.js'
@@ -14,7 +14,7 @@ export interface CapabilityInventoryItem {
 
 export interface SkillCapabilityInventoryItem extends CapabilityInventoryItem {
   label: string
-  runtime: 'tool-loop' | 'script-loop'
+  runtime: SkillRuntime
   userInvocable: boolean
   stage?: string
   resources: string[]
@@ -104,8 +104,8 @@ export function getMcpSkillToolName(skillId: string): string {
   return `skill__${skillId}`
 }
 
-function isInvocableScriptLoopSkill(skill: { runtime: 'tool-loop' | 'script-loop'; userInvocable: boolean }): boolean {
-  return skill.runtime === 'script-loop' && skill.userInvocable
+function isInvocableAgentSkill(skill: { runtime: SkillRuntime; userInvocable: boolean }): boolean {
+  return skill.runtime === 'agent-skill' && skill.userInvocable
 }
 
 function buildScriptUsageMap(skills: Awaited<ReturnType<typeof listSkillPacks>>) {
@@ -152,7 +152,7 @@ export async function buildCapabilityInventory(toolCenter: ToolCenter): Promise<
       kind: 'system-tool' as const,
     })),
     ...skillItems
-      .filter(isInvocableScriptLoopSkill)
+      .filter(isInvocableAgentSkill)
       .map((skill) => ({
         id: getMcpSkillToolName(skill.id),
         description: skill.description,
@@ -173,7 +173,7 @@ export async function createMcpCapabilityTools(ctx: EngineContext): Promise<Reco
   const result: Record<string, Tool> = {}
 
   for (const skill of skills) {
-    if (!isInvocableScriptLoopSkill(skill)) continue
+    if (!isInvocableAgentSkill(skill)) continue
 
     result[getMcpSkillToolName(skill.id)] = tool({
       description: skill.description,

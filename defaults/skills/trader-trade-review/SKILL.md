@@ -1,7 +1,7 @@
 ---
 name: trader-trade-review
 description: Use this stage skill to summarize recent trading outcomes and produce a Brain update for the next run.
-runtime: script-loop
+runtime: agent-skill
 stage: trade-review
 scripts:
   - trader-review-summaries

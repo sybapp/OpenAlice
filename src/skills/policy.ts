@@ -57,9 +57,9 @@ function buildToolPolicyText(skill: SkillPack): string {
 }
 
 function buildScriptPolicyText(skill: SkillPack): string {
-  if (skill.runtime !== 'script-loop') return ''
+  if (skill.runtime !== 'agent-skill') return ''
   const parts: string[] = [
-    'Runtime: script-loop.',
+    'Runtime: agent-skill.',
     'Do not call OpenAlice business tools directly.',
     'Request supporting resources and allowed scripts through the structured loop envelopes supplied by the caller.',
   ]
@@ -98,7 +98,7 @@ export function buildSkillPromptText(skill: SkillPack | null | undefined): strin
 
 export function getSkillToolPolicy(skill: SkillPack | null | undefined): ToolPolicy | undefined {
   if (!skill) return undefined
-  if (skill.runtime === 'script-loop') {
+  if (skill.runtime === 'agent-skill') {
     return {
       deny: ['*'],
     }
@@ -115,7 +115,7 @@ function patternMatchesInventory(pattern: string, inventory: ToolInventoryItem[]
 }
 
 export function validateSkillToolReferences(skill: SkillPack, inventory: ToolInventoryItem[]): string[] {
-  if (skill.runtime === 'script-loop') return []
+  if (skill.runtime === 'agent-skill') return []
   const warnings: string[] = []
   for (const [field, patterns] of [
     ['preferredTools', skill.preferredTools],

@@ -1,7 +1,7 @@
 ---
 name: trader-trade-plan
 description: Use this stage skill to convert an approved thesis into a deterministic order plan and explicit commit message.
-runtime: script-loop
+runtime: agent-skill
 stage: trade-plan
 scripts:
   - trader-account-state

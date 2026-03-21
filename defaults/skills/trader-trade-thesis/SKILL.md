@@ -1,7 +1,7 @@
 ---
 name: trader-trade-thesis
 description: Use this stage skill to request analysis or research scripts for one candidate symbol, then produce a structured trade thesis with scenario, bias, rationale, and invalidation.
-runtime: script-loop
+runtime: agent-skill
 stage: trade-thesis
 scripts:
   - trader-account-state

@@ -19,11 +19,19 @@ function getDefaultSkillsDir(): string {
   return resolve('defaults/skills')
 }
 
+export const SKILL_RUNTIMES = ['tool-loop', 'agent-skill'] as const
+export type SkillRuntime = (typeof SKILL_RUNTIMES)[number]
+
+export function normalizeSkillRuntime(runtime: FrontmatterValue | undefined): SkillRuntime {
+  const value = asNonEmptyString(runtime)
+  return value === 'script-loop' || value === 'agent-skill' ? 'agent-skill' : 'tool-loop'
+}
+
 const normalizedSkillSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string().min(1),
-  runtime: z.enum(['tool-loop', 'script-loop']).default('tool-loop'),
+  runtime: z.enum(SKILL_RUNTIMES).default('tool-loop'),
   userInvocable: z.boolean().default(true),
   stage: z.string().optional(),
   preferredTools: z.array(z.string()).default([]),
@@ -265,7 +273,7 @@ async function normalizePluginSkill(frontmatter: FrontmatterObject, body: string
   const compatibility = asObject(frontmatter.compatibility)
   const compatibilityTools = compatibility ? compatibility.tools : undefined
   const compatibilityToolObject = asObject(compatibilityTools)
-  const runtime = asNonEmptyString(frontmatter.runtime) === 'script-loop' ? 'script-loop' : 'tool-loop'
+  const runtime = normalizeSkillRuntime(frontmatter.runtime)
   const whenToUse = extractSection(body, 'whenToUse') || extractSection(body, 'when to use')
   const instructions = extractSection(body, 'instructions') || extractSection(body, 'instruction') || body.trim()
   const safetyNotes = extractSection(body, 'safetyNotes') || extractSection(body, 'safety notes')
@@ -320,7 +328,7 @@ async function normalizeLegacySkill(frontmatter: FrontmatterObject, body: string
     id: frontmatter.id,
     label: frontmatter.label,
     description: frontmatter.description,
-    runtime: asNonEmptyString(frontmatter.runtime) === 'script-loop' ? 'script-loop' : 'tool-loop',
+    runtime: normalizeSkillRuntime(frontmatter.runtime),
     userInvocable: asBoolean(frontmatter['user-invocable'], true),
     stage: asNonEmptyString(frontmatter.stage),
     preferredTools: asStringArray(frontmatter.preferredTools),
@@ -474,7 +482,7 @@ function buildScriptSkillTemplate(params: {
     '---',
     `name: ${params.id}`,
     `description: ${params.description}`,
-    'runtime: script-loop',
+    'runtime: agent-skill',
     ...(params.stage ? [`stage: ${params.stage}`] : []),
     `user-invocable: ${params.userInvocable ?? true}`,
     'scripts:',

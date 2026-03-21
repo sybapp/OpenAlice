@@ -1,7 +1,7 @@
 ---
 name: trader-risk-check
 description: Use this stage skill to decide whether a thesis can proceed under the strategy risk budget and current account exposure.
-runtime: script-loop
+runtime: agent-skill
 stage: risk-check
 scripts:
   - trader-account-state

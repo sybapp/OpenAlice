@@ -1,7 +1,7 @@
 ---
 name: trader-trade-execute
 description: Use this stage skill to confirm or abort an already-built deterministic trade plan. The actual execution is performed by a separate script after confirmation.
-runtime: script-loop
+runtime: agent-skill
 stage: trade-execute
 scripts: []
 outputSchema: TraderTradeExecute

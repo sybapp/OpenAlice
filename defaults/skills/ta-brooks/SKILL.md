@@ -1,7 +1,7 @@
 ---
 name: ta-brooks
 description: Use this skill for Brooks-style price action reading. It should request deterministic scripts for market structure, then explain trend, range, breakout, and invalidation in plain language.
-runtime: script-loop
+runtime: agent-skill
 user-invocable: true
 scripts:
   - analysis-brooks

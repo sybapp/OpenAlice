@@ -1,7 +1,7 @@
 ---
 name: ta-brooks-ict-smc
 description: Use this skill for confluence analysis between Brooks price action and ICT/SMC structure. It should request both structure scripts, then explain where the frameworks agree or conflict.
-runtime: script-loop
+runtime: agent-skill
 user-invocable: true
 scripts:
   - analysis-brooks

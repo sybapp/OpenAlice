@@ -1,7 +1,7 @@
 ---
 name: trader-market-scan
 description: Use this stage skill to scan the configured universe, request deterministic structure or research scripts, and nominate the best candidate symbols for the current run.
-runtime: script-loop
+runtime: agent-skill
 stage: market-scan
 scripts:
   - trader-account-state

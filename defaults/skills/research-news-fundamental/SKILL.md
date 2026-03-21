@@ -1,7 +1,7 @@
 ---
 name: research-news-fundamental
 description: Use this skill for news, catalyst, and fundamentals-driven research. It should request only the relevant research scripts, then synthesize them into a concise thesis.
-runtime: script-loop
+runtime: agent-skill
 user-invocable: true
 scripts:
   - research-market-search

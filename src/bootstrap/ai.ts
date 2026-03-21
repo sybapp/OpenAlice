@@ -12,7 +12,7 @@ import { AgentCenter } from '../core/agent-center.js'
 import { ProviderRouter } from '../core/ai-provider.js'
 import { createLocalCommandRouter } from '../core/commands/router.js'
 import { createDefaultEngineSessionHandlers } from '../core/engine-runtime.js'
-import { SkillLoopRunner } from '../skills/skill-loop.js'
+import { AgentSkillRuntime } from '../skills/skill-loop.js'
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { ClaudeCodeProvider } from '../ai-providers/claude-code/claude-code-provider.js'
 import { CodexCliProvider } from '../ai-providers/codex-cli/index.js'
@@ -59,7 +59,7 @@ export function initAIProviders(
   const router = new ProviderRouter(vercelProvider, claudeCodeProvider, codexCliProvider)
 
   const agentCenter = new AgentCenter(router)
-  const skillLoopRunner = new SkillLoopRunner(agentCenter, {
+  const agentSkillRuntime = new AgentSkillRuntime(agentCenter, {
     config,
     brain: skillRuntime.brain,
     eventLog: skillRuntime.eventLog,
@@ -73,7 +73,7 @@ export function initAIProviders(
     sessionHandlers: createDefaultEngineSessionHandlers({
       agentCenter,
       commandRouter: createLocalCommandRouter(),
-      skillLoopRunner,
+      agentSkillRuntime,
     }),
   })
 
