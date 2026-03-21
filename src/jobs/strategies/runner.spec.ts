@@ -1219,6 +1219,58 @@ describe('runTraderJob', () => {
     ])
     expect(stageEvents.every((payload: any) => payload.runId === 'run-stage-events')).toBe(true)
     expect(stageEvents.every((payload: any) => payload.data.workflowState === payload.stage)).toBe(true)
+    expect(stageEvents.map((payload: any) => payload.data.previousWorkflowState)).toEqual([
+      'boot',
+      'market-scan',
+      'trade-thesis',
+      'risk-check',
+      'trade-plan',
+      'trade-execute',
+    ])
+    expect(stageEvents.map((payload: any) => payload.data.nextAllowedStages)).toEqual([
+      ['trade-thesis'],
+      ['trade-thesis', 'risk-check'],
+      ['trade-thesis', 'trade-plan'],
+      ['trade-thesis', 'trade-execute'],
+      ['trade-thesis', 'trade-execute-script'],
+      [],
+    ])
+  })
+
+  it('passes the previous workflow state into each stage-agent context', async () => {
+    mocks.getTraderStrategy.mockResolvedValue(baseStrategy)
+    mocks.getSkillScript.mockReturnValue({
+      run: vi.fn(async () => ({
+        commit: { hash: 'abc12345' },
+        pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }], pending: [], rejected: [] },
+        commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 101 }] },
+      })),
+    })
+    const deps = makeDeps()
+    deps.accountManager.getAccount.mockReturnValue(makeAccount())
+    queueHappyPath(deps)
+
+    await runTraderJob({
+      jobId: 'job-stage-context',
+      strategyId: 'momentum',
+      session: { id: 'session-stage-context' } as SessionStore,
+    }, deps)
+
+    const skillContexts = deps.engine.askWithSession.mock.calls.map(([, , options]) => options.skillContext)
+    expect(skillContexts.map((context: any) => context.stage)).toEqual([
+      'market-scan',
+      'trade-thesis',
+      'risk-check',
+      'trade-plan',
+      'trade-execute',
+    ])
+    expect(skillContexts.map((context: any) => context.workflowState)).toEqual([
+      'boot',
+      'market-scan',
+      'trade-thesis',
+      'risk-check',
+      'trade-plan',
+    ])
   })
 })
 

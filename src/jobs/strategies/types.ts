@@ -7,6 +7,7 @@ import type { Config, MarketDataBridge } from '../../core/types.js'
 import type { CronSchedule } from '../cron/engine.js'
 import type { INewsProvider } from '../../domains/research/news-collector/index.js'
 import type { OhlcvStore } from '../../domains/technical-analysis/indicator-kit/index.js'
+import type { AccountInfo, MarketClock, Order, Position } from '../../domains/trading/interfaces.js'
 
 export type TraderAssetClass = 'crypto'
 export type TraderAllowedOrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'take_profit'
@@ -302,6 +303,22 @@ export interface TraderReviewJobPatch {
   enabled?: boolean
   schedule?: CronSchedule
   strategyId?: string
+}
+
+export interface TraderSourceSnapshot {
+  source: string
+  account: AccountInfo | null
+  positions: Position[]
+  orders: Order[]
+  marketClock?: MarketClock
+}
+
+export interface TraderPreflightSnapshot {
+  frontalLobe: string
+  warnings: string[]
+  exposurePercent: number
+  totalPositions: number
+  sourceSnapshots: TraderSourceSnapshot[]
 }
 
 export type TraderWorkflowStage =
