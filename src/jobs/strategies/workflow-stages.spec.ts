@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildTradeExecutionOutcome,
+  buildTradeExecutionRunnerResult,
   createTraderWorkflowAgentStageDefinitions,
   interpretTraderWorkflowStageTransitions,
+  resolveRiskSnapshotFailureRouteForWarnings,
   resolveTraderWorkflowStageRoute,
 } from './workflow-stages.js'
 
@@ -255,5 +258,95 @@ describe('trader workflow stage transitions', () => {
         reason: 'Execution failed: 1 order(s) were rejected.',
       },
     })
+  })
+
+  it('builds a risk snapshot failure route only when source availability warnings exist', () => {
+    const thesis = {
+      status: 'thesis_ready',
+      source: 'ccxt-main',
+      symbol: 'BTC/USDT:USDT',
+      bias: 'long',
+      chosenScenario: 'breakout',
+      alternateScenario: 'range failure',
+      rationale: 'Trend is aligned.',
+      invalidation: ['lost level'],
+      confidence: 0.74,
+      contextNotes: [],
+    } as const
+
+    expect(resolveRiskSnapshotFailureRouteForWarnings(
+      thesis,
+      { frontalLobe: '', warnings: ['Clock drift warning only'], exposurePercent: 0, totalPositions: 0, sourceSnapshots: [] },
+      'raw thesis',
+    )).toBeNull()
+
+    expect(resolveRiskSnapshotFailureRouteForWarnings(
+      thesis,
+      { frontalLobe: '', warnings: ['Configured source not available: ccxt-main'], exposurePercent: 0, totalPositions: 0, sourceSnapshots: [] },
+      'raw thesis',
+    )).toMatchObject({
+      status: 'failed',
+      decision: 'stop-run',
+      runnerResult: {
+        status: 'skip',
+        reason: 'Configured source not available: ccxt-main',
+        rawText: 'raw thesis',
+      },
+    })
+  })
+
+  it('builds the final trade runner result from execution outcome', () => {
+    const outcome = buildTradeExecutionOutcome({
+      status: 'plan_ready',
+      source: 'ccxt-main',
+      symbol: 'BTC/USDT:USDT',
+      chosenScenario: 'breakout',
+      rationale: 'Structured plan.',
+      invalidation: ['lost level'],
+      brainUpdate: 'Stay disciplined.',
+      commitMessage: 'momentum: breakout BTC/USDT:USDT',
+      orders: [{ aliceId: 'btc-1', symbol: 'BTC/USDT:USDT', side: 'buy', type: 'stop', qty: 1, stopPrice: 100, timeInForce: 'day' }],
+    }, {
+      commit: { hash: 'abc12345' },
+      pushed: { filled: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }], pending: [], rejected: [] },
+      commitDetails: { results: [{ status: 'filled', orderId: 'ord-1', filledPrice: 100 }] },
+    }, 'Confirm execution.')
+
+    const result = buildTradeExecutionRunnerResult({
+      strategyId: 'momentum',
+      plan: {
+        status: 'plan_ready',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'breakout',
+        rationale: 'Structured plan.',
+        invalidation: ['lost level'],
+        brainUpdate: 'Stay disciplined.',
+        commitMessage: 'momentum: breakout BTC/USDT:USDT',
+        orders: [{ aliceId: 'btc-1', symbol: 'BTC/USDT:USDT', side: 'buy', type: 'stop', qty: 1, stopPrice: 100, timeInForce: 'day' }],
+      },
+      outcome,
+      brainUpdate: 'Execute if structure holds.',
+      rawText: '{"commit":{"hash":"abc12345"}}',
+    })
+
+    expect(result).toMatchObject({
+      status: 'done',
+      reason: 'Confirm execution.',
+      decision: {
+        status: 'trade',
+        strategyId: 'momentum',
+        source: 'ccxt-main',
+        symbol: 'BTC/USDT:USDT',
+        chosenScenario: 'breakout',
+        rationale: 'Confirm execution.',
+        brainUpdate: 'Execute if structure holds.',
+      },
+      rawText: '{"commit":{"hash":"abc12345"}}',
+    })
+    expect(result.decision?.actionsTaken).toEqual([
+      'Executed deterministic trade plan: momentum: breakout BTC/USDT:USDT (abc12345)',
+      'BUY stop BTC/USDT:USDT qty=1 stop=100 -> filled @100 (ord-1)',
+    ])
   })
 })
