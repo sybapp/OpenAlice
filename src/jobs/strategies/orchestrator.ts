@@ -19,8 +19,9 @@ import {
 import {
   buildTraderSkipResult,
   createTraderWorkflowAgentStageDefinitions,
-  interpretTraderWorkflowStageTransitions,
+  resolveEmptyMarketScanReason,
   resolveHardRiskBudgetRoute,
+  resolveTraderWorkflowStageRoute,
   resolveRiskSnapshotFailureRoute,
   resolveTradeExecuteScriptRoute,
   TRADER_SKILLS,
@@ -157,23 +158,6 @@ function externalizeRunnerResult(
     ...replaceStringsDeep(result, (text) => replaceSourceReferencesForDisplay(text, presentation)),
     decision: result.decision ? externalizeSource(result.decision, presentation) : undefined,
   }
-}
-
-function summarizeMarketEvaluations(
-  evaluations: Array<{ source: string; symbol: string; reason: string }>,
-): string {
-  const entries = evaluations
-    .map((evaluation) => `${evaluation.symbol} on ${evaluation.source}: ${evaluation.reason.trim()}`)
-    .filter((entry) => !entry.endsWith(':'))
-  return entries.join(' ')
-}
-
-function resolveEmptyMarketScanReason(strategy: TraderStrategy, summary: string, evaluations: Array<{ source: string; symbol: string; reason: string }>): string {
-  const normalizedSummary = summary.trim()
-  if (normalizedSummary) return normalizedSummary
-  const evaluationSummary = summarizeMarketEvaluations(evaluations)
-  if (evaluationSummary) return evaluationSummary
-  return 'No tradable candidate found.'
 }
 
 function clampPercent(value: number): number {
@@ -458,21 +442,22 @@ class TraderWorkflowRun {
     }
 
     const scan = await this.runMarketScan(snapshot)
-    if (scan.candidates.length === 0) {
+    if (scan.route && scan.route.decision !== 'advance') {
       return this.externalize({
-        status: 'skip',
-        reason: resolveEmptyMarketScanReason(this.strategy, scan.summary, scan.evaluations),
-        rawText: scan.rawText,
+        ...(scan.route.runnerResult ?? buildTraderSkipResult(
+          resolveEmptyMarketScanReason(this.strategy, scan.output.summary, scan.output.evaluations),
+          scan.output.rawText,
+        )),
       })
     }
 
     let lastSkip: TraderRunnerResult = {
       status: 'skip',
-      reason: scan.summary || 'No tradable candidate survived the pipeline.',
-      rawText: scan.rawText,
+      reason: scan.output.summary || 'No tradable candidate survived the pipeline.',
+      rawText: scan.output.rawText,
     }
 
-    for (const candidate of scan.candidates) {
+    for (const candidate of scan.output.candidates) {
       const result = await this.runCandidatePipeline(candidate, snapshot)
       if (result.decision === 'done' || result.decision === 'stop-run') {
         return this.externalize(result.result)
@@ -533,17 +518,12 @@ class TraderWorkflowRun {
     definition: TraderWorkflowAgentStageDefinition<TPublic, TInternal>,
     result: TraderStageRunResult<TInternal>,
   ): Promise<TraderWorkflowStageTransitionRoute<Record<string, unknown>> | null> {
-    if (!definition.transitions) return null
-
-    const route = interpretTraderWorkflowStageTransitions(
-      definition.stage,
-      result.output,
-      {
-        rawText: result.rawText,
-        eventData: attachAgentTrace(result.output, result.trace),
-      },
-      definition.transitions,
-    )
+    const route = resolveTraderWorkflowStageRoute(definition, {
+      output: result.output,
+      rawText: result.rawText,
+      eventData: attachAgentTrace(result.output, result.trace),
+    })
+    if (!route) return null
     await this.applyStageRoute(definition.stage, route)
     return route
   }
@@ -587,15 +567,13 @@ class TraderWorkflowRun {
   }
 
   private async runMarketScan(preflightSnapshot: TraderPreflightSnapshot) {
-    const scan = await this.runAgentStage(this.stages.marketScan(preflightSnapshot))
-    const scanOutput = { ...scan.output, rawText: scan.rawText }
-
-    if (scanOutput.candidates.length === 0) {
-      await this.appendStageEvent('market-scan', 'skipped', attachAgentTrace(scanOutput, scan.trace))
-      return scanOutput
+    const definition = this.stages.marketScan(preflightSnapshot)
+    const scan = await this.runAgentStage(definition)
+    const route = await this.routeAgentStage(definition, scan)
+    return {
+      output: { ...scan.output, rawText: scan.rawText },
+      route,
     }
-    await this.appendStageEvent('market-scan', 'completed', attachAgentTrace(scanOutput, scan.trace))
-    return scanOutput
   }
 
   private async runCandidatePipeline(
@@ -635,15 +613,14 @@ class TraderWorkflowRun {
 
     const planDefinition = this.stages.tradePlan(thesisOutput, riskOutput)
     const plan = await this.runAgentStage(planDefinition)
-    const planRoute = interpretTraderWorkflowStageTransitions(
-      planDefinition.stage,
-      plan.output,
-      {
-        rawText: plan.rawText,
-        eventData: attachAgentTrace(plan.output, plan.trace),
-      },
-      planDefinition.transitions ?? [],
-    )
+    const planRoute = resolveTraderWorkflowStageRoute(planDefinition, {
+      output: plan.output,
+      rawText: plan.rawText,
+      eventData: attachAgentTrace(plan.output, plan.trace),
+    })
+    if (!planRoute) {
+      throw new Error('Trade plan stage is missing workflow transitions.')
+    }
     if (planRoute.decision !== 'advance') {
       await this.applyStageRoute(planDefinition.stage, planRoute)
       return {

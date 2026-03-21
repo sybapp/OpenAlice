@@ -91,6 +91,21 @@ export function buildTraderSkipResult(reason: string, rawText: string): TraderRu
   }
 }
 
+export function resolveEmptyMarketScanReason(
+  _strategy: TraderStrategy,
+  summary: string,
+  evaluations: Array<{ source: string; symbol: string; reason: string }>,
+): string {
+  const normalizedSummary = summary.trim()
+  if (normalizedSummary) return normalizedSummary
+  const evaluationSummary = evaluations
+    .map((evaluation) => `${evaluation.symbol} on ${evaluation.source}: ${evaluation.reason.trim()}`)
+    .filter((entry) => !entry.endsWith(':'))
+    .join(' ')
+  if (evaluationSummary) return evaluationSummary
+  return 'No tradable candidate found.'
+}
+
 export function interpretTraderWorkflowStageTransitions<TOutput, TData>(
   stage: TraderWorkflowStage,
   output: TOutput,
@@ -102,6 +117,22 @@ export function interpretTraderWorkflowStageTransitions<TOutput, TData>(
     throw new Error(`No trader workflow transition matched stage ${stage}.`)
   }
   return rule.resolve(output, context)
+}
+
+export function resolveTraderWorkflowStageRoute<TPublic, TInternal extends Record<string, unknown>, TData>(
+  definition: Pick<TraderWorkflowAgentStageDefinition<TPublic, TInternal>, 'stage' | 'transitions'>,
+  result: { output: TInternal; rawText: string; eventData: TData },
+): TraderWorkflowStageTransitionRoute<TData> | null {
+  if (!definition.transitions) return null
+  return interpretTraderWorkflowStageTransitions(
+    definition.stage,
+    result.output,
+    {
+      rawText: result.rawText,
+      eventData: result.eventData,
+    },
+    definition.transitions,
+  )
 }
 
 export function resolveRiskSnapshotFailureRoute(
@@ -313,6 +344,28 @@ export function createTraderWorkflowAgentStageDefinitions(ctx: TraderWorkflowSta
           evaluations: output.evaluations.map((evaluation) => ctx.replaceInternalStrings(ctx.toInternalSource(evaluation))),
         }),
         validate: (output) => validateMarketScanOutput(ctx.strategy, output),
+        transitions: [
+          {
+            when: (output) => output.candidates.length === 0,
+            resolve: (output, routeContext) => ({
+              status: 'skipped',
+              decision: 'stop-run',
+              eventData: routeContext.eventData,
+              runnerResult: buildTraderSkipResult(
+                resolveEmptyMarketScanReason(ctx.strategy, output.summary, output.evaluations),
+                routeContext.rawText,
+              ),
+            }),
+          },
+          {
+            when: () => true,
+            resolve: (_output, routeContext) => ({
+              status: 'completed',
+              decision: 'advance',
+              eventData: routeContext.eventData,
+            }),
+          },
+        ],
       }
     },
 
