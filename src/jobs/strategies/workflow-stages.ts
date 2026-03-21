@@ -15,11 +15,14 @@ import {
 } from './orchestrator-prompts.js'
 import type { TraderStageRequiredScriptCall } from './stage-agent.js'
 import type {
+  TraderDecision,
   TraderMarketCandidate,
   TraderMarketScanResult,
+  TraderPlannedOrder,
   TraderPreflightSnapshot,
   TraderRunnerResult,
   TraderRiskCheckResult,
+  TraderSourceSnapshot,
   TraderStrategy,
   TraderTradeExecuteResult,
   TraderTradePlanReadyResult,
@@ -163,7 +166,7 @@ interface TraderTradePlanRouteRuntime {
   hardRiskBlock?: string
 }
 
-interface TraderTradeExecuteScriptResult {
+export interface TraderTradeExecuteScriptResult {
   source: string
   symbol: string
   commitMessage: string
@@ -175,6 +178,197 @@ interface TraderTradeExecuteScriptResult {
     actionsTaken?: string[]
   }
   result: unknown
+}
+
+export interface TraderExecutionOutcome {
+  rationale: string
+  actionsTaken: string[]
+  filledCount: number
+  pendingCount: number
+  rejectedCount: number
+}
+
+function clampPercent(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(10_000, value)) : 0
+}
+
+function summarizePlannedOrder(order: TraderPlannedOrder): string {
+  const size = order.qty !== undefined
+    ? `qty=${order.qty}`
+    : order.notional !== undefined
+      ? `notional=${order.notional}`
+      : 'size=broker-default'
+  const trigger = order.stopPrice !== undefined
+    ? ` stop=${order.stopPrice}`
+    : order.price !== undefined
+      ? ` price=${order.price}`
+      : ''
+  const reduceOnly = order.reduceOnly ? ' reduceOnly' : ''
+  const protection = order.protection
+    ? ` | protection: SL ${order.protection.stopLossPrice ?? order.protection.stopLossPct ?? '-'} / TP ${order.protection.takeProfitPrice ?? order.protection.takeProfitPct ?? '-'}${order.protection.takeProfitSizeRatio !== undefined ? ` (ratio=${order.protection.takeProfitSizeRatio})` : ''}`
+    : ''
+  return `${order.side.toUpperCase()} ${order.type} ${order.symbol} ${size}${trigger}${reduceOnly}${protection}`.trim()
+}
+
+function getSourceSnapshot(snapshot: TraderPreflightSnapshot, source: string): TraderSourceSnapshot | undefined {
+  return snapshot.sourceSnapshots.find((entry) => entry.source === source)
+}
+
+function getPositionKey(position: TraderSourceSnapshot['positions'][number]): string {
+  return position.contract.symbol ?? position.contract.aliceId ?? ''
+}
+
+function estimateOrderExposurePercent(order: TraderPlannedOrder, sourceSnapshot: TraderSourceSnapshot | undefined): number | null {
+  const equity = sourceSnapshot?.account?.equity ?? 0
+  if (equity <= 0 || order.reduceOnly) return null
+
+  const referencePrice = order.price
+    ?? order.stopPrice
+    ?? sourceSnapshot?.positions.find((position) => getPositionKey(position) === order.symbol)?.currentPrice
+  const notional = order.notional ?? (order.qty !== undefined && referencePrice !== undefined ? order.qty * referencePrice : undefined)
+  if (notional === undefined) return null
+
+  return clampPercent(notional / equity * 100)
+}
+
+function summarizeExecutionAction(order: TraderPlannedOrder, result: Record<string, unknown> | undefined): string {
+  const summary = summarizePlannedOrder(order)
+  if (!result) return `${summary} -> submitted`
+
+  const status = typeof result.status === 'string' ? result.status : 'unknown'
+  const orderId = typeof result.orderId === 'string' ? result.orderId : undefined
+  const error = typeof result.error === 'string' ? result.error : undefined
+  const filledPrice = typeof result.filledPrice === 'number' ? result.filledPrice : undefined
+
+  if (status === 'filled') {
+    return `${summary} -> filled${filledPrice !== undefined ? ` @${filledPrice}` : ''}${orderId ? ` (${orderId})` : ''}`
+  }
+  if (status === 'pending') {
+    return `${summary} -> pending${orderId ? ` (${orderId})` : ''}`
+  }
+  if (status === 'rejected') {
+    return `${summary} -> rejected${error ? `: ${error}` : ''}`
+  }
+  return `${summary} -> ${status}${orderId ? ` (${orderId})` : ''}`
+}
+
+export function resolveRiskSnapshotFailureRouteForWarnings(
+  thesisOutput: TraderTradeThesisResult,
+  snapshot: TraderPreflightSnapshot,
+  rawText: string,
+): TraderWorkflowStageTransitionRoute<Record<string, unknown>> | null {
+  if (!snapshot.warnings.some((warning) => warning.includes('not available'))) {
+    return null
+  }
+  return resolveRiskSnapshotFailureRoute(thesisOutput, snapshot.warnings, rawText)
+}
+
+export function buildTradePlanRouteRuntime(
+  strategy: TraderStrategy,
+  snapshot: TraderPreflightSnapshot,
+  plan: TraderTradePlanResult,
+): TraderTradePlanRouteRuntime {
+  if (plan.status !== 'plan_ready') {
+    return {}
+  }
+
+  const additiveOrders = plan.orders.filter((order) => !order.reduceOnly)
+  if (additiveOrders.length === 0) return {}
+
+  const sourceSnapshot = getSourceSnapshot(snapshot, plan.source)
+  const heldSymbolsOnSource = new Set(
+    (sourceSnapshot?.positions ?? []).map((position) => getPositionKey(position)).filter(Boolean),
+  )
+  const opensNewPosition = additiveOrders.some((order) => !heldSymbolsOnSource.has(order.symbol))
+
+  if (opensNewPosition && snapshot.totalPositions >= strategy.riskBudget.maxPositions) {
+    return {
+      hardRiskBlock: `Hard risk gate blocked execution: current positions ${snapshot.totalPositions} already meet/exceed maxPositions ${strategy.riskBudget.maxPositions}.`,
+    }
+  }
+
+  if (snapshot.exposurePercent >= strategy.riskBudget.maxGrossExposurePercent) {
+    return {
+      hardRiskBlock: `Hard risk gate blocked execution: current gross exposure ${snapshot.exposurePercent.toFixed(2)}% already meets/exceeds maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`,
+    }
+  }
+
+  const estimatedAddedExposure = additiveOrders.reduce((sum, order) => {
+    const estimate = estimateOrderExposurePercent(order, sourceSnapshot)
+    return sum + (estimate ?? 0)
+  }, 0)
+
+  if (estimatedAddedExposure > 0 && snapshot.exposurePercent + estimatedAddedExposure > strategy.riskBudget.maxGrossExposurePercent) {
+    return {
+      hardRiskBlock: `Hard risk gate blocked execution: projected gross exposure ${(snapshot.exposurePercent + estimatedAddedExposure).toFixed(2)}% would exceed maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`,
+    }
+  }
+
+  return {}
+}
+
+export function buildTradeExecutionOutcome(
+  plan: TraderTradePlanReadyResult,
+  executionResult: unknown,
+  fallbackRationale: string,
+): TraderExecutionOutcome {
+  const executionRecord = executionResult as Record<string, unknown>
+  const pushed = (executionRecord.pushed ?? {}) as Record<string, unknown>
+  const commit = (executionRecord.commit ?? {}) as Record<string, unknown>
+  const commitDetails = executionRecord.commitDetails as Record<string, unknown> | null | undefined
+  const commitHash = typeof commit.hash === 'string' ? commit.hash : undefined
+  const commitResults = Array.isArray(commitDetails?.results) ? commitDetails.results as Array<Record<string, unknown>> : []
+  const filled = Array.isArray(pushed.filled) ? pushed.filled.length : 0
+  const pending = Array.isArray(pushed.pending) ? pushed.pending.length : 0
+  const rejected = Array.isArray(pushed.rejected) ? pushed.rejected.length : 0
+
+  const rationale = rejected > 0
+    ? filled === 0 && pending === 0
+      ? `Execution failed: ${rejected} order(s) were rejected.`
+      : `Execution completed with issues: ${filled} filled, ${pending} pending, ${rejected} rejected.`
+    : pending > 0
+      ? `Execution confirmed: ${filled} filled, ${pending} pending.`
+      : fallbackRationale
+
+  const actionsTaken = [
+    `Executed deterministic trade plan: ${plan.commitMessage}${commitHash ? ` (${commitHash})` : ''}`,
+    ...plan.orders.map((order, index) => summarizeExecutionAction(order, commitResults[index])),
+  ]
+
+  return {
+    rationale,
+    actionsTaken,
+    filledCount: filled,
+    pendingCount: pending,
+    rejectedCount: rejected,
+  }
+}
+
+export function buildTradeExecutionRunnerResult(params: {
+  strategyId: string
+  plan: TraderTradePlanReadyResult
+  outcome: TraderExecutionOutcome
+  brainUpdate: string
+  rawText: string
+}): TraderRunnerResult {
+  const decision: TraderDecision = {
+    status: 'trade',
+    strategyId: params.strategyId,
+    source: params.plan.source,
+    symbol: params.plan.symbol,
+    chosenScenario: params.plan.chosenScenario,
+    rationale: params.outcome.rationale,
+    invalidation: params.plan.invalidation,
+    actionsTaken: params.outcome.actionsTaken,
+    brainUpdate: params.brainUpdate,
+  }
+
+  return {
+    status: 'done',
+    reason: decision.rationale,
+    decision,
+    rawText: params.rawText,
+  }
 }
 
 interface TraderWorkflowStageFactoryContext {

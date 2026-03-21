@@ -17,11 +17,14 @@ import {
   type TraderStageRequiredScriptCall,
 } from './stage-agent.js'
 import {
+  buildTradeExecutionOutcome,
+  buildTradeExecutionRunnerResult,
+  buildTradePlanRouteRuntime,
   buildTraderSkipResult,
   createTraderWorkflowAgentStageDefinitions,
   resolveEmptyMarketScanReason,
+  resolveRiskSnapshotFailureRouteForWarnings,
   resolveTraderWorkflowStageRoute,
-  resolveRiskSnapshotFailureRoute,
   TRADER_SKILLS,
   type TraderWorkflowAgentStageDefinition,
   type TraderWorkflowStageTransitionRoute,
@@ -29,19 +32,12 @@ import {
 import { applyTraderStrategyPatch, getTraderStrategy } from './strategy.js'
 import { TraderWorkflowStateMachine } from './workflow-state.js'
 import type {
-  TraderDecision,
   TraderMarketCandidate,
-  TraderPlannedOrder,
   TraderReviewResult,
   TraderRunnerDeps,
   TraderRunnerResult,
   TraderStrategy,
-  TraderTradePlanReadyResult,
-  TraderTradePlanResult,
   TraderPreflightSnapshot,
-  TraderRiskCheckResult,
-  TraderTradeExecuteResult,
-  TraderTradeThesisResult,
   TraderWorkflowStage,
   TraderWorkflowStageEventPayload,
 } from './types.js'
@@ -257,133 +253,6 @@ function attachAgentTrace<T extends Record<string, unknown>>(data: T, trace: Tra
   }
 }
 
-function summarizePlannedOrder(order: TraderPlannedOrder): string {
-  const size = order.qty !== undefined
-    ? `qty=${order.qty}`
-    : order.notional !== undefined
-      ? `notional=${order.notional}`
-      : 'size=broker-default'
-  const trigger = order.stopPrice !== undefined
-    ? ` stop=${order.stopPrice}`
-    : order.price !== undefined
-      ? ` price=${order.price}`
-      : ''
-  const reduceOnly = order.reduceOnly ? ' reduceOnly' : ''
-  const protection = order.protection
-    ? ` | protection: SL ${order.protection.stopLossPrice ?? order.protection.stopLossPct ?? '-'} / TP ${order.protection.takeProfitPrice ?? order.protection.takeProfitPct ?? '-'}${order.protection.takeProfitSizeRatio !== undefined ? ` (ratio=${order.protection.takeProfitSizeRatio})` : ''}`
-    : ''
-  return `${order.side.toUpperCase()} ${order.type} ${order.symbol} ${size}${trigger}${reduceOnly}${protection}`.trim()
-}
-
-function getSourceSnapshot(snapshot: TraderPreflightSnapshot, source: string): TraderSourceSnapshot | undefined {
-  return snapshot.sourceSnapshots.find((entry) => entry.source === source)
-}
-
-function getPositionKey(position: Position): string {
-  return position.contract.symbol ?? position.contract.aliceId ?? ''
-}
-
-function estimateOrderExposurePercent(order: TraderPlannedOrder, sourceSnapshot: TraderSourceSnapshot | undefined): number | null {
-  const equity = sourceSnapshot?.account?.equity ?? 0
-  if (equity <= 0 || order.reduceOnly) return null
-
-  const referencePrice = order.price
-    ?? order.stopPrice
-    ?? sourceSnapshot?.positions.find((position) => getPositionKey(position) === order.symbol)?.currentPrice
-  const notional = order.notional ?? (order.qty !== undefined && referencePrice !== undefined ? order.qty * referencePrice : undefined)
-  if (notional === undefined) return null
-
-  return clampPercent(notional / equity * 100)
-}
-
-function getHardRiskBudgetViolation(
-  strategy: TraderStrategy,
-  snapshot: TraderPreflightSnapshot,
-  plan: TraderTradePlanReadyResult,
-): string | null {
-  const additiveOrders = plan.orders.filter((order) => !order.reduceOnly)
-  if (additiveOrders.length === 0) return null
-
-  const sourceSnapshot = getSourceSnapshot(snapshot, plan.source)
-  const heldSymbolsOnSource = new Set(
-    (sourceSnapshot?.positions ?? []).map((position) => getPositionKey(position)).filter(Boolean),
-  )
-  const opensNewPosition = additiveOrders.some((order) => !heldSymbolsOnSource.has(order.symbol))
-
-  if (opensNewPosition && snapshot.totalPositions >= strategy.riskBudget.maxPositions) {
-    return `Hard risk gate blocked execution: current positions ${snapshot.totalPositions} already meet/exceed maxPositions ${strategy.riskBudget.maxPositions}.`
-  }
-
-  if (snapshot.exposurePercent >= strategy.riskBudget.maxGrossExposurePercent) {
-    return `Hard risk gate blocked execution: current gross exposure ${snapshot.exposurePercent.toFixed(2)}% already meets/exceeds maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`
-  }
-
-  const estimatedAddedExposure = additiveOrders.reduce((sum, order) => {
-    const estimate = estimateOrderExposurePercent(order, sourceSnapshot)
-    return sum + (estimate ?? 0)
-  }, 0)
-
-  if (estimatedAddedExposure > 0 && snapshot.exposurePercent + estimatedAddedExposure > strategy.riskBudget.maxGrossExposurePercent) {
-    return `Hard risk gate blocked execution: projected gross exposure ${(snapshot.exposurePercent + estimatedAddedExposure).toFixed(2)}% would exceed maxGrossExposurePercent ${strategy.riskBudget.maxGrossExposurePercent}%.`
-  }
-
-  return null
-}
-
-function summarizeExecutionAction(order: TraderPlannedOrder, result: Record<string, unknown> | undefined): string {
-  const summary = summarizePlannedOrder(order)
-  if (!result) return `${summary} -> submitted`
-
-  const status = typeof result.status === 'string' ? result.status : 'unknown'
-  const orderId = typeof result.orderId === 'string' ? result.orderId : undefined
-  const error = typeof result.error === 'string' ? result.error : undefined
-  const filledPrice = typeof result.filledPrice === 'number' ? result.filledPrice : undefined
-
-  if (status === 'filled') {
-    return `${summary} -> filled${filledPrice !== undefined ? ` @${filledPrice}` : ''}${orderId ? ` (${orderId})` : ''}`
-  }
-  if (status === 'pending') {
-    return `${summary} -> pending${orderId ? ` (${orderId})` : ''}`
-  }
-  if (status === 'rejected') {
-    return `${summary} -> rejected${error ? `: ${error}` : ''}`
-  }
-  return `${summary} -> ${status}${orderId ? ` (${orderId})` : ''}`
-}
-
-function buildExecutionOutcome(plan: TraderTradePlanReadyResult, executionResult: unknown, fallbackRationale: string) {
-  const executionRecord = executionResult as Record<string, unknown>
-  const pushed = (executionRecord.pushed ?? {}) as Record<string, unknown>
-  const commit = (executionRecord.commit ?? {}) as Record<string, unknown>
-  const commitDetails = executionRecord.commitDetails as Record<string, unknown> | null | undefined
-  const commitHash = typeof commit.hash === 'string' ? commit.hash : undefined
-  const commitResults = Array.isArray(commitDetails?.results) ? commitDetails.results as Array<Record<string, unknown>> : []
-  const filled = Array.isArray(pushed.filled) ? pushed.filled.length : 0
-  const pending = Array.isArray(pushed.pending) ? pushed.pending.length : 0
-  const rejected = Array.isArray(pushed.rejected) ? pushed.rejected.length : 0
-
-  const rationale = rejected > 0
-    ? filled === 0 && pending === 0
-      ? `Execution failed: ${rejected} order(s) were rejected.`
-      : `Execution completed with issues: ${filled} filled, ${pending} pending, ${rejected} rejected.`
-    : pending > 0
-      ? `Execution confirmed: ${filled} filled, ${pending} pending.`
-      : fallbackRationale
-
-  const actionsTaken = [
-    `Executed deterministic trade plan: ${plan.commitMessage}${commitHash ? ` (${commitHash})` : ''}`,
-    ...plan.orders.map((order, index) => summarizeExecutionAction(order, commitResults[index])),
-  ]
-
-  return {
-    rationale,
-    actionsTaken,
-    filledCount: filled,
-    pendingCount: pending,
-    rejectedCount: rejected,
-  }
-}
-
 interface CandidatePipelineResultDone extends TraderRunnerResult {
   status: 'done'
 }
@@ -590,12 +459,12 @@ class TraderWorkflowRun {
     const thesisOutput = thesis.output
 
     const riskSnapshot = await buildPreflightSnapshot(this.strategy, this.deps)
-    if (riskSnapshot.warnings.some((warning) => warning.includes('not available'))) {
-      const route = resolveRiskSnapshotFailureRoute(thesisOutput, riskSnapshot.warnings, thesis.rawText)
-      await this.applyStageRoute('risk-check', route)
+    const riskSnapshotFailureRoute = resolveRiskSnapshotFailureRouteForWarnings(thesisOutput, riskSnapshot, thesis.rawText)
+    if (riskSnapshotFailureRoute) {
+      await this.applyStageRoute('risk-check', riskSnapshotFailureRoute)
       return {
-        decision: route.decision,
-        result: route.runnerResult ?? buildTraderSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText),
+        decision: riskSnapshotFailureRoute.decision,
+        result: riskSnapshotFailureRoute.runnerResult ?? buildTraderSkipResult(riskSnapshot.warnings.join(' '), thesis.rawText),
       }
     }
     const riskDefinition = this.stages.riskCheck(thesisOutput, riskSnapshot)
@@ -615,11 +484,7 @@ class TraderWorkflowRun {
       output: plan.output,
       rawText: plan.rawText,
       eventData: attachAgentTrace(plan.output, plan.trace),
-      runtime: {
-        hardRiskBlock: plan.output.status === 'plan_ready'
-          ? getHardRiskBudgetViolation(this.strategy, riskSnapshot, plan.output)
-          : undefined,
-      },
+      runtime: buildTradePlanRouteRuntime(this.strategy, riskSnapshot, plan.output),
     })
     if (!planRoute) {
       throw new Error('Trade plan stage is missing workflow transitions.')
@@ -677,7 +542,7 @@ class TraderWorkflowRun {
       orders: planOutput.orders,
     })
 
-    const executionOutcome = buildExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
+    const executionOutcome = buildTradeExecutionOutcome(planOutput, executionResult, executeOutput.rationale)
     const executionRawText = JSON.stringify(executionResult, null, 2)
     const executeScriptDefinition = this.stages.tradeExecuteScript()
     const executeScriptRoute = resolveTraderWorkflowStageRoute(executeScriptDefinition, {
@@ -708,26 +573,15 @@ class TraderWorkflowRun {
       }
     }
 
-    const decision: TraderDecision = {
-      status: 'trade',
-      strategyId: this.strategy.id,
-      source: planOutput.source,
-      symbol: planOutput.symbol,
-      chosenScenario: planOutput.chosenScenario,
-      rationale: executionOutcome.rationale,
-      invalidation: planOutput.invalidation,
-      actionsTaken: executionOutcome.actionsTaken,
-      brainUpdate,
-    }
-
     return {
       decision: 'done',
-      result: {
-        status: 'done',
-        reason: decision.rationale,
-        decision,
+      result: buildTradeExecutionRunnerResult({
+        strategyId: this.strategy.id,
+        plan: planOutput,
+        outcome: executionOutcome,
+        brainUpdate,
         rawText: executionRawText,
-      },
+      }),
     }
   }
 }
