@@ -351,6 +351,15 @@ describe('UTA — stagePlaceOrder', () => {
     expect(contract.symbol).toBe('AAPL')
   })
 
+  it('rejects aliceId from another account', () => {
+    expect(() => uta.stagePlaceOrder({
+      aliceId: 'other-account|AAPL',
+      action: 'BUY',
+      orderType: 'MKT',
+      totalQuantity: 10,
+    })).toThrow('belongs to account "other-account", not "mock-paper"')
+  })
+
   it('sets tpsl with takeProfit only', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10, takeProfit: { price: '160' } })
     const staged = uta.status().staged
@@ -444,6 +453,52 @@ describe('UTA — stageClosePosition', () => {
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'closePosition' }>
     expect(op.quantity).toBeUndefined()
+  })
+
+  it('rejects aliceId from another account', () => {
+    expect(() => uta.stageClosePosition({ aliceId: 'other-account|AAPL' })).toThrow(
+      'belongs to account "other-account", not "mock-paper"',
+    )
+  })
+})
+
+// ==================== Query normalization ====================
+
+describe('UTA — query normalization', () => {
+  it('resolves aliceId-only contracts before getQuote', async () => {
+    const { uta, broker } = createUTA()
+    const spy = vi.spyOn(broker, 'getQuote')
+    const query = makeContract({ symbol: '' })
+    query.aliceId = 'mock-paper|AAPL'
+
+    await uta.getQuote(query)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].symbol).toBe('AAPL')
+    expect(spy.mock.calls[0][0].aliceId).toBe('mock-paper|AAPL')
+  })
+
+  it('resolves aliceId-only contracts before getContractDetails', async () => {
+    const { uta, broker } = createUTA()
+    const spy = vi.spyOn(broker, 'getContractDetails')
+    const query = makeContract({ symbol: '' })
+    query.aliceId = 'mock-paper|AAPL'
+
+    await uta.getContractDetails(query)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].symbol).toBe('AAPL')
+    expect(spy.mock.calls[0][0].aliceId).toBe('mock-paper|AAPL')
+  })
+
+  it('rejects getQuote aliceId from another account', async () => {
+    const { uta } = createUTA()
+    const query = makeContract({ symbol: '' })
+    query.aliceId = 'other-account|AAPL'
+
+    await expect(uta.getQuote(query)).rejects.toThrow(
+      'belongs to account "other-account", not "mock-paper"',
+    )
   })
 })
 
