@@ -335,16 +335,37 @@ export class UnifiedTradingAccount {
     return { utaId: aliceId.slice(0, sep), nativeKey: aliceId.slice(sep + 1) }
   }
 
+  /** Resolve an aliceId into a trade-ready contract scoped to this UTA. */
+  private resolveAliceIdContract(aliceId: string): Contract {
+    const parsed = UnifiedTradingAccount.parseAliceId(aliceId)
+    if (!parsed) {
+      throw new Error(`Invalid aliceId "${aliceId}". Use searchContracts to get a valid contract identifier (expected format: "accountId|nativeKey").`)
+    }
+    if (parsed.utaId !== this.id) {
+      throw new Error(`aliceId "${aliceId}" belongs to account "${parsed.utaId}", not "${this.id}".`)
+    }
+    const contract = this.broker.resolveNativeKey(parsed.nativeKey)
+    contract.aliceId = aliceId
+    return contract
+  }
+
+  /** Fill broker-native fields when callers only provide aliceId. */
+  private normalizeQueryContract(query: Contract): Contract {
+    if (!query.aliceId || query.symbol || query.localSymbol || query.conId) return query
+
+    const resolved = this.resolveAliceIdContract(query.aliceId)
+    if (query.secType) resolved.secType = query.secType
+    if (query.currency) resolved.currency = query.currency
+    if (query.exchange) resolved.exchange = query.exchange
+    if (query.primaryExchange) resolved.primaryExchange = query.primaryExchange
+    return resolved
+  }
+
   // ==================== Stage operations ====================
 
   stagePlaceOrder(params: StagePlaceOrderParams): AddResult {
     // Resolve aliceId → full contract via broker (fills secType, exchange, currency, conId, etc.)
-    const parsed = UnifiedTradingAccount.parseAliceId(params.aliceId)
-    if (!parsed) {
-      throw new Error(`Invalid aliceId "${params.aliceId}". Use searchContracts to get a valid contract identifier (expected format: "accountId|nativeKey").`)
-    }
-    const contract = this.broker.resolveNativeKey(parsed.nativeKey)
-    contract.aliceId = params.aliceId
+    const contract = this.resolveAliceIdContract(params.aliceId)
     if (params.symbol) contract.symbol = params.symbol
 
     const order = new Order()
@@ -386,12 +407,7 @@ export class UnifiedTradingAccount {
   }
 
   stageClosePosition(params: StageClosePositionParams): AddResult {
-    const parsed = UnifiedTradingAccount.parseAliceId(params.aliceId)
-    if (!parsed) {
-      throw new Error(`Invalid aliceId "${params.aliceId}". Use searchContracts to get a valid contract identifier (expected format: "accountId|nativeKey").`)
-    }
-    const contract = this.broker.resolveNativeKey(parsed.nativeKey)
-    contract.aliceId = params.aliceId
+    const contract = this.resolveAliceIdContract(params.aliceId)
     if (params.symbol) contract.symbol = params.symbol
 
     return this.git.add({
@@ -516,7 +532,8 @@ export class UnifiedTradingAccount {
   }
 
   async getQuote(contract: Contract): Promise<Quote> {
-    const quote = await this._callBroker(() => this.broker.getQuote(contract))
+    const query = this.normalizeQueryContract(contract)
+    const quote = await this._callBroker(() => this.broker.getQuote(query))
     this.stampAliceId(quote.contract)
     return quote
   }
@@ -544,7 +561,8 @@ export class UnifiedTradingAccount {
   }
 
   async getContractDetails(query: Contract): Promise<ContractDetails | null> {
-    const details = await this._callBroker(() => this.broker.getContractDetails(query))
+    const normalized = this.normalizeQueryContract(query)
+    const details = await this._callBroker(() => this.broker.getContractDetails(normalized))
     if (details) this.stampAliceId(details.contract)
     return details
   }
