@@ -18,6 +18,7 @@ import type {
 export interface BrainConfig {
   /** Called after each commit for persistence */
   onCommit?: (state: BrainExportState) => void | Promise<void>;
+  frontalLobeMaxChars?: number;
 }
 
 function generateCommitHash(content: object): CommitHash {
@@ -64,6 +65,13 @@ export class Brain {
   // ==================== Mutations ====================
 
   updateFrontalLobe(content: string): { success: boolean; message: string } {
+    const maxChars = this.config.frontalLobeMaxChars;
+    if (maxChars && content.length > maxChars) {
+      return {
+        success: false,
+        message: `Frontal lobe update rejected: content is ${content.length} characters, max is ${maxChars}`,
+      };
+    }
     this.state.frontalLobe = content;
     this.createCommit('frontal_lobe', content.slice(0, 100));
     return { success: true, message: 'Frontal lobe updated successfully' };

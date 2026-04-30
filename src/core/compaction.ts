@@ -23,6 +23,10 @@ export interface CompactionConfig {
   autoCompactBuffer: number
   /** Number of recent tool results to keep during microcompact. Default: 3 */
   microcompactKeepRecent: number
+  memoryMaxTokens?: number
+  systemContextMaxTokens?: number
+  preservedToolResults?: number
+  summaryMaxTokens?: number
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -146,7 +150,10 @@ export function microcompact(
 // ==================== Full Compact (LLM summarization) ====================
 
 /** Build the summarization prompt. Modeled after Claude Code's t2A function. */
-export function buildSummarizationPrompt(entries: SessionEntry[]): string {
+export function buildSummarizationPrompt(
+  entries: SessionEntry[],
+  config: Pick<CompactionConfig, 'summaryMaxTokens'> = DEFAULT_COMPACTION_CONFIG,
+): string {
   const conversationText = entries
     .filter(e => e.type !== 'system')
     .map(e => {
@@ -161,7 +168,11 @@ export function buildSummarizationPrompt(entries: SessionEntry[]): string {
     })
     .join('\n\n')
 
-  return `Your task is to create a detailed summary of the conversation so far, preserving all important context needed to continue the session.
+  const maxTokensHint = config.summaryMaxTokens
+    ? ` Aim for no more than ${config.summaryMaxTokens} tokens.`
+    : ''
+
+  return `Your task is to create a detailed summary of the conversation so far, preserving all important context needed to continue the session.${maxTokensHint}
 
 <conversation>
 ${conversationText}
@@ -169,15 +180,17 @@ ${conversationText}
 
 Produce a summary inside <summary> tags with these sections:
 
-1. **Primary Request and Intent**: What is the user's main goal or ongoing task?
-2. **Key Technical Concepts**: Important domain concepts, terminology, or constraints mentioned.
-3. **Current State**: What has been accomplished so far? What is the current situation?
-4. **Important Data Points**: Specific numbers, prices, positions, or configuration values that matter.
-5. **User Preferences**: Any expressed preferences, constraints, or style requests.
-6. **Pending Tasks**: What still needs to be done?
-7. **Current Work**: What was being actively worked on when this summary was created?
+1. **Current Goal**: The user's main objective and the immediate task being pursued.
+2. **User Preferences**: Expressed preferences, style requirements, constraints, and standing instructions.
+3. **Key Constraints**: Technical, safety, provider, file, trading, or workflow constraints that must remain true.
+4. **Current State**: What has been accomplished so far and what state the session is in now.
+5. **Tool Results Summary**: Important outputs from tool calls, including errors and irreversible observations.
+6. **Pending Tasks**: What still needs to be done.
+7. **Do Not Lose**: Exact numbers, IDs, file paths, symbols, prices, positions, timestamps, order IDs, tool-use IDs, and other concrete values that must be preserved.
+8. **Current Work**: What was being actively worked on when this summary was created.
 
 Be thorough but concise. Preserve specific values (numbers, names, IDs) exactly.
+Do not treat long-term memory as something to copy here; it will be recalled separately after compaction.
 IMPORTANT: Respond with ONLY the <summary>...</summary> block. Do NOT use any tools.`
 }
 
@@ -187,12 +200,13 @@ export function createCompactBoundary(
   preTokens: number,
   sessionId: string,
   parentUuid: string | null,
+  metadata: Partial<NonNullable<SessionEntry['compactMetadata']>> = {},
 ): SessionEntry {
   return {
     type: 'system',
     subtype: 'compact_boundary',
     message: { role: 'system', content: 'Conversation compacted' },
-    compactMetadata: { trigger, preTokens },
+    compactMetadata: { trigger, preTokens, method: 'full', provider: 'compaction', ...metadata },
     uuid: randomUUID(),
     parentUuid,
     sessionId,
@@ -219,6 +233,30 @@ export function createSummaryEntry(
     timestamp: new Date().toISOString(),
     provider: 'compaction',
     isCompactSummary: true,
+  }
+}
+
+export function collectPreservedContextMetadata(
+  entries: SessionEntry[],
+  config: CompactionConfig = DEFAULT_COMPACTION_CONFIG,
+): Pick<NonNullable<SessionEntry['compactMetadata']>, 'preservedEntryUuids' | 'preservedToolUseIds'> {
+  const keepToolResults = config.preservedToolResults ?? config.microcompactKeepRecent
+  const preservedEntryUuids = entries.slice(-8).map((entry) => entry.uuid)
+  const toolUseIds: string[] = []
+
+  for (const entry of entries.slice().reverse()) {
+    const content = entry.message.content
+    if (!Array.isArray(content)) continue
+    for (const block of content.slice().reverse()) {
+      if (block.type === 'tool_result') toolUseIds.push(block.tool_use_id)
+      if (toolUseIds.length >= keepToolResults) break
+    }
+    if (toolUseIds.length >= keepToolResults) break
+  }
+
+  return {
+    preservedEntryUuids,
+    preservedToolUseIds: [...new Set(toolUseIds.reverse())],
   }
 }
 
@@ -263,12 +301,15 @@ export async function compactIfNeeded(
 
   // Phase 2: full compact
   console.log(`compaction: microcompact insufficient (saved ${savedTokens}), running full LLM summarization...`)
-  const prompt = buildSummarizationPrompt(activeEntries)
+  const prompt = buildSummarizationPrompt(activeEntries, config)
   const summaryText = await summarize(prompt)
 
   const lastEntry = allEntries[allEntries.length - 1]
-  const boundary = createCompactBoundary('auto', currentTokens, session.id, lastEntry?.uuid ?? null)
+  const boundary = createCompactBoundary('auto', currentTokens, session.id, lastEntry?.uuid ?? null, {
+    ...collectPreservedContextMetadata(activeEntries, config),
+  })
   const summary = createSummaryEntry(summaryText, session.id, boundary.uuid)
+  boundary.compactMetadata!.summaryUuid = summary.uuid
 
   await session.appendRaw(boundary)
   await session.appendRaw(summary)
@@ -297,8 +338,11 @@ export async function forceCompact(
   const summaryText = await summarize(prompt)
 
   const lastEntry = allEntries[allEntries.length - 1]
-  const boundary = createCompactBoundary('manual', currentTokens, session.id, lastEntry?.uuid ?? null)
+  const boundary = createCompactBoundary('manual', currentTokens, session.id, lastEntry?.uuid ?? null, {
+    ...collectPreservedContextMetadata(activeEntries),
+  })
   const summary = createSummaryEntry(summaryText, session.id, boundary.uuid)
+  boundary.compactMetadata!.summaryUuid = summary.uuid
 
   await session.appendRaw(boundary)
   await session.appendRaw(summary)

@@ -8,6 +8,7 @@ import {
   getActiveEntries,
   microcompact,
   buildSummarizationPrompt,
+  collectPreservedContextMetadata,
   createCompactBoundary,
   createSummaryEntry,
   compactIfNeeded,
@@ -320,7 +321,9 @@ describe('buildSummarizationPrompt', () => {
   it('should include summarization instructions', () => {
     const prompt = buildSummarizationPrompt([userText('test')])
     expect(prompt).toContain('<summary>')
-    expect(prompt).toContain('Primary Request')
+    expect(prompt).toContain('Current Goal')
+    expect(prompt).toContain('Tool Results Summary')
+    expect(prompt).toContain('Do Not Lose')
   })
 })
 
@@ -331,7 +334,12 @@ describe('createCompactBoundary', () => {
     const entry = createCompactBoundary('auto', 50000, 'sess1', 'parent-uuid')
     expect(entry.type).toBe('system')
     expect(entry.subtype).toBe('compact_boundary')
-    expect(entry.compactMetadata).toEqual({ trigger: 'auto', preTokens: 50000 })
+    expect(entry.compactMetadata).toMatchObject({
+      trigger: 'auto',
+      preTokens: 50000,
+      method: 'full',
+      provider: 'compaction',
+    })
     expect(entry.sessionId).toBe('sess1')
     expect(entry.parentUuid).toBe('parent-uuid')
     expect(entry.provider).toBe('compaction')
@@ -343,6 +351,24 @@ describe('createCompactBoundary', () => {
     const entry = createCompactBoundary('manual', 1000, 's1', null)
     expect(entry.compactMetadata!.trigger).toBe('manual')
     expect(entry.parentUuid).toBeNull()
+  })
+})
+
+describe('collectPreservedContextMetadata', () => {
+  it('captures recent entry UUIDs and recent tool result IDs', () => {
+    const entries = [
+      { ...userText('a'), uuid: 'u1' },
+      { ...toolResultEntry('old', 'tool-old'), uuid: 'u2' },
+      { ...toolResultEntry('new', 'tool-new'), uuid: 'u3' },
+    ]
+
+    const metadata = collectPreservedContextMetadata(entries, {
+      ...SMALL_CONFIG,
+      preservedToolResults: 1,
+    })
+
+    expect(metadata.preservedEntryUuids).toEqual(['u1', 'u2', 'u3'])
+    expect(metadata.preservedToolUseIds).toEqual(['tool-new'])
   })
 })
 

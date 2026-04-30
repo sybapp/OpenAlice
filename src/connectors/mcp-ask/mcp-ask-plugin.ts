@@ -62,6 +62,7 @@ export class McpAskPlugin implements Plugin {
 
           const result = await ctx.agentCenter.askWithSession(message, session, {
             historyPreamble: `You are operating via the MCP Ask connector (session: mcp-ask__${sessionId}). The following is the conversation from an external MCP client.`,
+            channelContext: `Connector: MCP Ask\nSession: mcp-ask__${sessionId}`,
           })
 
           return {

@@ -86,6 +86,8 @@ export interface AskOptions {
   historyPreamble?: string
   /** System prompt override for this call. */
   systemPrompt?: string
+  /** Extra context about the connector/channel invoking this call. */
+  channelContext?: string
   /** Max text history entries to include in context (text providers only). */
   maxHistoryEntries?: number
   /** Tool names to disable for this call. */

@@ -15,7 +15,7 @@
 import type { AskOptions, ProviderResult, ProviderEvent, GenerateOpts } from './ai-provider-manager.js'
 import type { ResolvedProfile } from './config.js'
 import { GenerateRouter, StreamableResult } from './ai-provider-manager.js'
-import type { ISessionStore, ContentBlock } from './session.js'
+import type { ISessionStore, ContentBlock, SessionEntry } from './session.js'
 import type { CompactionConfig } from './compaction.js'
 import { compactIfNeeded } from './compaction.js'
 import type { MediaAttachment } from './types.js'
@@ -23,6 +23,7 @@ import { extractMediaFromToolResultContent } from './media.js'
 import { persistMedia } from './media-store.js'
 import { logToolCall, stripImageData, DEFAULT_MAX_HISTORY } from '../ai-providers/utils.js'
 import type { ToolCallLog } from './tool-call-log.js'
+import type { ContextAssembler } from './context-assembler.js'
 
 // ==================== Types ====================
 
@@ -35,6 +36,8 @@ export interface AgentCenterOpts {
   maxHistoryEntries?: number
   /** Structured tool call logger. */
   toolCallLog?: ToolCallLog
+  /** Optional layered context assembler for persona/brain/memory/runtime context. */
+  contextAssembler?: ContextAssembler
 }
 
 // ==================== AgentCenter ====================
@@ -45,6 +48,7 @@ export class AgentCenter {
   private defaultPreamble?: string
   private defaultMaxHistory: number
   private toolCallLog?: ToolCallLog
+  private contextAssembler?: ContextAssembler
 
   constructor(opts: AgentCenterOpts) {
     this.router = opts.router
@@ -52,6 +56,7 @@ export class AgentCenter {
     this.defaultPreamble = opts.historyPreamble
     this.defaultMaxHistory = opts.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
     this.toolCallLog = opts.toolCallLog
+    this.contextAssembler = opts.contextAssembler
   }
 
   /** Stateless prompt — routed through the configured AI provider. */
@@ -98,16 +103,28 @@ export class AgentCenter {
 
     // 4. Read active window
     const entries = compactionResult.activeEntries ?? await session.readActive()
+    const recentToolNames = extractRecentToolNames(entries)
+    const contextBundle = this.contextAssembler
+      ? await this.contextAssembler.assemble({
+          activeEntries: entries,
+          prompt,
+          systemPromptOverride: opts?.systemPrompt,
+          channelContext: opts?.channelContext ?? opts?.historyPreamble,
+          recentToolNames,
+        })
+      : null
+    const activeEntries = contextBundle?.activeEntries ?? entries
 
     // 5. Delegate to provider — each provider decides how to serialize history
     const genOpts: GenerateOpts = {
-      systemPrompt: opts?.systemPrompt,
+      systemPrompt: contextBundle?.systemPrompt ?? opts?.systemPrompt,
+      channelContext: opts?.channelContext,
       historyPreamble: opts?.historyPreamble ?? this.defaultPreamble,
       maxHistoryEntries: opts?.maxHistoryEntries ?? this.defaultMaxHistory,
       disabledTools: opts?.disabledTools,
       profile,
     }
-    const source = provider.generate(entries, prompt, genOpts)
+    const source = provider.generate(activeEntries, prompt, genOpts)
 
     // 6. Consume provider events — unified pipeline
     const media: MediaAttachment[] = []
@@ -222,4 +239,16 @@ export class AgentCenter {
       },
     }
   }
+}
+
+function extractRecentToolNames(entries: SessionEntry[]): string[] {
+  const names: string[] = []
+  for (const entry of entries.slice(-20)) {
+    const content = entry.message.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (block.type === 'tool_use') names.push(block.name)
+    }
+  }
+  return [...new Set(names)].slice(-10)
 }

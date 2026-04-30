@@ -12,7 +12,9 @@ import type { Brain } from '@/domain/brain/Brain';
  * content goes stale and pollutes later reasoning; self-referring content
  * stays valid until she chooses to change it.
  */
-export function createBrainTools(brain: Brain) {
+export function createBrainTools(brain: Brain, opts: { frontalLobeMaxChars?: number } = {}) {
+  const frontalLobeMaxChars = opts.frontalLobeMaxChars ?? 4000
+
   return {
     getFrontalLobe: tool({
       description: `
@@ -66,6 +68,7 @@ assumption for BTC range — flip if we break 98k or lose 94k."
       inputSchema: z.object({
         content: z
           .string()
+          .max(frontalLobeMaxChars)
           .describe(
             'Your personal notes (rules, attention targets, self-constraints, stances — not facts or predictions)',
           ),

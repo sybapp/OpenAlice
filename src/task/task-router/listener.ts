@@ -75,6 +75,7 @@ export function createTaskRouter(opts: TaskRouterOpts): TaskRouter {
       try {
         const result = await agentCenter.askWithSession(payload.prompt, session, {
           historyPreamble: `You are handling an externally-triggered task (session: task/default). Follow the prompt and reply with what the caller needs.`,
+          channelContext: 'Connector: task-router\nSession: task/default',
         })
 
         try {

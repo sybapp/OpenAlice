@@ -26,6 +26,8 @@ export interface ProviderResult {
 export interface GenerateOpts {
   /** System prompt override for this call. */
   systemPrompt?: string
+  /** Extra context about the connector/channel invoking this call. */
+  channelContext?: string
   /** Preamble text for chat history (text providers only). */
   historyPreamble?: string
   /** Max history entries to include (text providers only). */

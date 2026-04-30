@@ -36,12 +36,18 @@ export function createChatRoutes({ ctx, sessions, sseByChannel }: ChatDeps) {
     // Build AskOptions from channel config (if not default)
     const opts: AskOptions = {
       historyPreamble: `You are operating via the Web UI (session: web/${channelId}). The following is the recent conversation.`,
+      channelContext: `Connector: Web UI\nSession: web/${channelId}`,
     }
     if (channelId !== 'default') {
       const channels = await readWebSubchannels()
       const channel = channels.find((ch) => ch.id === channelId)
       if (channel) {
         if (channel.systemPrompt) opts.systemPrompt = channel.systemPrompt
+        opts.channelContext = [
+          `Connector: Web UI`,
+          `Session: web/${channelId}`,
+          `Channel label: ${channel.label}`,
+        ].join('\n')
         if (channel.disabledTools?.length) opts.disabledTools = channel.disabledTools
         if (channel.profile) opts.profileSlug = channel.profile
       }

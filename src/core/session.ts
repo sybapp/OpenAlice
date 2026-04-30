@@ -43,7 +43,16 @@ export interface SessionEntry {
   /** Identifies a compact_boundary entry (type === 'system'). */
   subtype?: 'compact_boundary'
   /** Metadata attached to compact_boundary entries. */
-  compactMetadata?: { trigger: 'auto' | 'manual'; preTokens: number }
+  compactMetadata?: {
+    trigger: 'auto' | 'manual'
+    preTokens: number
+    method?: 'full'
+    provider?: string
+    model?: string
+    summaryUuid?: string
+    preservedEntryUuids?: string[]
+    preservedToolUseIds?: string[]
+  }
   /** Marks this entry as a compacted summary (not a real user message). */
   isCompactSummary?: boolean
 }

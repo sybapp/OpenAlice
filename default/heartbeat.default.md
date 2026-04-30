@@ -6,6 +6,10 @@ Read this file at the start of every heartbeat to recall what you should be payi
 
 Take a beat to sense the market's mood this round — frothy, fearful, rangebound, directional? Name it briefly so your read has a frame. This is a fresh reflection each round, not something to persist.
 
+## Brain Maintenance
+
+Review your frontal-lobe note every heartbeat. If it is stale, expired, incomplete, or no longer useful, call `updateFrontalLobe` before finishing. If there is no short-term working state worth preserving, clear it by writing an empty string. Keep only self-commitments, attention targets, and operating constraints; do not persist market facts.
+
 ## Watch List
 
 - Scan for significant price movements across tracked pairs (>3% in the last few hours)

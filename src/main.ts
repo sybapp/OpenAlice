@@ -46,6 +46,8 @@ import { createMetricsListener } from './task/metrics/index.js'
 import { createTaskRouter } from './task/task-router/index.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import { BrainMemoryStore } from './core/brain-memory-store.js'
+import { ContextAssembler } from './core/context-assembler.js'
 
 // ==================== Persistence paths ====================
 
@@ -58,18 +60,6 @@ const HEARTBEAT_FILE = resolve('data/brain/heartbeat.md')
 const HEARTBEAT_DEFAULT = resolve('default/heartbeat.default.md')
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-/** Render a timestamp as "Nm ago" / "Nh ago" / "Nd ago" for prompt injection. */
-function formatRelativeAge(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  if (diffMs < 60_000) return 'just now'
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 /** Read a file, copying from default if it doesn't exist yet. */
 async function readWithDefault(target: string, defaultFile: string): Promise<string> {
@@ -134,26 +124,22 @@ async function main() {
   }
 
   const brain = brainExport
-    ? Brain.restore(brainExport, { onCommit: brainOnCommit })
-    : new Brain({ onCommit: brainOnCommit })
+    ? Brain.restore(brainExport, { onCommit: brainOnCommit, frontalLobeMaxChars: config.brain.frontalLobeMaxChars })
+    : new Brain({ onCommit: brainOnCommit, frontalLobeMaxChars: config.brain.frontalLobeMaxChars })
 
-  /** Re-read persona from disk + live frontal-lobe note on each request.
-   *  Frames the note as "you wrote this Nh ago" rather than "current state"
-   *  — the time-distance cue stops her from treating a stale note as
-   *  ground truth. */
+  const memoryStore = new BrainMemoryStore({
+    recallLimit: config.brain.memoryRecallLimit,
+    entryMaxChars: config.brain.memoryEntryMaxChars,
+  })
+  const contextAssembler = new ContextAssembler({
+    brain,
+    memoryStore,
+    config: config.brain,
+    personaFile: PERSONA_FILE,
+  })
   const getInstructions = async () => {
-    const persona = await readFile(PERSONA_FILE, 'utf-8').catch(() => '')
-    const { content, updatedAt } = brain.getFrontalLobeMeta()
-    if (!content) return persona
-    const age = updatedAt ? formatRelativeAge(updatedAt) : 'at some point'
-    return [
-      persona,
-      '---',
-      '## Notes you wrote to yourself',
-      `_(written ${age})_`,
-      '',
-      content,
-    ].join('\n')
+    const bundle = await contextAssembler.assemble({ activeEntries: [], prompt: '' })
+    return bundle.systemPrompt
   }
 
   // ==================== Cron ====================
@@ -225,7 +211,7 @@ async function main() {
     'trading',
   )
 
-  toolCenter.register(createBrainTools(brain), 'brain')
+  toolCenter.register(createBrainTools(brain, { frontalLobeMaxChars: config.brain.frontalLobeMaxChars }), 'brain')
   toolCenter.register(createBrowserTools(), 'browser')
   toolCenter.register(createCronTools(cronEngine), 'cron')
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
@@ -258,6 +244,7 @@ async function main() {
     router,
     compaction: config.compaction,
     toolCallLog,
+    contextAssembler,
   })
 
   // ==================== Connector Center ====================

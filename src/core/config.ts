@@ -188,6 +188,18 @@ const compactionSchema = z.object({
   maxOutputTokens: z.number().default(20_000),
   autoCompactBuffer: z.number().default(13_000),
   microcompactKeepRecent: z.number().default(3),
+  memoryMaxTokens: z.number().optional(),
+  systemContextMaxTokens: z.number().optional(),
+  preservedToolResults: z.number().optional(),
+  summaryMaxTokens: z.number().optional(),
+})
+
+const brainSchema = z.object({
+  frontalLobeStaleHours: z.number().default(24),
+  frontalLobeCriticalStaleHours: z.number().default(72),
+  frontalLobeMaxChars: z.number().default(4000),
+  memoryRecallLimit: z.number().default(5),
+  memoryEntryMaxChars: z.number().default(1600),
 })
 
 const activeHoursSchema = z.object({
@@ -302,6 +314,7 @@ export type Config = {
   securities: z.infer<typeof securitiesSchema>
   marketData: z.infer<typeof marketDataSchema>
   compaction: z.infer<typeof compactionSchema>
+  brain: z.infer<typeof brainSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
   snapshot: z.infer<typeof snapshotSchema>
@@ -341,12 +354,12 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'brain.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
   // ---------- Migration: flat ai-provider config → profile-based ----------
-  const aiProviderRaw = raws[6] as Record<string, unknown> | undefined
+  const aiProviderRaw = raws[7] as Record<string, unknown> | undefined
   if (aiProviderRaw && 'backend' in aiProviderRaw && !('profiles' in aiProviderRaw)) {
     // Legacy flat format detected — convert to profile-based
 
@@ -419,7 +432,7 @@ export async function loadConfig(): Promise<Config> {
 
     // Step 5: write new format
     const migrated = { apiKeys: legacy.apiKeys, profiles, activeProfile: 'default' }
-    raws[6] = migrated
+    raws[7] = migrated
     await mkdir(CONFIG_DIR, { recursive: true })
     await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(migrated, null, 2) + '\n')
   } else if (aiProviderRaw && !('backend' in aiProviderRaw) && !('profiles' in aiProviderRaw)) {
@@ -439,7 +452,7 @@ export async function loadConfig(): Promise<Config> {
       },
       activeProfile: 'default',
     }
-    raws[6] = migrated
+    raws[7] = migrated
     await mkdir(CONFIG_DIR, { recursive: true })
     await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(migrated, null, 2) + '\n')
     await removeJsonFile('model.json')
@@ -447,7 +460,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   // ---------- Migration: distribute global apiKeys into profiles ----------
-  const aiConfigAfterMigration = raws[6] as Record<string, unknown> | undefined
+  const aiConfigAfterMigration = raws[7] as Record<string, unknown> | undefined
   if (aiConfigAfterMigration && 'apiKeys' in aiConfigAfterMigration && 'profiles' in aiConfigAfterMigration) {
     const keys = aiConfigAfterMigration.apiKeys as Record<string, string> | undefined
     const profiles = aiConfigAfterMigration.profiles as Record<string, Record<string, unknown>>
@@ -466,7 +479,7 @@ export async function loadConfig(): Promise<Config> {
       }
       if (changed) {
         delete aiConfigAfterMigration.apiKeys
-        raws[6] = aiConfigAfterMigration
+        raws[7] = aiConfigAfterMigration
         await mkdir(CONFIG_DIR, { recursive: true })
         await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(aiConfigAfterMigration, null, 2) + '\n')
       }
@@ -474,7 +487,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   // ---------- Migration: consolidate old telegram.json + engine port fields ----------
-  const connectorsRaw = raws[9] as Record<string, unknown> | undefined
+  const connectorsRaw = raws[10] as Record<string, unknown> | undefined
   if (connectorsRaw === undefined) {
     const oldTelegram = await loadJsonFile('telegram.json')
     const oldEngine = raws[0] as Record<string, unknown> | undefined
@@ -491,7 +504,7 @@ export async function loadConfig(): Promise<Config> {
       await mkdir(CONFIG_DIR, { recursive: true })
       await writeFile(resolve(CONFIG_DIR, 'engine.json'), JSON.stringify(cleanEngine, null, 2) + '\n')
     }
-    raws[9] = Object.keys(migrated).length > 0 ? migrated : undefined
+    raws[10] = Object.keys(migrated).length > 0 ? migrated : undefined
   }
 
   return {
@@ -501,13 +514,14 @@ export async function loadConfig(): Promise<Config> {
     securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
     marketData:    await parseAndSeed(files[4], marketDataSchema, raws[4]),
     compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
-    aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
-    heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
-    snapshot:      await parseAndSeed(files[8], snapshotSchema, raws[8]),
-    connectors:    await parseAndSeed(files[9], connectorsSchema, raws[9]),
-    news:          await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
-    tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
-    webhook:       await parseAndSeed(files[12], webhookSchema, raws[12]),
+    brain:         await parseAndSeed(files[6], brainSchema, raws[6]),
+    aiProvider:    await parseAndSeed(files[7], aiProviderSchema, raws[7]),
+    heartbeat:     await parseAndSeed(files[8], heartbeatSchema, raws[8]),
+    snapshot:      await parseAndSeed(files[9], snapshotSchema, raws[9]),
+    connectors:    await parseAndSeed(files[10], connectorsSchema, raws[10]),
+    news:          await parseAndSeed(files[11], newsCollectorSchema, raws[11]),
+    tools:         await parseAndSeed(files[12], toolsSchema, raws[12]),
+    webhook:       await parseAndSeed(files[13], webhookSchema, raws[13]),
   }
 }
 
@@ -805,6 +819,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   securities: securitiesSchema,
   marketData: marketDataSchema,
   compaction: compactionSchema,
+  brain: brainSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
   snapshot: snapshotSchema,
@@ -821,6 +836,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   securities: 'securities.json',
   marketData: 'market-data.json',
   compaction: 'compaction.json',
+  brain: 'brain.json',
   aiProvider: 'ai-provider-manager.json',
   heartbeat: 'heartbeat.json',
   snapshot: 'snapshot.json',
