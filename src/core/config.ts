@@ -240,6 +240,31 @@ const snapshotSchema = z.object({
   every: z.string().default('15m'),
 })
 
+const hookEventSchema = z.enum([
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PermissionDenied',
+  'PreCompact',
+  'PostCompact',
+  'ConfigChange',
+])
+
+export const hooksSchema = z.object({
+  enabled: z.boolean().default(true),
+  audit: z.boolean().default(true),
+  timeoutMs: z.number().int().positive().default(2000),
+  promptHooks: z.array(z.object({
+    id: z.string().min(1),
+    event: hookEventSchema,
+    enabled: z.boolean().default(true),
+    matcher: z.string().optional(),
+    content: z.string().default(''),
+    priority: z.number().default(0),
+  })).default([]),
+})
+
 export const toolsSchema = z.object({
   /** Tool names that are disabled. Tools not listed are enabled by default. */
   disabled: z.array(z.string()).default([]),
@@ -339,6 +364,7 @@ export type Config = {
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
   snapshot: z.infer<typeof snapshotSchema>
+  hooks: z.infer<typeof hooksSchema>
   connectors: z.infer<typeof connectorsSchema>
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
@@ -375,7 +401,7 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'brain.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'brain.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'hooks.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
@@ -508,7 +534,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   // ---------- Migration: consolidate old telegram.json + engine port fields ----------
-  const connectorsRaw = raws[10] as Record<string, unknown> | undefined
+  const connectorsRaw = raws[11] as Record<string, unknown> | undefined
   if (connectorsRaw === undefined) {
     const oldTelegram = await loadJsonFile('telegram.json')
     const oldEngine = raws[0] as Record<string, unknown> | undefined
@@ -525,7 +551,7 @@ export async function loadConfig(): Promise<Config> {
       await mkdir(CONFIG_DIR, { recursive: true })
       await writeFile(resolve(CONFIG_DIR, 'engine.json'), JSON.stringify(cleanEngine, null, 2) + '\n')
     }
-    raws[10] = Object.keys(migrated).length > 0 ? migrated : undefined
+    raws[11] = Object.keys(migrated).length > 0 ? migrated : undefined
   }
 
   return {
@@ -539,10 +565,11 @@ export async function loadConfig(): Promise<Config> {
     aiProvider:    await parseAndSeed(files[7], aiProviderSchema, raws[7]),
     heartbeat:     await parseAndSeed(files[8], heartbeatSchema, raws[8]),
     snapshot:      await parseAndSeed(files[9], snapshotSchema, raws[9]),
-    connectors:    await parseAndSeed(files[10], connectorsSchema, raws[10]),
-    news:          await parseAndSeed(files[11], newsCollectorSchema, raws[11]),
-    tools:         await parseAndSeed(files[12], toolsSchema, raws[12]),
-    webhook:       await parseAndSeed(files[13], webhookSchema, raws[13]),
+    hooks:         await parseAndSeed(files[10], hooksSchema, raws[10]),
+    connectors:    await parseAndSeed(files[11], connectorsSchema, raws[11]),
+    news:          await parseAndSeed(files[12], newsCollectorSchema, raws[12]),
+    tools:         await parseAndSeed(files[13], toolsSchema, raws[13]),
+    webhook:       await parseAndSeed(files[14], webhookSchema, raws[14]),
   }
 }
 
@@ -754,6 +781,16 @@ export async function readToolsConfig() {
   }
 }
 
+/** Read hooks config from disk (called per-request for hot-reload). */
+export async function readHooksConfig() {
+  try {
+    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'hooks.json'), 'utf-8'))
+    return hooksSchema.parse(raw)
+  } catch {
+    return hooksSchema.parse({})
+  }
+}
+
 /** Read connectors config from disk (called per-request for hot-reload). */
 export async function readConnectorsConfig() {
   try {
@@ -844,6 +881,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
   snapshot: snapshotSchema,
+  hooks: hooksSchema,
   connectors: connectorsSchema,
   news: newsCollectorSchema,
   tools: toolsSchema,
@@ -861,6 +899,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   aiProvider: 'ai-provider-manager.json',
   heartbeat: 'heartbeat.json',
   snapshot: 'snapshot.json',
+  hooks: 'hooks.json',
   connectors: 'connectors.json',
   news: 'news.json',
   tools: 'tools.json',

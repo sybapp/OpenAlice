@@ -14,6 +14,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MockAIProvider, doneEvent } from '../ai-providers/mock/index.js'
+import { HookEngine } from './hook-engine.js'
 
 // ==================== Helpers ====================
 
@@ -268,6 +269,85 @@ describe('AgentCenter', () => {
       const secondSystem = provider.generateCalls[1]?.opts?.systemPrompt
       expect(String(firstSystem)).toContain('Remember this only once.')
       expect(String(secondSystem)).not.toContain('Remember this only once.')
+    })
+
+    it('injects UserPromptSubmit hook context into assembled system prompt without mutating stored prompt', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'openalice-agent-hooks-'))
+      const personaFile = join(dir, 'persona.md')
+      await writeFile(personaFile, 'You are a test agent.')
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      hookEngine.register({
+        id: 'prompt-context',
+        event: 'UserPromptSubmit',
+        handler: () => ({ additionalContext: 'Injected hook context.' }),
+      })
+      const provider = new MockAIProvider([doneEvent('ok')])
+      const router = new GenerateRouter(provider, null)
+      const agentCenter = new AgentCenter({
+        router,
+        compaction: DEFAULT_COMPACTION_CONFIG,
+        hookEngine,
+        contextAssembler: new ContextAssembler({
+          brain: new Brain({}),
+          memoryStore: new BrainMemoryStore({ memoryDir: join(dir, 'memory') }),
+          personaFile,
+        }),
+      })
+      const session = new MemorySessionStore('hook-session')
+
+      await agentCenter.askWithSession('original prompt', session)
+
+      expect(provider.generateCalls[0]?.opts?.systemPrompt).toContain('Injected hook context.')
+      const entries = await session.readAll()
+      expect(entries[0]?.message.content).toBe('original prompt')
+    })
+
+    it('runs SessionStart once per live session and compaction hooks every turn', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      const events: string[] = []
+      for (const event of ['SessionStart', 'PreCompact', 'PostCompact'] as const) {
+        hookEngine.register({
+          id: event,
+          event,
+          handler: () => { events.push(event) },
+        })
+      }
+      const provider = new MockAIProvider([doneEvent('ok')])
+      const router = new GenerateRouter(provider, null)
+      const agentCenter = new AgentCenter({
+        router,
+        compaction: DEFAULT_COMPACTION_CONFIG,
+        hookEngine,
+      })
+      const session = new MemorySessionStore('hook-lifecycle')
+
+      await agentCenter.askWithSession('one', session)
+      await agentCenter.askWithSession('two', session)
+
+      expect(events.filter((event) => event === 'SessionStart')).toHaveLength(1)
+      expect(events.filter((event) => event === 'PreCompact')).toHaveLength(2)
+      expect(events.filter((event) => event === 'PostCompact')).toHaveLength(2)
+    })
+
+    it('blocks prompt persistence when UserPromptSubmit blocks', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      hookEngine.register({
+        id: 'block',
+        event: 'UserPromptSubmit',
+        handler: () => ({ block: true, reason: 'no prompt' }),
+      })
+      const provider = new MockAIProvider([doneEvent('ok')])
+      const router = new GenerateRouter(provider, null)
+      const agentCenter = new AgentCenter({
+        router,
+        compaction: DEFAULT_COMPACTION_CONFIG,
+        hookEngine,
+      })
+      const session = new MemorySessionStore('blocked-session')
+
+      await expect(agentCenter.askWithSession('blocked', session)).rejects.toThrow('no prompt')
+      expect(await session.readAll()).toEqual([])
+      expect(provider.generateCalls).toHaveLength(0)
     })
   })
 

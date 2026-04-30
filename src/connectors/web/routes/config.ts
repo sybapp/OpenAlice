@@ -134,6 +134,8 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       if (opts?.ctx) {
         const fresh = await loadConfig()
         Object.assign(opts.ctx.config, fresh)
+        opts.ctx.hookEngine.configure(fresh.hooks)
+        await opts.ctx.hookEngine.run('ConfigChange', { section, data: validated })
       }
       // Hot-reload connectors / OpenBB server when their config changes
       if (section === 'connectors' || section === 'marketData') {

@@ -24,6 +24,7 @@ import { persistMedia } from './media-store.js'
 import { logToolCall, stripImageData, DEFAULT_MAX_HISTORY } from '../ai-providers/utils.js'
 import type { ToolCallLog } from './tool-call-log.js'
 import type { ContextAssembler } from './context-assembler.js'
+import { HookEngine, mergeHookContext } from './hook-engine.js'
 
 // ==================== Types ====================
 
@@ -38,6 +39,8 @@ export interface AgentCenterOpts {
   toolCallLog?: ToolCallLog
   /** Optional layered context assembler for persona/brain/memory/runtime context. */
   contextAssembler?: ContextAssembler
+  /** Optional lifecycle hook engine for prompt/tool/compaction extension points. */
+  hookEngine?: HookEngine
 }
 
 // ==================== AgentCenter ====================
@@ -50,6 +53,8 @@ export class AgentCenter {
   private toolCallLog?: ToolCallLog
   private contextAssembler?: ContextAssembler
   private surfacedMemoryBySession = new Map<string, string[]>()
+  private hookEngine?: HookEngine
+  private startedSessions = new Set<string>()
 
   constructor(opts: AgentCenterOpts) {
     this.router = opts.router
@@ -58,6 +63,7 @@ export class AgentCenter {
     this.defaultMaxHistory = opts.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
     this.toolCallLog = opts.toolCallLog
     this.contextAssembler = opts.contextAssembler
+    this.hookEngine = opts.hookEngine
   }
 
   /** Stateless prompt — routed through the configured AI provider. */
@@ -87,13 +93,42 @@ export class AgentCenter {
     session: ISessionStore,
     opts?: AskOptions,
   ): AsyncGenerator<ProviderEvent> {
-    // 1. Append user message to session
-    await session.appendUser(prompt, 'human')
-
-    // 2. Resolve provider + profile (may be overridden per-request via profileSlug)
+    // 1. Resolve provider + profile (may be overridden per-request via profileSlug)
     const { provider, profile } = await this.router.resolve(opts?.profileSlug)
 
+    if (!this.startedSessions.has(session.id)) {
+      this.startedSessions.add(session.id)
+      await this.hookEngine?.run('SessionStart', {
+        sessionId: session.id,
+        provider: provider.providerTag,
+        profileSlug: opts?.profileSlug,
+        channelContext: opts?.channelContext,
+      })
+    }
+
+    const promptHook = await this.hookEngine?.run('UserPromptSubmit', {
+      sessionId: session.id,
+      prompt,
+      provider: provider.providerTag,
+      profileSlug: opts?.profileSlug,
+      channelContext: opts?.channelContext,
+    })
+    if (promptHook?.blocked) {
+      throw new Error(`UserPromptSubmit hook blocked prompt: ${promptHook.reason ?? 'blocked by hook'}`)
+    }
+    const hookContext = promptHook?.additionalContext ?? []
+    const channelContext = mergeHookContext(opts?.channelContext ?? opts?.historyPreamble, hookContext)
+
+    // 2. Append user message to session after prompt hooks approve it.
+    await session.appendUser(prompt, 'human')
+
     // 3. Compact if needed (provider can override with custom strategy)
+    await this.hookEngine?.run('PreCompact', {
+      sessionId: session.id,
+      provider: provider.providerTag,
+      profileBackend: profile.backend,
+      config: this.compaction,
+    })
     const compactionResult = provider.compact
       ? await provider.compact(session, this.compaction)
       : await compactIfNeeded(
@@ -101,6 +136,13 @@ export class AgentCenter {
           this.compaction,
           async (summarizePrompt) => (await provider.ask(summarizePrompt)).text,
         )
+    await this.hookEngine?.run('PostCompact', {
+      sessionId: session.id,
+      provider: provider.providerTag,
+      compacted: compactionResult.compacted,
+      method: compactionResult.method,
+      activeEntryCount: compactionResult.activeEntries?.length,
+    })
 
     // 4. Read active window
     const entries = compactionResult.activeEntries ?? await session.readActive()
@@ -110,7 +152,7 @@ export class AgentCenter {
           activeEntries: entries,
           prompt,
           systemPromptOverride: opts?.systemPrompt,
-          channelContext: opts?.channelContext ?? opts?.historyPreamble,
+          channelContext,
           recentToolNames,
           alreadySurfacedMemoryIds: this.surfacedMemoryBySession.get(session.id) ?? [],
         })

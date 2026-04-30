@@ -8,6 +8,7 @@ vi.mock('./config.js', () => ({
 }))
 
 import { readToolsConfig } from './config.js'
+import { HookEngine } from './hook-engine.js'
 const mockReadToolsConfig = vi.mocked(readToolsConfig)
 
 // ==================== Helpers ====================
@@ -205,6 +206,85 @@ describe('ToolCenter', () => {
       const result = await tools.readSession.execute!({}, { toolCallId: 't1', messages: [] })
 
       expect(result).toEqual({ ok: true })
+    })
+
+    it('lets PreToolUse update input before execution and permission checks', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      hookEngine.register({
+        id: 'rewrite',
+        event: 'PreToolUse',
+        handler: () => ({ updatedInput: { symbol: 'ETH/USD' } }),
+      })
+      const execute = vi.fn(async (input) => input)
+      const tc = new ToolCenter({ hookEngine })
+      tc.register({
+        echo: { description: 'echo', inputSchema: z.object({}), execute },
+      } as unknown as Record<string, Tool>, 'analysis')
+
+      const tools = await tc.getVercelTools()
+      const result = await tools.echo.execute!({ symbol: 'BTC/USD' }, { toolCallId: 't1', messages: [] })
+
+      expect(execute).toHaveBeenCalledWith({ symbol: 'ETH/USD' }, expect.anything())
+      expect(result).toEqual({ symbol: 'ETH/USD' })
+    })
+
+    it('blocks tools when PreToolUse denies them', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      hookEngine.register({
+        id: 'deny',
+        event: 'PreToolUse',
+        handler: () => ({ permissionDecision: 'deny', reason: 'blocked in test' }),
+      })
+      const execute = vi.fn(async () => ({ ok: true }))
+      const tc = new ToolCenter({ hookEngine })
+      tc.register({
+        echo: { description: 'echo', inputSchema: z.object({}), execute },
+      } as unknown as Record<string, Tool>, 'analysis')
+
+      const tools = await tc.getVercelTools()
+      const result = await tools.echo.execute!({}, { toolCallId: 't1', messages: [] })
+
+      expect(execute).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        code: 'TOOL_HOOK_DENIED',
+        reason: 'blocked in test',
+      })
+    })
+
+    it('runs PermissionDenied hooks after permission engine denial', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      const denied = vi.fn()
+      hookEngine.register({
+        id: 'denied',
+        event: 'PermissionDenied',
+        handler: ({ payload }) => {
+          denied(payload.tool)
+        },
+      })
+      const tc = new ToolCenter({ hookEngine })
+      tc.register({ placeOrder: makeTool('place') }, 'trading')
+
+      const tools = await tc.getVercelTools()
+      const result = await tools.placeOrder.execute!({}, { toolCallId: 't1', messages: [] })
+
+      expect(result).toMatchObject({ code: 'TOOL_PERMISSION_DENIED' })
+      expect(denied).toHaveBeenCalledWith('placeOrder')
+    })
+
+    it('lets PostToolUse update output', async () => {
+      const hookEngine = new HookEngine({ config: { audit: false } })
+      hookEngine.register({
+        id: 'filter-output',
+        event: 'PostToolUse',
+        handler: () => ({ updatedOutput: { ok: 'filtered' } }),
+      })
+      const tc = new ToolCenter({ hookEngine })
+      tc.register({ echo: makeTool('echo') }, 'analysis')
+
+      const tools = await tc.getVercelTools()
+      const result = await tools.echo.execute!({}, { toolCallId: 't1', messages: [] })
+
+      expect(result).toEqual({ ok: 'filtered' })
     })
   })
 })

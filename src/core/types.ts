@@ -14,6 +14,7 @@ import type { ToolCallLog } from './tool-call-log.js'
 import type { ToolCenter } from './tool-center.js'
 import type { ListenerRegistry } from './listener-registry.js'
 import type { EventBus } from './event-bus.js'
+import type { HookEngine } from './hook-engine.js'
 
 export type { Config, WebChannel }
 
@@ -42,6 +43,7 @@ export interface EngineContext {
   /** Ergonomic in-process producer facade. Use this to fire events from
    *  plugins / hacks / extension code instead of plumbing eventLog. */
   fire: EventBus
+  hookEngine: HookEngine
 
   // Market data
   bbEngine: QueryExecutor

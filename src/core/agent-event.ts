@@ -83,6 +83,26 @@ export interface TaskErrorPayload {
   durationMs: number
 }
 
+export interface HookCompletedPayload {
+  hookId: string
+  event: string
+  durationMs: number
+}
+
+export interface HookBlockedPayload {
+  hookId: string
+  event: string
+  reason: string
+  durationMs: number
+}
+
+export interface HookErrorPayload {
+  hookId: string
+  event: string
+  error: string
+  durationMs: number
+}
+
 // ==================== Event Map ====================
 
 // Import the actual CronFirePayload type for use in the map
@@ -100,6 +120,9 @@ export interface AgentEventMap {
   'task.requested': TaskRequestedPayload
   'task.done': TaskDonePayload
   'task.error': TaskErrorPayload
+  'hook.completed': HookCompletedPayload
+  'hook.blocked': HookBlockedPayload
+  'hook.error': HookErrorPayload
 }
 
 // ==================== TypeBox Schemas ====================
@@ -171,6 +194,26 @@ const TaskErrorSchema = Type.Object({
   durationMs: Type.Number(),
 })
 
+const HookCompletedSchema = Type.Object({
+  hookId: Type.String(),
+  event: Type.String(),
+  durationMs: Type.Number(),
+})
+
+const HookBlockedSchema = Type.Object({
+  hookId: Type.String(),
+  event: Type.String(),
+  reason: Type.String(),
+  durationMs: Type.Number(),
+})
+
+const HookErrorSchema = Type.Object({
+  hookId: Type.String(),
+  event: Type.String(),
+  error: Type.String(),
+  durationMs: Type.Number(),
+})
+
 // ==================== AgentEvents — metadata registry ====================
 
 export interface AgentEventMeta {
@@ -230,6 +273,18 @@ export const AgentEvents: { [K in keyof AgentEventMap]: AgentEventMeta } = {
   'task.error': {
     schema: TaskErrorSchema,
     description: 'A requested task failed during execution.',
+  },
+  'hook.completed': {
+    schema: HookCompletedSchema,
+    description: 'A lifecycle hook completed successfully.',
+  },
+  'hook.blocked': {
+    schema: HookBlockedSchema,
+    description: 'A lifecycle hook blocked a blockable operation.',
+  },
+  'hook.error': {
+    schema: HookErrorSchema,
+    description: 'A lifecycle hook failed or timed out.',
   },
 }
 

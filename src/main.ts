@@ -48,6 +48,7 @@ import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
 import { BrainMemoryStore } from './core/brain-memory-store.js'
 import { ContextAssembler } from './core/context-assembler.js'
+import { HookEngine } from './core/hook-engine.js'
 
 // ==================== Persistence paths ====================
 
@@ -87,7 +88,8 @@ async function main() {
 
   // ==================== Tool Center (created early — UTAManager needs it) ====================
 
-  const toolCenter = new ToolCenter()
+  const hookEngine = new HookEngine({ config: config.hooks, eventLog })
+  const toolCenter = new ToolCenter({ hookEngine })
 
   // ==================== Trading Account Manager ====================
 
@@ -250,6 +252,7 @@ async function main() {
     compaction: config.compaction,
     toolCallLog,
     contextAssembler,
+    hookEngine,
   })
 
   // ==================== Connector Center ====================
@@ -405,6 +408,7 @@ async function main() {
     config, connectorCenter, agentCenter, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
     listenerRegistry,
     fire: createEventBus(eventLog),
+    hookEngine,
     bbEngine: getSDKExecutor(),
     marketSearch,
     utaManager, fxService, snapshotService,

@@ -16,6 +16,7 @@ import {
   shouldAudit,
   type ToolPermissionConfig,
 } from './tool-permission.js'
+import { HookEngine, hookDeniedResult } from './hook-engine.js'
 
 interface ToolEntry {
   tool: Tool
@@ -31,6 +32,11 @@ export interface ToolRequestContext {
 export class ToolCenter {
   private tools: Record<string, ToolEntry> = {}
   private auditLog = new ToolPermissionAuditLog()
+  private hookEngine?: HookEngine
+
+  constructor(opts?: { hookEngine?: HookEngine }) {
+    this.hookEngine = opts?.hookEngine
+  }
 
   /** Batch-register tool definitions under a group. Later registrations overwrite same-name tools. */
   register(tools: Record<string, Tool>, group: string): void {
@@ -92,10 +98,24 @@ export class ToolCenter {
     return {
       ...entry.tool,
       execute: async (input, options) => {
+        let effectiveInput = input
+        const preHook = await this.hookEngine?.run('PreToolUse', {
+          tool: name,
+          group: entry.group,
+          input: effectiveInput,
+          sessionId: context?.sessionId,
+          provider: context?.provider,
+          channelContext: context?.channelContext,
+        })
+        if (preHook?.updatedInputSet) effectiveInput = preHook.updatedInput
+        if (preHook?.blocked || preHook?.permissionDecision === 'deny') {
+          return hookDeniedResult(name, preHook.reason)
+        }
+
         const request = {
           tool: name,
           group: entry.group,
-          input,
+          input: effectiveInput,
           sessionId: context?.sessionId,
           provider: context?.provider,
           channelContext: context?.channelContext,
@@ -104,8 +124,31 @@ export class ToolCenter {
         if (shouldAudit(decision, permission)) {
           await this.auditLog.append(makeAuditRecord(request, decision))
         }
-        if (decision.action === 'deny') return permissionDeniedResult(request, decision)
-        return original(input, options)
+        if (decision.action === 'deny') {
+          await this.hookEngine?.run('PermissionDenied', {
+            tool: name,
+            group: entry.group,
+            input: effectiveInput,
+            decision,
+            sessionId: context?.sessionId,
+            provider: context?.provider,
+            channelContext: context?.channelContext,
+          })
+          return permissionDeniedResult(request, decision)
+        }
+
+        const output = await original(effectiveInput, options)
+        const postHook = await this.hookEngine?.run('PostToolUse', {
+          tool: name,
+          group: entry.group,
+          input: effectiveInput,
+          output,
+          sessionId: context?.sessionId,
+          provider: context?.provider,
+          channelContext: context?.channelContext,
+        })
+        if (postHook?.updatedOutputSet) return postHook.updatedOutput
+        return output
       },
     } as Tool
   }
