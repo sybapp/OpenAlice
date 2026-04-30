@@ -125,6 +125,7 @@ export class AgentCenter {
       maxHistoryEntries: opts?.maxHistoryEntries ?? this.defaultMaxHistory,
       disabledTools: opts?.disabledTools,
       profile,
+      sessionId: session.id,
     }
     const source = provider.generate(activeEntries, prompt, genOpts)
     if (contextBundle?.recalledMemory.length) {

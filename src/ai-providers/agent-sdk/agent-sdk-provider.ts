@@ -12,6 +12,7 @@ import { resolve } from 'node:path'
 import type { Tool } from 'ai'
 import type { ProviderResult, ProviderEvent, AIProvider, GenerateOpts } from '../types.js'
 import type { SessionEntry } from '../../core/session.js'
+import type { ToolRequestContext } from '../../core/tool-center.js'
 import type { AgentSdkConfig, AgentSdkOverride } from './query.js'
 import { toTextHistory } from '../../core/session.js'
 import { buildChatHistoryPrompt, DEFAULT_MAX_HISTORY } from '../utils.js'
@@ -24,7 +25,7 @@ export class AgentSdkProvider implements AIProvider {
   readonly providerTag = 'agent-sdk' as const
 
   constructor(
-    private getTools: () => Promise<Record<string, Tool>>,
+    private getTools: (context?: ToolRequestContext) => Promise<Record<string, Tool>>,
     private getSystemPrompt: () => Promise<string>,
   ) {}
 
@@ -39,8 +40,8 @@ export class AgentSdkProvider implements AIProvider {
   }
 
   /** Build an in-process MCP server from ToolCenter, filtering disabled tools. */
-  private async buildMcpServer(disabledTools?: string[]) {
-    const tools = await this.getTools()
+  private async buildMcpServer(disabledTools?: string[], context?: ToolRequestContext) {
+    const tools = await this.getTools(context)
     return buildAgentSdkMcpServer(tools, disabledTools)
   }
 
@@ -77,7 +78,11 @@ export class AgentSdkProvider implements AIProvider {
     const override: AgentSdkOverride | undefined = profile
       ? { model: profile.model, apiKey: profile.apiKey, baseUrl: profile.baseUrl, loginMethod: profile.loginMethod as 'api-key' | 'claudeai' | undefined }
       : undefined
-    const mcpServer = await this.buildMcpServer(opts?.disabledTools)
+    const mcpServer = await this.buildMcpServer(opts?.disabledTools, {
+      sessionId: opts?.sessionId,
+      provider: this.providerTag,
+      channelContext: opts?.channelContext,
+    })
 
     const channel = createChannel<ProviderEvent>()
 

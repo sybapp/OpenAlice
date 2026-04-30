@@ -10,6 +10,7 @@ import type { ProviderResult, ProviderEvent, AIProvider, GenerateOpts } from '..
 import type { SessionEntry } from '../../core/session.js'
 import type { MediaAttachment } from '../../core/types.js'
 import type { ResolvedProfile } from '../../core/config.js'
+import type { ToolRequestContext } from '../../core/tool-center.js'
 import { resolveProfile } from '../../core/config.js'
 import { toModelMessages } from '../../core/session.js'
 import { extractMediaFromToolOutput } from '../../core/media.js'
@@ -21,18 +22,22 @@ export class VercelAIProvider implements AIProvider {
   readonly providerTag = 'vercel-ai' as const
 
   constructor(
-    private getTools: () => Promise<Record<string, Tool>>,
+    private getTools: (context?: ToolRequestContext) => Promise<Record<string, Tool>>,
     private getInstructions: () => Promise<string>,
     private maxSteps: number,
   ) {}
 
   /** Resolve model, tools, and instructions for a single request. */
-  private async resolve(disabledTools?: string[], profile?: ResolvedProfile) {
+  private async resolve(disabledTools?: string[], profile?: ResolvedProfile, opts?: GenerateOpts) {
     // If no profile provided (e.g. ask()), resolve the active one
     const effectiveProfile = profile ?? await resolveProfile()
     const [{ model }, allTools, instructions] = await Promise.all([
       createModelFromProfile(effectiveProfile),
-      this.getTools(),
+      this.getTools({
+        sessionId: opts?.sessionId,
+        provider: this.providerTag,
+        channelContext: opts?.channelContext,
+      }),
       this.getInstructions(),
     ])
 
@@ -64,7 +69,7 @@ export class VercelAIProvider implements AIProvider {
   }
 
   async *generate(entries: SessionEntry[], _prompt: string, opts?: GenerateOpts): AsyncGenerator<ProviderEvent> {
-    const { model, tools, instructions } = await this.resolve(opts?.disabledTools, opts?.profile)
+    const { model, tools, instructions } = await this.resolve(opts?.disabledTools, opts?.profile, opts)
     const messages = toModelMessages(entries)
 
     const channel = createChannel<ProviderEvent>()

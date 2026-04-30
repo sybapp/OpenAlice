@@ -243,6 +243,25 @@ const snapshotSchema = z.object({
 export const toolsSchema = z.object({
   /** Tool names that are disabled. Tools not listed are enabled by default. */
   disabled: z.array(z.string()).default([]),
+  permission: z.object({
+    enabled: z.boolean().default(true),
+    defaultAction: z.enum(['allow', 'deny']).default('allow'),
+    highRiskDefaultAction: z.enum(['allow', 'deny']).default('deny'),
+    audit: z.boolean().default(true),
+    rules: z.array(z.object({
+      action: z.enum(['allow', 'deny']),
+      tools: z.array(z.string()).optional(),
+      groups: z.array(z.string()).optional(),
+      input: z.record(z.string(), z.unknown()).optional(),
+      reason: z.string().optional(),
+    })).default([]),
+  }).default({
+    enabled: true,
+    defaultAction: 'allow',
+    highRiskDefaultAction: 'deny',
+    audit: true,
+    rules: [],
+  }),
 })
 
 const webhookTokenSchema = z.object({

@@ -231,16 +231,16 @@ async function main() {
   // ==================== AI Provider Chain ====================
 
   const vercelProvider = new VercelAIProvider(
-    () => toolCenter.getVercelTools(),
+    (context) => toolCenter.getVercelTools(context),
     getInstructions,
     config.agent.maxSteps,
   )
   const agentSdkProvider = new AgentSdkProvider(
-    () => toolCenter.getVercelTools(),
+    (context) => toolCenter.getVercelTools(context),
     getInstructions,
   )
   const codexProvider = new CodexProvider(
-    () => toolCenter.getVercelTools(),
+    (context) => toolCenter.getVercelTools(context),
     getInstructions,
   )
   const router = new GenerateRouter(vercelProvider, agentSdkProvider, codexProvider)

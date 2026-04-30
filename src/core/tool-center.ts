@@ -8,14 +8,29 @@
 
 import type { Tool } from 'ai'
 import { readToolsConfig } from './config.js'
+import {
+  ToolPermissionAuditLog,
+  ToolPermissionEngine,
+  makeAuditRecord,
+  permissionDeniedResult,
+  shouldAudit,
+  type ToolPermissionConfig,
+} from './tool-permission.js'
 
 interface ToolEntry {
   tool: Tool
   group: string
 }
 
+export interface ToolRequestContext {
+  sessionId?: string
+  provider?: string
+  channelContext?: string
+}
+
 export class ToolCenter {
   private tools: Record<string, ToolEntry> = {}
+  private auditLog = new ToolPermissionAuditLog()
 
   /** Batch-register tool definitions under a group. Later registrations overwrite same-name tools. */
   register(tools: Record<string, Tool>, group: string): void {
@@ -25,25 +40,19 @@ export class ToolCenter {
   }
 
   /** Vercel AI SDK format — returns only enabled tools (reads disabled list from disk). */
-  async getVercelTools(): Promise<Record<string, Tool>> {
-    const { disabled } = await readToolsConfig()
+  async getVercelTools(context?: ToolRequestContext): Promise<Record<string, Tool>> {
+    const { disabled, permission } = await readToolsConfig()
     const result: Record<string, Tool> = {}
-    if (disabled.length === 0) {
-      for (const [name, entry] of Object.entries(this.tools)) {
-        result[name] = entry.tool
-      }
-      return result
-    }
     const disabledSet = new Set(disabled)
     for (const [name, entry] of Object.entries(this.tools)) {
-      if (!disabledSet.has(name)) result[name] = entry.tool
+      if (!disabledSet.has(name)) result[name] = this.wrapTool(name, entry, permission, context)
     }
     return result
   }
 
   /** MCP format — same filtering as Vercel. Kept separate for future divergence. */
-  async getMcpTools(): Promise<Record<string, Tool>> {
-    return this.getVercelTools()
+  async getMcpTools(context?: ToolRequestContext): Promise<Record<string, Tool>> {
+    return this.getVercelTools(context)
   }
 
   /** Full tool inventory with group metadata (for frontend / API). */
@@ -68,5 +77,36 @@ export class ToolCenter {
   /** Tool name list (for logging / debugging). */
   list(): string[] {
     return Object.keys(this.tools)
+  }
+
+  private wrapTool(
+    name: string,
+    entry: ToolEntry,
+    permission: ToolPermissionConfig,
+    context?: ToolRequestContext,
+  ): Tool {
+    if (!entry.tool.execute) return entry.tool
+
+    const engine = new ToolPermissionEngine(permission)
+    const original = entry.tool.execute
+    return {
+      ...entry.tool,
+      execute: async (input, options) => {
+        const request = {
+          tool: name,
+          group: entry.group,
+          input,
+          sessionId: context?.sessionId,
+          provider: context?.provider,
+          channelContext: context?.channelContext,
+        }
+        const decision = engine.decide(request)
+        if (shouldAudit(decision, permission)) {
+          await this.auditLog.append(makeAuditRecord(request, decision))
+        }
+        if (decision.action === 'deny') return permissionDeniedResult(request, decision)
+        return original(input, options)
+      },
+    } as Tool
   }
 }

@@ -16,6 +16,7 @@ import { pino } from 'pino'
 import type { ProviderResult, ProviderEvent, AIProvider, GenerateOpts } from '../types.js'
 import type { SessionEntry } from '../../core/session.js'
 import type { ResolvedProfile } from '../../core/config.js'
+import type { ToolRequestContext } from '../../core/tool-center.js'
 import { toResponsesInput } from '../../core/session.js'
 import { readAgentConfig } from '../../core/config.js'
 import { getAccessToken, clearTokenCache } from './auth.js'
@@ -35,7 +36,7 @@ export class CodexProvider implements AIProvider {
   readonly providerTag = 'codex' as const
 
   constructor(
-    private getTools: () => Promise<Record<string, Tool>>,
+    private getTools: (context?: ToolRequestContext) => Promise<Record<string, Tool>>,
     private getSystemPrompt: () => Promise<string>,
   ) {}
 
@@ -100,7 +101,11 @@ export class CodexProvider implements AIProvider {
     const maxSteps = agentConfig.maxSteps
 
     // Build tools
-    const allTools = await this.getTools()
+    const allTools = await this.getTools({
+      sessionId: opts?.sessionId,
+      provider: this.providerTag,
+      channelContext: opts?.channelContext,
+    })
     const tools = convertTools(allTools, opts?.disabledTools)
 
     // Build structured input from session history + current prompt

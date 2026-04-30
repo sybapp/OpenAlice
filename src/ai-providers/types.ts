@@ -35,6 +35,8 @@ export interface GenerateOpts {
   disabledTools?: string[]
   /** Resolved profile — contains model, apiKey, baseUrl, etc. */
   profile?: ResolvedProfile
+  /** Local session id for permission/audit context. */
+  sessionId?: string
 }
 
 // ==================== AIProvider ====================
