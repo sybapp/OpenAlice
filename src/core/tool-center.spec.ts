@@ -9,6 +9,7 @@ vi.mock('./config.js', () => ({
 
 import { readToolsConfig } from './config.js'
 import { HookEngine } from './hook-engine.js'
+import { ToolApprovalCenter } from './tool-approval-center.js'
 const mockReadToolsConfig = vi.mocked(readToolsConfig)
 
 // ==================== Helpers ====================
@@ -22,6 +23,22 @@ function toolsConfig(disabled: string[] = []) {
     disabled,
     permission: { enabled: true, defaultAction: 'allow' as const, highRiskDefaultAction: 'deny' as const, audit: false, rules: [] },
   }
+}
+
+function askToolsConfig() {
+  return {
+    disabled: [],
+    permission: { enabled: true, defaultAction: 'allow' as const, highRiskDefaultAction: 'ask' as const, audit: false, rules: [] },
+  }
+}
+
+async function waitForPending(approvalCenter: ToolApprovalCenter) {
+  for (let i = 0; i < 20; i++) {
+    const pending = approvalCenter.list({ status: 'pending' })[0]
+    if (pending) return pending
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error('pending approval not created')
 }
 
 // ==================== ToolCenter ====================
@@ -285,6 +302,46 @@ describe('ToolCenter', () => {
       const result = await tools.echo.execute!({}, { toolCallId: 't1', messages: [] })
 
       expect(result).toEqual({ ok: 'filtered' })
+    })
+
+    it('waits for approval and executes after approval', async () => {
+      mockReadToolsConfig.mockResolvedValue(askToolsConfig())
+      const approvalCenter = new ToolApprovalCenter({ timeoutMs: 1000 })
+      const execute = vi.fn(async () => ({ ok: true }))
+      const tc = new ToolCenter({ approvalCenter })
+      tc.register({
+        placeOrder: { description: 'place', inputSchema: z.object({}), execute },
+      } as unknown as Record<string, Tool>, 'trading')
+
+      const tools = await tc.getVercelTools()
+      const pendingResult = tools.placeOrder.execute!({}, { toolCallId: 't1', messages: [] })
+      const pending = await waitForPending(approvalCenter)
+      await approvalCenter.approve(pending.requestId)
+
+      await expect(pendingResult).resolves.toEqual({ ok: true })
+      expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not execute when approval is rejected', async () => {
+      mockReadToolsConfig.mockResolvedValue(askToolsConfig())
+      const approvalCenter = new ToolApprovalCenter({ timeoutMs: 1000 })
+      const execute = vi.fn(async () => ({ ok: true }))
+      const tc = new ToolCenter({ approvalCenter })
+      tc.register({
+        placeOrder: { description: 'place', inputSchema: z.object({}), execute },
+      } as unknown as Record<string, Tool>, 'trading')
+
+      const tools = await tc.getVercelTools()
+      const pendingResult = tools.placeOrder.execute!({}, { toolCallId: 't1', messages: [] })
+      const pending = await waitForPending(approvalCenter)
+      await approvalCenter.reject(pending.requestId, 'no')
+
+      await expect(pendingResult).resolves.toMatchObject({
+        code: 'TOOL_PERMISSION_DENIED',
+        approvalRequestId: pending.requestId,
+        reason: 'no',
+      })
+      expect(execute).not.toHaveBeenCalled()
     })
   })
 })

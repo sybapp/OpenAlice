@@ -13,10 +13,12 @@ import {
   ToolPermissionEngine,
   makeAuditRecord,
   permissionDeniedResult,
+  permissionApprovalRejectedResult,
   shouldAudit,
   type ToolPermissionConfig,
 } from './tool-permission.js'
 import { HookEngine, hookDeniedResult } from './hook-engine.js'
+import type { ToolApprovalCenter } from './tool-approval-center.js'
 
 interface ToolEntry {
   tool: Tool
@@ -33,9 +35,11 @@ export class ToolCenter {
   private tools: Record<string, ToolEntry> = {}
   private auditLog = new ToolPermissionAuditLog()
   private hookEngine?: HookEngine
+  private approvalCenter?: ToolApprovalCenter
 
-  constructor(opts?: { hookEngine?: HookEngine }) {
+  constructor(opts?: { hookEngine?: HookEngine; approvalCenter?: ToolApprovalCenter }) {
     this.hookEngine = opts?.hookEngine
+    this.approvalCenter = opts?.approvalCenter
   }
 
   /** Batch-register tool definitions under a group. Later registrations overwrite same-name tools. */
@@ -123,6 +127,24 @@ export class ToolCenter {
         const decision = engine.decide(request)
         if (shouldAudit(decision, permission)) {
           await this.auditLog.append(makeAuditRecord(request, decision))
+        }
+        if (decision.action === 'ask') {
+          if (!this.approvalCenter) {
+            return permissionDeniedResult(request, { ...decision, action: 'deny', reason: 'approval center unavailable' })
+          }
+          const approval = await this.approvalCenter.requestApproval(request, decision)
+          if (!approval.approved) {
+            await this.hookEngine?.run('PermissionDenied', {
+              tool: name,
+              group: entry.group,
+              input: effectiveInput,
+              decision,
+              sessionId: context?.sessionId,
+              provider: context?.provider,
+              channelContext: context?.channelContext,
+            })
+            return permissionApprovalRejectedResult(request, decision, approval.requestId, approval.reason)
+          }
         }
         if (decision.action === 'deny') {
           await this.hookEngine?.run('PermissionDenied', {

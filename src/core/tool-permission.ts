@@ -1,7 +1,7 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-export type ToolPermissionAction = 'allow' | 'deny'
+export type ToolPermissionAction = 'allow' | 'deny' | 'ask'
 export type ToolRiskLevel = 'low' | 'medium' | 'high'
 
 export interface ToolPermissionRule {
@@ -51,7 +51,7 @@ export interface ToolPermissionAuditRecord {
 export const DEFAULT_TOOL_PERMISSION_CONFIG: ToolPermissionConfig = {
   enabled: true,
   defaultAction: 'allow',
-  highRiskDefaultAction: 'deny',
+  highRiskDefaultAction: 'ask',
   audit: true,
   rules: [],
 }
@@ -125,6 +125,22 @@ export function permissionDeniedResult(request: ToolPermissionRequest, decision:
     tool: request.tool,
     reason: decision.reason,
     risk: decision.risk,
+  }
+}
+
+export function permissionApprovalRejectedResult(
+  request: ToolPermissionRequest,
+  decision: ToolPermissionDecision,
+  approvalRequestId: string,
+  reason: string,
+) {
+  return {
+    error: 'Tool call rejected by approval policy',
+    code: 'TOOL_PERMISSION_DENIED',
+    tool: request.tool,
+    reason,
+    risk: decision.risk,
+    approvalRequestId,
   }
 }
 

@@ -103,6 +103,23 @@ export interface HookErrorPayload {
   durationMs: number
 }
 
+export interface ToolApprovalRequestedPayload {
+  requestId: string
+  tool: string
+  group: string
+  risk: string
+  sessionId?: string
+  provider?: string
+  expiresAt: string
+}
+
+export interface ToolApprovalResolvedPayload {
+  requestId: string
+  tool: string
+  group: string
+  reason?: string
+}
+
 // ==================== Event Map ====================
 
 // Import the actual CronFirePayload type for use in the map
@@ -123,6 +140,10 @@ export interface AgentEventMap {
   'hook.completed': HookCompletedPayload
   'hook.blocked': HookBlockedPayload
   'hook.error': HookErrorPayload
+  'tool_approval.requested': ToolApprovalRequestedPayload
+  'tool_approval.approved': ToolApprovalResolvedPayload
+  'tool_approval.rejected': ToolApprovalResolvedPayload
+  'tool_approval.expired': ToolApprovalResolvedPayload
 }
 
 // ==================== TypeBox Schemas ====================
@@ -214,6 +235,23 @@ const HookErrorSchema = Type.Object({
   durationMs: Type.Number(),
 })
 
+const ToolApprovalRequestedSchema = Type.Object({
+  requestId: Type.String(),
+  tool: Type.String(),
+  group: Type.String(),
+  risk: Type.String(),
+  sessionId: Type.Optional(Type.String()),
+  provider: Type.Optional(Type.String()),
+  expiresAt: Type.String(),
+})
+
+const ToolApprovalResolvedSchema = Type.Object({
+  requestId: Type.String(),
+  tool: Type.String(),
+  group: Type.String(),
+  reason: Type.Optional(Type.String()),
+})
+
 // ==================== AgentEvents — metadata registry ====================
 
 export interface AgentEventMeta {
@@ -285,6 +323,22 @@ export const AgentEvents: { [K in keyof AgentEventMap]: AgentEventMeta } = {
   'hook.error': {
     schema: HookErrorSchema,
     description: 'A lifecycle hook failed or timed out.',
+  },
+  'tool_approval.requested': {
+    schema: ToolApprovalRequestedSchema,
+    description: 'A tool call is waiting for manual approval.',
+  },
+  'tool_approval.approved': {
+    schema: ToolApprovalResolvedSchema,
+    description: 'A pending tool approval was approved.',
+  },
+  'tool_approval.rejected': {
+    schema: ToolApprovalResolvedSchema,
+    description: 'A pending tool approval was rejected.',
+  },
+  'tool_approval.expired': {
+    schema: ToolApprovalResolvedSchema,
+    description: 'A pending tool approval expired before user action.',
   },
 }
 

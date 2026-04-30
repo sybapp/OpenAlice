@@ -240,6 +240,8 @@ const snapshotSchema = z.object({
   every: z.string().default('15m'),
 })
 
+const toolPermissionActionSchema = z.enum(['allow', 'deny', 'ask'])
+
 const hookEventSchema = z.enum([
   'SessionStart',
   'UserPromptSubmit',
@@ -270,11 +272,11 @@ export const toolsSchema = z.object({
   disabled: z.array(z.string()).default([]),
   permission: z.object({
     enabled: z.boolean().default(true),
-    defaultAction: z.enum(['allow', 'deny']).default('allow'),
-    highRiskDefaultAction: z.enum(['allow', 'deny']).default('deny'),
+    defaultAction: toolPermissionActionSchema.default('allow'),
+    highRiskDefaultAction: toolPermissionActionSchema.default('ask'),
     audit: z.boolean().default(true),
     rules: z.array(z.object({
-      action: z.enum(['allow', 'deny']),
+      action: toolPermissionActionSchema,
       tools: z.array(z.string()).optional(),
       groups: z.array(z.string()).optional(),
       input: z.record(z.string(), z.unknown()).optional(),
@@ -283,7 +285,7 @@ export const toolsSchema = z.object({
   }).default({
     enabled: true,
     defaultAction: 'allow',
-    highRiskDefaultAction: 'deny',
+    highRiskDefaultAction: 'ask',
     audit: true,
     rules: [],
   }),

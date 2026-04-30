@@ -15,6 +15,7 @@ import type { ToolCenter } from './tool-center.js'
 import type { ListenerRegistry } from './listener-registry.js'
 import type { EventBus } from './event-bus.js'
 import type { HookEngine } from './hook-engine.js'
+import type { ToolApprovalCenter } from './tool-approval-center.js'
 
 export type { Config, WebChannel }
 
@@ -44,6 +45,7 @@ export interface EngineContext {
    *  plugins / hacks / extension code instead of plumbing eventLog. */
   fire: EventBus
   hookEngine: HookEngine
+  toolApprovalCenter: ToolApprovalCenter
 
   // Market data
   bbEngine: QueryExecutor

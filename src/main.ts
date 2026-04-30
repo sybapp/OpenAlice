@@ -49,6 +49,7 @@ import { createNewsArchiveTools } from './tool/news.js'
 import { BrainMemoryStore } from './core/brain-memory-store.js'
 import { ContextAssembler } from './core/context-assembler.js'
 import { HookEngine } from './core/hook-engine.js'
+import { ToolApprovalCenter } from './core/tool-approval-center.js'
 
 // ==================== Persistence paths ====================
 
@@ -89,7 +90,9 @@ async function main() {
   // ==================== Tool Center (created early — UTAManager needs it) ====================
 
   const hookEngine = new HookEngine({ config: config.hooks, eventLog })
-  const toolCenter = new ToolCenter({ hookEngine })
+  const toolApprovalCenter = new ToolApprovalCenter({ eventLog })
+  await toolApprovalCenter.restore()
+  const toolCenter = new ToolCenter({ hookEngine, approvalCenter: toolApprovalCenter })
 
   // ==================== Trading Account Manager ====================
 
@@ -258,6 +261,7 @@ async function main() {
   // ==================== Connector Center ====================
 
   const connectorCenter = new ConnectorCenter({ eventLog, listenerRegistry })
+  toolApprovalCenter.setConnectorCenter(connectorCenter)
 
   // Session awareness tools (registered here because they need connectorCenter)
   toolCenter.register(createSessionTools(connectorCenter), 'session')
@@ -409,6 +413,7 @@ async function main() {
     listenerRegistry,
     fire: createEventBus(eventLog),
     hookEngine,
+    toolApprovalCenter,
     bbEngine: getSDKExecutor(),
     marketSearch,
     utaManager, fxService, snapshotService,
@@ -452,6 +457,7 @@ async function main() {
     metricsListener.stop()
     cronListener.stop()
     cronEngine.stop()
+    await toolApprovalCenter.markAllPendingStale()
     connectorCenter.stop()
     await listenerRegistry.stop()
     for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
