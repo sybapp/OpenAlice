@@ -47,6 +47,7 @@ describe('ContextAssembler', () => {
     expect(bundle.systemPrompt).toContain('## Runtime Context')
     expect(bundle.systemPrompt).toContain('## Channel Context')
     expect(bundle.systemPrompt).toContain('## History Context')
+    expect(bundle.report.totalTokens).toBeGreaterThan(0)
     expect(bundle.activeEntries).toHaveLength(1)
   })
 
@@ -84,6 +85,53 @@ describe('ContextAssembler', () => {
     expect(bundle.recalledMemory).toHaveLength(1)
     expect(bundle.systemPrompt).toContain('## Recalled Long-Term Memory')
     expect(bundle.systemPrompt).toContain('Do not use provider-native sessions.')
+  })
+
+  it('does not recall memory when the prompt asks to ignore memory', async () => {
+    const { brain, personaFile, memoryDir } = await setupAssembler()
+    await mkdir(memoryDir, { recursive: true })
+    await writeFile(join(memoryDir, 'project_context.md'), 'Do not use provider-native sessions.')
+
+    const memoryStore = new BrainMemoryStore({ memoryDir })
+    const assembler = new ContextAssembler({ brain, memoryStore, personaFile })
+    const bundle = await assembler.assemble({
+      activeEntries: [],
+      prompt: 'ignore memory and answer from this prompt only',
+    })
+
+    expect(bundle.recalledMemory).toHaveLength(0)
+    expect(bundle.systemPrompt).not.toContain('Do not use provider-native sessions.')
+    expect(bundle.report.memoryIgnored).toBe(true)
+  })
+
+  it('reports compact continuation metadata', async () => {
+    const { brain, memoryStore, personaFile } = await setupAssembler()
+    const assembler = new ContextAssembler({ brain, memoryStore, personaFile })
+    const bundle = await assembler.assemble({
+      activeEntries: [
+        {
+          type: 'system',
+          subtype: 'compact_boundary',
+          message: { role: 'system', content: 'Conversation compacted' },
+          compactMetadata: {
+            trigger: 'auto',
+            preTokens: 100,
+            summaryUuid: 'summary-1',
+            preservedEntryUuids: [],
+            preservedToolUseIds: ['tool-1'],
+          },
+          uuid: 'boundary',
+          parentUuid: null,
+          sessionId: 's1',
+          timestamp: '2026-01-01T00:00:00Z',
+        },
+      ],
+      prompt: 'continue',
+    })
+
+    expect(bundle.report.compact.isCompactContinuation).toBe(true)
+    expect(bundle.report.compact.summaryUuid).toBe('summary-1')
+    expect(bundle.report.compact.preservedToolUseIds).toEqual(['tool-1'])
   })
 
   it('emits stale and critical stale warnings', () => {

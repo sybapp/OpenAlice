@@ -23,6 +23,7 @@ export interface MemoryEntry {
 export interface MemoryRecallOptions {
   query?: string
   recentToolNames?: string[]
+  excludedIds?: string[]
   limit?: number
   entryMaxChars?: number
 }
@@ -31,10 +32,12 @@ export interface BrainMemoryStoreConfig {
   memoryDir?: string
   recallLimit?: number
   entryMaxChars?: number
+  manifestMaxBytes?: number
 }
 
 const DEFAULT_RECALL_LIMIT = 5
 const DEFAULT_ENTRY_MAX_CHARS = 1600
+const DEFAULT_MANIFEST_MAX_BYTES = 25 * 1024
 const MEMORY_FILENAME_RE = /^(user|feedback|project|trading|reference)_[\w.-]+\.md$/i
 
 interface ParsedMarkdown {
@@ -46,11 +49,13 @@ export class BrainMemoryStore {
   private memoryDir: string
   private recallLimit: number
   private entryMaxChars: number
+  private manifestMaxBytes: number
 
   constructor(config: BrainMemoryStoreConfig = {}) {
     this.memoryDir = config.memoryDir ?? resolve('data/brain/memory')
     this.recallLimit = config.recallLimit ?? DEFAULT_RECALL_LIMIT
     this.entryMaxChars = config.entryMaxChars ?? DEFAULT_ENTRY_MAX_CHARS
+    this.manifestMaxBytes = config.manifestMaxBytes ?? DEFAULT_MANIFEST_MAX_BYTES
   }
 
   async list(): Promise<MemoryEntry[]> {
@@ -77,8 +82,10 @@ export class BrainMemoryStore {
       options.query ?? '',
       ...(options.recentToolNames ?? []),
     ].join(' '))
+    const excludedIds = new Set(options.excludedIds ?? [])
 
     const scored = entries
+      .filter((entry) => !excludedIds.has(entry.id))
       .map((entry) => ({
         entry: {
           ...entry,
@@ -104,6 +111,8 @@ export class BrainMemoryStore {
     const manifestPath = join(this.memoryDir, 'MEMORY.md')
     let raw = ''
     try {
+      const info = await stat(manifestPath)
+      if (info.size > this.manifestMaxBytes) return []
       raw = await readFile(manifestPath, 'utf-8')
     } catch {
       return []

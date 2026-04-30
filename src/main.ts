@@ -130,11 +130,16 @@ async function main() {
   const memoryStore = new BrainMemoryStore({
     recallLimit: config.brain.memoryRecallLimit,
     entryMaxChars: config.brain.memoryEntryMaxChars,
+    manifestMaxBytes: config.brain.memoryManifestMaxBytes,
   })
   const contextAssembler = new ContextAssembler({
     brain,
     memoryStore,
     config: config.brain,
+    budget: {
+      systemContextMaxTokens: config.compaction.systemContextMaxTokens,
+      memoryMaxTokens: config.compaction.memoryMaxTokens,
+    },
     personaFile: PERSONA_FILE,
   })
   const getInstructions = async () => {

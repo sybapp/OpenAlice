@@ -7,6 +7,13 @@ import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from './compaction.j
 import { VercelAIProvider } from '../ai-providers/vercel-ai-sdk/vercel-provider.js'
 import { createModelFromProfile } from '../ai-providers/vercel-ai-sdk/model-factory.js'
 import { MemorySessionStore, type SessionEntry } from './session.js'
+import { ContextAssembler } from './context-assembler.js'
+import { BrainMemoryStore } from './brain-memory-store.js'
+import { Brain } from '../domain/brain/index.js'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { MockAIProvider, doneEvent } from '../ai-providers/mock/index.js'
 
 // ==================== Helpers ====================
 
@@ -225,6 +232,42 @@ describe('AgentCenter', () => {
 
       await agentCenter.askWithSession('test', session)
       expect(spy).toHaveBeenCalled()
+    })
+
+    it('does not surface the same memory twice for one live session', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'openalice-agent-memory-'))
+      const memoryDir = join(dir, 'memory')
+      const personaFile = join(dir, 'persona.md')
+      await mkdir(memoryDir, { recursive: true })
+      await writeFile(personaFile, 'You are a test agent.')
+      await writeFile(join(memoryDir, 'project_context.md'), [
+        '---',
+        'title: Project Context',
+        'keywords: repeat',
+        '---',
+        'Remember this only once.',
+      ].join('\n'))
+
+      const provider = new MockAIProvider([doneEvent('ok')])
+      const router = new GenerateRouter(provider, null)
+      const agentCenter = new AgentCenter({
+        router,
+        compaction: DEFAULT_COMPACTION_CONFIG,
+        contextAssembler: new ContextAssembler({
+          brain: new Brain({}),
+          memoryStore: new BrainMemoryStore({ memoryDir }),
+          personaFile,
+        }),
+      })
+      const session = new MemorySessionStore('memory-session')
+
+      await agentCenter.askWithSession('repeat', session)
+      await agentCenter.askWithSession('repeat', session)
+
+      const firstSystem = provider.generateCalls[0]?.opts?.systemPrompt
+      const secondSystem = provider.generateCalls[1]?.opts?.systemPrompt
+      expect(String(firstSystem)).toContain('Remember this only once.')
+      expect(String(secondSystem)).not.toContain('Remember this only once.')
     })
   })
 

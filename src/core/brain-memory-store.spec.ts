@@ -86,4 +86,26 @@ describe('BrainMemoryStore', () => {
     expect(recalled[0].content.length).toBeLessThanOrEqual(92)
     expect(recalled[0].content).toContain('[truncated]')
   })
+
+  it('excludes already surfaced memory ids', async () => {
+    const dir = await tempMemoryDir()
+    await writeFile(join(dir, 'project_a.md'), 'context alpha')
+    await writeFile(join(dir, 'project_b.md'), 'context beta')
+
+    const store = new BrainMemoryStore({ memoryDir: dir })
+    const recalled = await store.recall({ query: 'context', excludedIds: ['project_a'] })
+
+    expect(recalled.map((entry) => entry.id)).toEqual(['project_b'])
+  })
+
+  it('ignores oversized manifest and falls back to scanning files', async () => {
+    const dir = await tempMemoryDir()
+    await writeFile(join(dir, 'MEMORY.md'), 'x'.repeat(64))
+    await writeFile(join(dir, 'project_scanned.md'), 'scanned memory')
+
+    const store = new BrainMemoryStore({ memoryDir: dir, manifestMaxBytes: 16 })
+    const entries = await store.list()
+
+    expect(entries.map((entry) => entry.id)).toEqual(['project_scanned'])
+  })
 })

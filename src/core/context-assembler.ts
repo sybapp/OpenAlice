@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path'
 import type { Brain } from '../domain/brain/index.js'
 import type { SessionEntry } from './session.js'
 import type { BrainMemoryStore, MemoryEntry } from './brain-memory-store.js'
+import { applyContextBudget, type ContextBudget, type ContextBudgetReport, type ContextSectionPriority } from './context-budget.js'
+import { rehydratePostCompactContext, type PostCompactRehydration } from './post-compact-rehydrator.js'
 
 export type ContextSectionKind =
   | 'persona'
@@ -16,6 +18,12 @@ export interface ContextSection {
   kind: ContextSectionKind
   title: string
   content: string
+  priority?: ContextSectionPriority
+  maxChars?: number
+  tokenEstimate?: number
+  included?: boolean
+  truncated?: boolean
+  reason?: string
 }
 
 export interface ContextBundle {
@@ -23,6 +31,15 @@ export interface ContextBundle {
   activeEntries: SessionEntry[]
   sections: ContextSection[]
   recalledMemory: MemoryEntry[]
+  report: ContextAssemblyReport
+}
+
+export interface ContextAssemblyReport extends ContextBudgetReport {
+  memoryIgnored: boolean
+  recalledMemoryCount: number
+  recalledMemoryIds: string[]
+  alreadySurfacedMemoryIds: string[]
+  compact: PostCompactRehydration
 }
 
 export interface BrainContextConfig {
@@ -31,12 +48,14 @@ export interface BrainContextConfig {
   frontalLobeMaxChars: number
   memoryRecallLimit: number
   memoryEntryMaxChars: number
+  memoryAlreadySurfacedWindow: number
 }
 
 export interface ContextAssemblerOptions {
   brain: Brain
   memoryStore: BrainMemoryStore
   config?: Partial<BrainContextConfig>
+  budget?: ContextBudget
   personaFile?: string
   fallbackSystemPrompt?: () => Promise<string>
 }
@@ -47,6 +66,7 @@ export interface AssembleContextOptions {
   channelContext?: string
   systemPromptOverride?: string
   recentToolNames?: string[]
+  alreadySurfacedMemoryIds?: string[]
 }
 
 export const DEFAULT_BRAIN_CONTEXT_CONFIG: BrainContextConfig = {
@@ -55,6 +75,7 @@ export const DEFAULT_BRAIN_CONTEXT_CONFIG: BrainContextConfig = {
   frontalLobeMaxChars: 4000,
   memoryRecallLimit: 5,
   memoryEntryMaxChars: 1600,
+  memoryAlreadySurfacedWindow: 20,
 }
 
 export class ContextAssembler {
@@ -68,18 +89,25 @@ export class ContextAssembler {
 
   async assemble(options: AssembleContextOptions): Promise<ContextBundle> {
     const sections: ContextSection[] = []
+    const compact = rehydratePostCompactContext(options.activeEntries)
+    const memoryIgnored = shouldIgnoreMemory(options.prompt)
+    const alreadySurfacedMemoryIds = [
+      ...(options.alreadySurfacedMemoryIds ?? []),
+      ...collectSurfacedMemoryIds(options.activeEntries, this.config.memoryAlreadySurfacedWindow),
+    ]
 
     const persona = options.systemPromptOverride ?? await this.readPersona()
     if (persona.trim()) {
-      sections.push({ kind: 'persona', title: 'Persona', content: persona.trim() })
+      sections.push({ kind: 'persona', title: 'Persona', content: persona.trim(), priority: 'required' })
     }
 
     const frontalLobeSection = this.buildFrontalLobeSection()
     if (frontalLobeSection) sections.push(frontalLobeSection)
 
-    const recalledMemory = await this.opts.memoryStore.recall({
-      query: this.buildRecallQuery(options),
+    const recalledMemory = memoryIgnored ? [] : await this.opts.memoryStore.recall({
+      query: this.buildRecallQuery(options, compact),
       recentToolNames: options.recentToolNames,
+      excludedIds: alreadySurfacedMemoryIds,
       limit: this.config.memoryRecallLimit,
       entryMaxChars: this.config.memoryEntryMaxChars,
     })
@@ -88,6 +116,7 @@ export class ContextAssembler {
         kind: 'memory',
         title: 'Recalled Long-Term Memory',
         content: renderMemory(recalledMemory),
+        priority: 'normal',
       })
     }
 
@@ -99,6 +128,7 @@ export class ContextAssembler {
         kind: 'channel',
         title: 'Channel Context',
         content: options.channelContext.trim(),
+        priority: 'normal',
       })
     }
 
@@ -106,13 +136,24 @@ export class ContextAssembler {
       kind: 'history_context',
       title: 'History Context',
       content: 'The active session entries supplied with this request remain the source of truth for the current conversation. Compact summaries are continuation context only. Recalled memory is advisory and should be checked against current tools when facts may have changed.',
+      priority: 'required',
     })
 
+    const { sections: budgetedSections, report } = applyContextBudget(sections, this.opts.budget)
+
     return {
-      systemPrompt: renderSections(sections),
+      systemPrompt: renderSections(budgetedSections),
       activeEntries: options.activeEntries,
-      sections,
+      sections: budgetedSections,
       recalledMemory,
+      report: {
+        ...report,
+        memoryIgnored,
+        recalledMemoryCount: recalledMemory.length,
+        recalledMemoryIds: recalledMemory.map((entry) => entry.id),
+        alreadySurfacedMemoryIds,
+        compact,
+      },
     }
   }
 
@@ -131,6 +172,7 @@ export class ContextAssembler {
         kind: 'frontal_lobe',
         title: 'Frontal Lobe',
         content: 'No active frontal-lobe note is set. If this round creates a short-term working stance, write it with updateFrontalLobe.',
+        priority: 'high',
       }
     }
 
@@ -141,7 +183,13 @@ export class ContextAssembler {
       truncate(content.trim(), this.config.frontalLobeMaxChars),
     ].filter(Boolean)
 
-    return { kind: 'frontal_lobe', title: 'Frontal Lobe', content: parts.join('\n\n') }
+    return {
+      kind: 'frontal_lobe',
+      title: 'Frontal Lobe',
+      content: parts.join('\n\n'),
+      priority: 'high',
+      maxChars: this.config.frontalLobeMaxChars + 500,
+    }
   }
 
   private buildRuntimeSection(): ContextSection {
@@ -153,15 +201,16 @@ export class ContextAssembler {
         `Working directory: ${process.cwd()}`,
         'Context policy: data/sessions/*.jsonl is the conversation source of truth. data/brain/frontal-lobe.md is short-term working state. data/brain/memory/*.md is long-term memory recalled as needed.',
       ].join('\n'),
+      priority: 'required',
     }
   }
 
-  private buildRecallQuery(options: AssembleContextOptions): string {
+  private buildRecallQuery(options: AssembleContextOptions, compact: PostCompactRehydration): string {
     const recentText = options.activeEntries
       .slice(-8)
       .map((entry) => entryText(entry))
       .join('\n')
-    return [options.prompt, recentText].filter(Boolean).join('\n')
+    return [options.prompt, compact.recallHint, recentText].filter(Boolean).join('\n')
   }
 }
 
@@ -183,7 +232,7 @@ export function buildStaleWarning(
 
 function renderSections(sections: ContextSection[]): string {
   return sections
-    .filter((section) => section.content.trim())
+    .filter((section) => section.included !== false && section.content.trim())
     .map((section) => `## ${section.title}\n\n${section.content.trim()}`)
     .join('\n\n---\n\n')
 }
@@ -198,8 +247,34 @@ function renderMemory(entries: MemoryEntry[]): string {
       entry.keywords.length ? `keywords=${entry.keywords.join(', ')}` : '',
     ].filter(Boolean).join('; ')
 
-    return `### ${entry.title}\n${meta}\n\n${entry.content}`
+    return `### ${entry.title}\n${meta}\n\nUse this as long-term preference/constraint context only. Verify current files, prices, positions, configs, and tool state before relying on factual claims.\n\n${entry.content}`
   }).join('\n\n')
+}
+
+function shouldIgnoreMemory(prompt: string): boolean {
+  const normalized = prompt.toLowerCase()
+  return [
+    'ignore memory',
+    'ignore memories',
+    'do not use memory',
+    "don't use memory",
+    'without memory',
+    '不要使用记忆',
+    '忽略记忆',
+    '别用记忆',
+  ].some((needle) => normalized.includes(needle))
+}
+
+function collectSurfacedMemoryIds(entries: SessionEntry[], window: number): string[] {
+  const ids = new Set<string>()
+  const recent = entries.slice(-Math.max(0, window))
+  for (const entry of recent) {
+    const text = entryText(entry)
+    for (const match of text.matchAll(/id=([A-Za-z0-9_.-]+)/g)) {
+      ids.add(match[1])
+    }
+  }
+  return [...ids]
 }
 
 function entryText(entry: SessionEntry): string {

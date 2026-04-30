@@ -49,6 +49,7 @@ export class AgentCenter {
   private defaultMaxHistory: number
   private toolCallLog?: ToolCallLog
   private contextAssembler?: ContextAssembler
+  private surfacedMemoryBySession = new Map<string, string[]>()
 
   constructor(opts: AgentCenterOpts) {
     this.router = opts.router
@@ -111,6 +112,7 @@ export class AgentCenter {
           systemPromptOverride: opts?.systemPrompt,
           channelContext: opts?.channelContext ?? opts?.historyPreamble,
           recentToolNames,
+          alreadySurfacedMemoryIds: this.surfacedMemoryBySession.get(session.id) ?? [],
         })
       : null
     const activeEntries = contextBundle?.activeEntries ?? entries
@@ -125,6 +127,9 @@ export class AgentCenter {
       profile,
     }
     const source = provider.generate(activeEntries, prompt, genOpts)
+    if (contextBundle?.recalledMemory.length) {
+      this.rememberSurfacedMemory(session.id, contextBundle.recalledMemory.map((entry) => entry.id))
+    }
 
     // 6. Consume provider events — unified pipeline
     const media: MediaAttachment[] = []
@@ -238,6 +243,11 @@ export class AgentCenter {
         mediaUrls,
       },
     }
+  }
+
+  private rememberSurfacedMemory(sessionId: string, ids: string[]): void {
+    const existing = this.surfacedMemoryBySession.get(sessionId) ?? []
+    this.surfacedMemoryBySession.set(sessionId, [...new Set([...existing, ...ids])].slice(-50))
   }
 }
 

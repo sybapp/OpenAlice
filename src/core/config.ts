@@ -200,6 +200,8 @@ const brainSchema = z.object({
   frontalLobeMaxChars: z.number().default(4000),
   memoryRecallLimit: z.number().default(5),
   memoryEntryMaxChars: z.number().default(1600),
+  memoryManifestMaxBytes: z.number().default(25_600),
+  memoryAlreadySurfacedWindow: z.number().default(20),
 })
 
 const activeHoursSchema = z.object({
