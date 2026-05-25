@@ -175,7 +175,6 @@ export async function getHistoricalData(
     interval?: string
   } = {},
 ): Promise<Record<string, unknown>[]> {
-  const yf = getYF()
   const interval = options.interval ?? '1d'
 
   const period1 = options.startDate
@@ -186,43 +185,60 @@ export async function getHistoricalData(
     ? new Date(options.endDate)
     : new Date()
 
-  const chartResult = await withRetry(() => yf.chart(symbol, {
-    period1,
-    period2,
-    interval: interval as any,
-  }))
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const yf = getYF()
+    try {
+      const chartResult = await withRetry(() => yf.chart(symbol, {
+        period1,
+        period2,
+        interval: interval as any,
+      }))
 
-  if (!chartResult?.quotes?.length) {
-    throw new EmptyDataError(`No historical data for ${symbol}`)
+      if (!chartResult?.quotes?.length) {
+        throw new EmptyDataError(`No historical data for ${symbol}`)
+      }
+
+      const isIntraday = ['1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h'].includes(interval)
+
+      const records: Record<string, unknown>[] = []
+      for (const q of chartResult.quotes) {
+        if (q.open == null || q.open <= 0) continue
+
+        const date = q.date instanceof Date ? q.date : new Date(q.date as any)
+        const dateStr = isIntraday
+          ? date.toISOString().replace('T', ' ').slice(0, 19)
+          : date.toISOString().slice(0, 10)
+
+        records.push({
+          date: dateStr,
+          open: q.open ?? null,
+          high: q.high ?? null,
+          low: q.low ?? null,
+          close: q.close ?? null,
+          volume: q.volume ?? null,
+          ...(q.adjclose != null ? { adj_close: q.adjclose } : {}),
+        })
+      }
+
+      if (records.length === 0) {
+        throw new EmptyDataError(`No valid historical data for ${symbol}`)
+      }
+
+      recordYFSuccess()
+      return records
+    } catch (err) {
+      recordYFFailure()
+      if (attempt === 0) {
+        _yf = null
+        _yfFailCount = 0
+        await new Promise(r => setTimeout(r, 1000))
+        continue
+      }
+      throw err
+    }
   }
 
-  const isIntraday = ['1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h'].includes(interval)
-
-  const records: Record<string, unknown>[] = []
-  for (const q of chartResult.quotes) {
-    if (q.open == null || q.open <= 0) continue
-
-    const date = q.date instanceof Date ? q.date : new Date(q.date as any)
-    const dateStr = isIntraday
-      ? date.toISOString().replace('T', ' ').slice(0, 19)
-      : date.toISOString().slice(0, 10)
-
-    records.push({
-      date: dateStr,
-      open: q.open ?? null,
-      high: q.high ?? null,
-      low: q.low ?? null,
-      close: q.close ?? null,
-      volume: q.volume ?? null,
-      ...(q.adjclose != null ? { adj_close: q.adjclose } : {}),
-    })
-  }
-
-  if (records.length === 0) {
-    throw new EmptyDataError(`No valid historical data for ${symbol}`)
-  }
-
-  return records
+  throw new EmptyDataError(`No historical data for ${symbol}`)
 }
 
 /**
@@ -488,4 +504,3 @@ export async function getYahooNews(
   const result = await withRetry(() => yf.search(symbol, { quotesCount: 0, newsCount: limit }))
   return (result.news ?? []) as Record<string, unknown>[]
 }
-
