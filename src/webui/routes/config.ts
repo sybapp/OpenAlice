@@ -1,12 +1,28 @@
 import { Hono } from 'hono'
 import {
-  loadConfig, writeConfigSection, readAIProviderConfig, validSections,
+  loadConfig, readMarketDataConfig, writeConfigSection, readAIProviderConfig, validSections,
   writeProfile, deleteProfile, setActiveProfile,
   profileSchema, type ConfigSection, type Profile,
 } from '../../core/config.js'
 import type { EngineContext } from '../../core/types.js'
 import { BUILTIN_PRESETS } from '../../ai-providers/presets.js'
 import { getSdkAdapterInfo } from '../../ai-providers/sdk-adapters.js'
+import {
+  addMarketDataAlert,
+  addMarketDataWatch,
+  listMarketDataAlertRuns,
+  listMarketDataAlerts,
+  listMarketDataWatchWithCache,
+  normalizeAlertRunsQuery,
+  providerFor,
+  readMarketDataAlertStateSummary,
+  readOhlcvCacheStatus,
+  recordMarketDataAlertFeedback,
+  removeMarketDataAlert,
+  removeMarketDataWatch,
+  setMarketDataAlertsEnabled,
+  setMarketDataWatchEnabled,
+} from '../../domain/market-data/ohlcv/index.js'
 
 interface ConfigRouteOpts {
   ctx?: EngineContext
@@ -171,6 +187,197 @@ export function createMarketDataRoutes(ctx: EngineContext) {
   }
 
   const app = new Hono()
+
+  app.get('/watch', async (c) => {
+    try {
+      return c.json(await listMarketDataWatchWithCache(await readMarketDataConfig()))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+  })
+
+  app.post('/watch', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = addMarketDataWatch(await readMarketDataConfig(), {
+        asset: body.asset,
+        symbol: body.symbol,
+        intervals: body.intervals,
+        provider: body.provider,
+        lookbackBars: body.lookbackBars ?? 300,
+        enableWatch: body.enableWatch ?? true,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.delete('/watch', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = removeMarketDataWatch(await readMarketDataConfig(), {
+        asset: body.asset,
+        symbol: body.symbol,
+        provider: body.provider,
+        intervals: body.intervals,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post('/watch/enabled', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = setMarketDataWatchEnabled(await readMarketDataConfig(), {
+        enabled: Boolean(body.enabled),
+        every: typeof body.every === 'string' ? body.every : undefined,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post('/watch/run', async (c) => {
+    if (!ctx.runMarketDataWatchNow) return c.json({ error: 'Market data watcher is not available' }, 503)
+    return c.json(await ctx.runMarketDataWatchNow())
+  })
+
+  app.get('/alerts', async (c) => {
+    try {
+      return c.json(listMarketDataAlerts(await readMarketDataConfig()))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+  })
+
+  app.post('/alerts', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = addMarketDataAlert(await readMarketDataConfig(), {
+        asset: body.asset,
+        symbol: body.symbol,
+        interval: body.interval ?? '5m',
+        provider: body.provider,
+        enabled: body.enabled ?? true,
+        mode: body.mode,
+        lookbackBars: body.lookbackBars ?? 300,
+        cooldownMinutes: body.cooldownMinutes,
+        maxSignalAgeBars: body.maxSignalAgeBars ?? 3,
+        minVolumeScore: body.minVolumeScore,
+        options: body.options && typeof body.options === 'object' && !Array.isArray(body.options) ? body.options : undefined,
+        enableAlerts: body.enableAlerts ?? true,
+        ensureWatch: body.ensureWatch ?? true,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.delete('/alerts', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = removeMarketDataAlert(await readMarketDataConfig(), {
+        asset: body.asset,
+        symbol: body.symbol,
+        interval: body.interval,
+        provider: body.provider,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post('/alerts/enabled', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { next, result } = setMarketDataAlertsEnabled(await readMarketDataConfig(), {
+        enabled: Boolean(body.enabled),
+        every: typeof body.every === 'string' ? body.every : undefined,
+        mode: body.mode,
+      })
+      await writeConfigSection('marketData', next)
+      return c.json(result)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post('/alerts/run', async (c) => {
+    if (!ctx.runMarketDataAlertsNow) return c.json({ error: 'Market data alerts are not available' }, 503)
+    return c.json(await ctx.runMarketDataAlertsNow())
+  })
+
+  app.get('/alerts/history', async (c) => {
+    const limit = Number(c.req.query('limit')) || 100
+    return c.json(await ctx.notificationsStore.read({ limit, source: 'task' }))
+  })
+
+  app.get('/alerts/state', async (c) => {
+    return c.json(await readMarketDataAlertStateSummary())
+  })
+
+  app.get('/alerts/runs', async (c) => {
+    try {
+      return c.json(await listMarketDataAlertRuns(normalizeAlertRunsQuery({
+        limit: Number(c.req.query('limit')) || undefined,
+        asset: c.req.query('asset') as never,
+        symbol: c.req.query('symbol') ?? undefined,
+        interval: c.req.query('interval') ?? undefined,
+        status: c.req.query('status') as never,
+      })))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post('/alerts/runs/:runId/feedback', async (c) => {
+    try {
+      const runId = c.req.param('runId')
+      const body = await c.req.json()
+      if (!['useful', 'false_positive', 'ignored', 'needs_tuning'].includes(body.rating)) {
+        return c.json({ error: 'Invalid feedback rating' }, 400)
+      }
+      const result = await recordMarketDataAlertFeedback({
+        runId,
+        rating: body.rating,
+        note: body.note,
+      })
+      return c.json(result, result.ok ? 200 : 404)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.get('/cache/status', async (c) => {
+    try {
+      const config = await readMarketDataConfig()
+      const asset = c.req.query('asset') as 'equity' | 'crypto' | 'currency' | 'commodity'
+      const symbol = c.req.query('symbol')
+      const interval = c.req.query('interval')
+      const provider = c.req.query('provider')
+      if (!asset || !symbol || !interval) return c.json({ error: 'asset, symbol, and interval are required' }, 400)
+      return c.json(await readOhlcvCacheStatus({
+        cacheDir: config.ohlcvCache.dir,
+        asset,
+        symbol,
+        interval: asset === 'commodity' ? '1d' : interval,
+        provider: providerFor(config, asset, provider),
+      }))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
 
   app.post('/test-provider', async (c) => {
     try {

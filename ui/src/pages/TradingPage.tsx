@@ -14,7 +14,44 @@ import { Metric, signFromDelta } from '../components/Metric'
 import { Sparkline } from '../components/Sparkline'
 import { fmt, fmtPnl, fmtPctSigned } from '../lib/format'
 import { api } from '../api'
+import type { TradeSetup } from '../api/trading'
 import type { UTAConfig, BrokerPreset, BrokerHealthInfo, TestConnectionResult, Position, AccountInfo, EquityCurvePoint } from '../api/types'
+
+type SignalAwareTradeSetup = Omit<TradeSetup, 'source'> & {
+  provenance?: {
+    source?: string
+    provider?: string
+    generatedAt?: string
+    inputHash?: string
+    dataHash?: string
+    signalRunId?: string
+    signalHash?: string
+    contentHash?: string
+    [key: string]: unknown
+  }
+  riskTemplate?: string | { id?: string; name?: string; label?: string; [key: string]: unknown }
+  contentHash?: string
+  signalHash?: string
+  source: TradeSetup['source'] | { type: 'signal_engine' | string; alertRunId?: string; signalRunId?: string; runId?: string }
+}
+
+type SetupStatusFilter = 'actionable' | TradeSetup['status'] | 'all'
+type SetupSourceFilter = 'all' | 'signal_engine' | 'market_data_alert'
+
+const SETUP_STATUS_FILTERS: Array<{ value: SetupStatusFilter; label: string }> = [
+  { value: 'actionable', label: 'Actionable' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'committed', label: 'Committed' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'all', label: 'All' },
+]
+
+const SETUP_SOURCE_FILTERS: Array<{ value: SetupSourceFilter; label: string }> = [
+  { value: 'all', label: 'All sources' },
+  { value: 'signal_engine', label: 'Signal Engine' },
+  { value: 'market_data_alert', label: 'Market Alerts' },
+]
 
 // ==================== Live equity (across all UTAs) ====================
 
@@ -96,9 +133,13 @@ export function TradingPage() {
   const [equity, setEquity] = useState<EquitySummary | null>(null)
   const [curve, setCurve] = useState<CurveSummary | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [setups, setSetups] = useState<TradeSetup[]>([])
+  const [setupAction, setSetupAction] = useState<string | null>(null)
+  const [setupError, setSetupError] = useState<string | null>(null)
 
-  useEffect(() => {
-    api.trading.getBrokerPresets().then(r => setPresets(r.presets)).catch(() => {})
+  const refreshSetups = useCallback(async () => {
+    const result = await api.trading.tradeSetups({ limit: 50 })
+    setSetups(result.entries)
   }, [])
 
   // Live aggregates: pull `equity()` for headline numbers and `equityCurve()`
@@ -121,10 +162,43 @@ export function TradingPage() {
   }, [])
 
   useEffect(() => {
+    api.trading.getBrokerPresets().then(r => setPresets(r.presets)).catch(() => {})
+    refreshSetups().catch(() => {})
+  }, [refreshSetups])
+
+  useEffect(() => {
     refreshAggregates()
     const id = setInterval(refreshAggregates, 30_000)
     return () => clearInterval(id)
   }, [refreshAggregates])
+
+  const stageSetup = async (setupId: string) => {
+    setSetupAction(setupId)
+    setSetupError(null)
+    try {
+      const result = await api.trading.stageTradeSetup(setupId)
+      if (!result.ok) throw new Error(result.error ?? 'Stage setup failed')
+      await refreshSetups()
+    } catch (err) {
+      setSetupError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSetupAction(null)
+    }
+  }
+
+  const rejectSetup = async (setupId: string) => {
+    setSetupAction(setupId)
+    setSetupError(null)
+    try {
+      const result = await api.trading.rejectTradeSetup(setupId, 'rejected in Trading page')
+      if (!result.ok) throw new Error(result.error ?? 'Reject setup failed')
+      await refreshSetups()
+    } catch (err) {
+      setSetupError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSetupAction(null)
+    }
+  }
 
   if (tc.loading) return <PageShell subtitle="Loading..." />
   if (tc.error) {
@@ -146,6 +220,14 @@ export function TradingPage() {
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
         <div className="max-w-[820px] mx-auto space-y-4">
+          <TradeSetupPanel
+            setups={setups}
+            action={setupAction}
+            error={setupError}
+            onStage={stageSetup}
+            onReject={rejectSetup}
+          />
+
           {tc.utas.length === 0 ? (
             <EmptyState onAdd={() => setShowAdd(true)} />
           ) : (
@@ -202,6 +284,327 @@ export function TradingPage() {
       )}
     </div>
   )
+}
+
+function TradeSetupPanel({
+  setups,
+  action,
+  error,
+  onStage,
+  onReject,
+}: {
+  setups: TradeSetup[]
+  action: string | null
+  error: string | null
+  onStage: (setupId: string) => void
+  onReject: (setupId: string) => void
+}) {
+  const [statusFilter, setStatusFilter] = useState<SetupStatusFilter>('actionable')
+  const [sourceFilter, setSourceFilter] = useState<SetupSourceFilter>('all')
+  const [symbolQuery, setSymbolQuery] = useState('')
+  const [accountFilter, setAccountFilter] = useState('all')
+  const active = setups.filter((setup) => setup.status === 'draft' || setup.status === 'failed')
+  const accounts = useMemo(() => {
+    const values = new Set<string>()
+    for (const setup of setups) {
+      if (setup.order.source) values.add(setup.order.source)
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b))
+  }, [setups])
+  const filtered = useMemo(() => {
+    const query = symbolQuery.trim().toUpperCase()
+    return setups
+      .filter((setup) => {
+        if (statusFilter === 'actionable') return setup.status === 'draft' || setup.status === 'failed'
+        if (statusFilter === 'all') return true
+        return setup.status === statusFilter
+      })
+      .filter((setup) => sourceFilter === 'all' || setup.source.type === sourceFilter)
+      .filter((setup) => accountFilter === 'all' || setup.order.source === accountFilter)
+      .filter((setup) => !query || setup.symbol.toUpperCase().includes(query) || setup.order.aliceId.toUpperCase().includes(query))
+  }, [accountFilter, setups, sourceFilter, statusFilter, symbolQuery])
+
+  if (setups.length === 0) return null
+  return (
+    <section className="rounded-lg border border-border bg-bg-secondary/20 p-3 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-[13px] font-semibold text-text">Trade Setups</h3>
+          <p className="text-[11px] text-text-muted">Review setups here; final broker push stays in the approval panel.</p>
+        </div>
+        <span className="text-[11px] text-text-muted">{active.length} actionable · {filtered.length} shown</span>
+      </div>
+      {error && <p className="text-[12px] text-red">{error}</p>}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_150px_150px] gap-2">
+        <input
+          className="px-2.5 py-1.5 bg-bg text-text border border-border rounded-md text-[12px] outline-none focus:border-accent"
+          value={symbolQuery}
+          onChange={(e) => setSymbolQuery(e.target.value)}
+          placeholder="Search symbol or aliceId"
+        />
+        <SetupSelect value={statusFilter} onChange={(value) => setStatusFilter(value as SetupStatusFilter)}>
+          {SETUP_STATUS_FILTERS.map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}
+        </SetupSelect>
+        <SetupSelect value={sourceFilter} onChange={(value) => setSourceFilter(value as SetupSourceFilter)}>
+          {SETUP_SOURCE_FILTERS.map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}
+        </SetupSelect>
+        <SetupSelect value={accountFilter} onChange={setAccountFilter}>
+          <option value="all">All accounts</option>
+          {accounts.map((account) => <option key={account} value={account}>{account}</option>)}
+        </SetupSelect>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="rounded-md border border-border/40 bg-bg/30 px-2.5 py-3 text-[12px] text-text-muted">No setups match the current filters.</p>
+      ) : (
+        filtered.slice(0, 20).map((setup) => (
+          <TradeSetupCard
+            key={setup.setupId}
+            setup={setup}
+            action={action}
+            onStage={onStage}
+            onReject={onReject}
+          />
+        ))
+      )}
+    </section>
+  )
+}
+
+function SetupSelect({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: React.ReactNode }) {
+  return (
+    <select
+      className="px-2.5 py-1.5 bg-bg text-text border border-border rounded-md text-[12px] outline-none focus:border-accent"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {children}
+    </select>
+  )
+}
+
+function TradeSetupCard({
+  setup,
+  action,
+  onStage,
+  onReject,
+}: {
+  setup: TradeSetup
+  action: string | null
+  onStage: (setupId: string) => void
+  onReject: (setupId: string) => void
+}) {
+  const committed = setup.status === 'committed'
+  return (
+    <details className="rounded-md border border-border/50 bg-bg/40 px-2.5 py-2 text-[12px]">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-text">{setup.symbol}</span>
+          <DirectionPill direction={setup.direction} />
+          <StatusPill status={setup.status} />
+          <span className="text-text-muted">{setup.order.source}</span>
+          <span className="text-text-muted">{setup.order.action} {setup.order.orderType}</span>
+          <SetupChip label={setup.source.type === 'signal_engine' ? 'signal' : 'alert'} value={sourceId(setup)} mono />
+          {setup.commitHash && <SetupChip label="commit" value={setup.commitHash} mono />}
+        </div>
+        <p className="mt-1 text-text-muted/80 line-clamp-2">{setup.thesis}</p>
+      </summary>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {setupProvenanceChips(setup).map((chip) => (
+          <SetupChip key={chip.label} label={chip.label} value={chip.value} />
+        ))}
+        {riskTemplateLabel(setup) && <SetupChip label="risk" value={riskTemplateLabel(setup)!} />}
+        {setupHashChips(setup).map((chip) => (
+          <SetupChip key={`${chip.label}:${chip.value}`} label={chip.label} value={chip.value} mono />
+        ))}
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-2">
+        <SetupDetailSection title="Review">
+          <SetupDetailRow label="Thesis" value={setup.thesis} />
+          <SetupDetailRow label="Invalidation" value={setup.invalidation} />
+          {setup.riskNotes && <SetupDetailRow label="Risk notes" value={setup.riskNotes} />}
+          {setup.error && <SetupDetailRow label="Error" value={setup.error} tone="error" />}
+          {setup.signals && setup.signals.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {setup.signals.slice(0, 5).map((signal) => (
+                <div key={signal.id} className="rounded bg-bg-tertiary/60 px-2 py-1">
+                  <div className="font-medium text-text">{signal.label}</div>
+                  <div className="text-text-muted/70">{signal.message}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SetupDetailSection>
+
+        <SetupDetailSection title="Order">
+          <SetupDetailRow label="aliceId" value={setup.order.aliceId} mono />
+          <SetupDetailRow label="Account" value={setup.order.source} />
+          <SetupDetailRow label="Action" value={`${setup.order.action} ${setup.order.orderType}`} />
+          <SetupDetailRow label="Quantity" value={setup.order.totalQuantity ?? setup.order.cashQty} />
+          <SetupDetailRow label="Limit" value={setup.order.lmtPrice} />
+          <SetupDetailRow label="Stop loss" value={setup.order.stopLoss ? stopLossText(setup.order.stopLoss) : undefined} />
+          <SetupDetailRow label="Take profit" value={setup.order.takeProfit?.price} />
+          <SetupDetailRow label="TIF" value={setup.order.tif} />
+        </SetupDetailSection>
+
+        <SetupDetailSection title="Provenance">
+          <SetupDetailRow label="Source" value={setup.source.type} />
+          <SetupDetailRow label="Run" value={sourceId(setup)} mono />
+          {setup.source.type === 'signal_engine' && (
+            <>
+              <SetupDetailRow label="Signal" value={setup.source.signalId} mono />
+              <SetupDetailRow label="Strategy" value={`${setup.source.strategyId ?? 'unknown'}@${setup.source.strategyVersion ?? '?'}`} />
+              <SetupDetailRow label="Engine" value={setup.source.engineVersion} />
+              <SetupDetailRow label="Closed bar" value={setup.source.closedBarTime ? shortDateTime(setup.source.closedBarTime) : undefined} />
+            </>
+          )}
+          <SetupDetailRow label="Source hash" value={setup.provenance?.sourceHash} mono />
+          <SetupDetailRow label="Payload hash" value={setup.provenance?.canonicalPayloadHash} mono />
+          <SetupDetailRow label="Eligibility" value={eligibilityText(setup)} />
+        </SetupDetailSection>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <button
+          className="px-2.5 py-1 text-[12px] border border-border rounded-md text-text-muted hover:text-text hover:bg-bg-tertiary disabled:opacity-50"
+          disabled={action !== null || setup.status !== 'draft'}
+          onClick={() => onStage(setup.setupId)}
+        >
+          {action === setup.setupId ? 'Working' : 'Stage Pending Trade'}
+        </button>
+        <button
+          className="px-2.5 py-1 text-[12px] border border-border rounded-md text-text-muted hover:text-red hover:bg-red/10 disabled:opacity-50"
+          disabled={action !== null || setup.status === 'committed' || setup.status === 'rejected'}
+          onClick={() => onReject(setup.setupId)}
+        >
+          Reject
+        </button>
+        {committed && <span className="text-[11px] text-accent">Ready for manual Approve & Push in the trading approval panel.</span>}
+      </div>
+    </details>
+  )
+}
+
+function SetupDetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded border border-border/40 px-2 py-2">
+      <div className="text-[11px] uppercase text-text-muted/60">{title}</div>
+      <div className="mt-1 space-y-1">{children}</div>
+    </div>
+  )
+}
+
+function SetupDetailRow({ label, value, mono, tone }: { label: string; value?: string | number | null; mono?: boolean; tone?: 'error' }) {
+  if (value == null || value === '') return null
+  return (
+    <div className="grid grid-cols-[78px_1fr] gap-2">
+      <span className="text-text-muted/60">{label}</span>
+      <span className={`${mono ? 'font-mono' : ''} ${tone === 'error' ? 'text-red' : 'text-text-muted/90'} break-words`}>{String(value)}</span>
+    </div>
+  )
+}
+
+function SetupChip({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <span className={`rounded bg-bg-tertiary px-1.5 py-0.5 text-[11px] text-text-muted ${mono ? 'font-mono text-accent' : ''}`}>
+      {label}:{mono ? shortChip(value) : value}
+    </span>
+  )
+}
+
+function DirectionPill({ direction }: { direction: TradeSetup['direction'] }) {
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] ${direction === 'bullish' ? 'bg-green/10 text-green' : 'bg-red/10 text-red'}`}>
+      {direction}
+    </span>
+  )
+}
+
+function StatusPill({ status }: { status: TradeSetup['status'] }) {
+  const cls = status === 'draft'
+    ? 'bg-accent/10 text-accent'
+    : status === 'failed'
+      ? 'bg-red/10 text-red'
+      : status === 'committed'
+        ? 'bg-green/10 text-green'
+        : 'bg-bg-tertiary text-text-muted'
+  return <span className={`rounded px-1.5 py-0.5 text-[11px] ${cls}`}>{status}</span>
+}
+
+function setupHashChips(setup: TradeSetup): Array<{ label: string; value: string }> {
+  const signalSetup = setup as SignalAwareTradeSetup
+  const chips = [
+    signalSetup.contentHash ? { label: 'setup', value: signalSetup.contentHash } : null,
+    signalSetup.signalHash ? { label: 'signal', value: signalSetup.signalHash } : null,
+    signalSetup.provenance?.contentHash ? { label: 'content', value: String(signalSetup.provenance.contentHash) } : null,
+    signalSetup.provenance?.signalHash ? { label: 'signal', value: String(signalSetup.provenance.signalHash) } : null,
+    signalSetup.provenance?.inputHash ? { label: 'input', value: String(signalSetup.provenance.inputHash) } : null,
+    signalSetup.provenance?.dataHash ? { label: 'data', value: String(signalSetup.provenance.dataHash) } : null,
+  ].filter((chip): chip is { label: string; value: string } => Boolean(chip))
+  const seen = new Set<string>()
+  return chips.filter((chip) => {
+    const key = `${chip.label}:${chip.value}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function sourceId(setup: TradeSetup): string {
+  if (setup.source.type === 'signal_engine') return setup.source.signalRunId
+  return setup.source.alertRunId
+}
+
+function setupProvenanceChips(setup: TradeSetup): Array<{ label: string; value: string }> {
+  const signalSetup = setup as SignalAwareTradeSetup
+  const provenance = signalSetup.provenance ?? {}
+  const sourceRun = signalSourceField(signalSetup.source, 'signalRunId') ?? signalSourceField(signalSetup.source, 'runId') ?? provenance.signalRunId ?? signalSourceField(signalSetup.source, 'alertRunId')
+  return [
+    sourceRun ? { label: signalSetup.source.type === 'signal_engine' ? 'run' : 'alert', value: shortChip(String(sourceRun)) } : null,
+    provenance.source ? { label: 'source', value: String(provenance.source) } : null,
+    provenance.provider ? { label: 'provider', value: String(provenance.provider) } : null,
+    provenance.generatedAt ? { label: 'generated', value: shortDateTime(String(provenance.generatedAt)) } : null,
+  ].filter((chip): chip is { label: string; value: string } => Boolean(chip))
+}
+
+function signalSourceField(source: SignalAwareTradeSetup['source'], key: 'signalRunId' | 'runId' | 'alertRunId'): string | undefined {
+  const value = (source as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function riskTemplateLabel(setup: TradeSetup): string | null {
+  const template = (setup as SignalAwareTradeSetup).riskTemplate
+  if (!template) {
+    const riskId = setup.provenance?.riskTemplateId
+    const riskVersion = setup.provenance?.riskTemplateVersion
+    return riskId ? `${riskId}${riskVersion ? `@${riskVersion}` : ''}` : null
+  }
+  if (typeof template === 'string') return template
+  return template.label ?? template.name ?? template.id ?? null
+}
+
+function stopLossText(stopLoss: NonNullable<TradeSetup['order']['stopLoss']>): string {
+  return stopLoss.limitPrice ? `${stopLoss.price} / limit ${stopLoss.limitPrice}` : stopLoss.price
+}
+
+function eligibilityText(setup: TradeSetup): string | null {
+  const eligibility = setup.provenance?.accountEligibility
+  if (!eligibility) return null
+  const mode = eligibility.resolvedMode ?? 'unknown'
+  const account = eligibility.accountId ?? setup.order.source
+  const allowed = eligibility.allowedModes?.join(', ') ?? 'simulator, paper'
+  return `${account}: ${mode}; allowed ${allowed}`
+}
+
+function shortChip(value: string): string {
+  return value.length > 12 ? value.slice(0, 12) : value
+}
+
+function shortDateTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 // ==================== Page Shell ====================

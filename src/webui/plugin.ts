@@ -17,12 +17,14 @@ import { createCronRoutes } from './routes/cron.js'
 import { createHeartbeatRoutes } from './routes/heartbeat.js'
 import { createTradingProxyRoutes } from './routes/trading-proxy.js'
 import { createTradingConfigRoutes } from './routes/trading-config.js'
+import { createTradingSetupRoutes } from './routes/trading-setups.js'
 import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
 import { createAgentStatusRoutes } from './routes/agent-status.js'
 import { createPersonaRoutes } from './routes/persona.js'
 import { createNewsRoutes } from './routes/news.js'
 import { createMarketRoutes } from './routes/market.js'
+import { createSignalEngineRoutes } from './routes/signal-engine.js'
 import { createNotificationsRoutes } from './routes/notifications.js'
 import { createInboxRoutes } from './routes/inbox.js'
 import { createVersionRoutes } from './routes/version.js'
@@ -194,6 +196,8 @@ export class WebPlugin implements Plugin {
     app.route('/api/cron', createCronRoutes(ctx))
     app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
     app.route('/api/trading/config', createTradingConfigRoutes(ctx))
+    app.route('/api/trading', createTradingSetupRoutes(ctx))
+    app.route('/api/signal-engine', createSignalEngineRoutes(ctx))
     // `/api/trading/*` and `/api/simulator/*` are proxied to the co-located
     // UTA service (decision #2 of UTA-split v1 — UI stays single-origin).
     // Trading domain + the MockBroker god-view live on UTA's side.

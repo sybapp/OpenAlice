@@ -193,6 +193,34 @@ const securitiesSchema = z.object({
   })).default([]),
 })
 
+const technicalAnalysisAlertOptionsSchema = z.object({
+  internalLookback: z.number().int().min(2).max(100).optional(),
+  swingLookback: z.number().int().min(2).max(250).optional(),
+  useCloseBreak: z.boolean().optional(),
+  zoneMode: z.enum(['Fast', 'Slow']).optional(),
+  fvgMode: z.enum(['FVG', 'VI', 'OG', 'IFVG']).optional(),
+  obFilter: z.enum(['None', 'MSS', 'BOS']).optional(),
+  obMitigation: z.enum(['Absolute', 'Middle']).optional(),
+  obPosition: z.enum(['Full', 'Middle', 'Accurate', 'Precise']).optional(),
+  volumeLookback: z.number().int().min(2).max(250).optional(),
+  emaFastPeriod: z.number().int().min(2).max(500).optional(),
+  emaSlowPeriod: z.number().int().min(2).max(500).optional(),
+  emaLongPeriod: z.number().int().min(2).max(500).optional(),
+  vwapEnabled: z.boolean().optional(),
+  vwapAnchor: z.enum(['auto', 'rolling', 'session', 'week', 'month', 'year', 'structure']).optional(),
+  atrPeriod: z.number().int().min(2).max(500).optional(),
+  equalToleranceAtr: z.number().min(0).optional(),
+  maxOrderBlocks: z.number().int().min(1).max(100).optional(),
+}).passthrough().default({})
+
+const marketDataAlertModeSchema = z.enum(['deterministic', 'agent', 'both'])
+const marketDataWorkspaceExecutionSchema = z.object({
+  workspaceId: z.string().min(1).optional(),
+  agent: z.enum(['workspace-default', 'claude', 'codex']).default('workspace-default'),
+  resume: z.enum(['auto', 'fresh', 'last']).default('auto'),
+  timeoutMs: z.number().int().positive().default(120_000),
+}).default({ agent: 'workspace-default', resume: 'auto', timeoutMs: 120_000 })
+
 const marketDataSchema = z.object({
   enabled: z.boolean().default(true),
   apiUrl: z.string().default('http://localhost:6900'),
@@ -220,8 +248,112 @@ const marketDataSchema = z.object({
     tiingo: z.string().optional(),
     biztoc: z.string().optional(),
   }).default({}),
+  ohlcvCache: z.object({
+    enabled: z.boolean().default(true),
+    dir: z.string().default('data/cache/ohlcv'),
+    maxGapRequests: z.number().int().positive().default(4),
+    writeClosedOnly: z.boolean().default(true),
+  }).default({
+    enabled: true,
+    dir: 'data/cache/ohlcv',
+    maxGapRequests: 4,
+    writeClosedOnly: true,
+  }),
+  watch: z.object({
+    enabled: z.boolean().default(false),
+    every: z.string().default('5m'),
+    items: z.array(z.object({
+      asset: z.enum(['equity', 'crypto', 'currency', 'commodity']),
+      symbol: z.string().min(1),
+      intervals: z.array(z.string().min(1)).min(1),
+      provider: z.string().optional(),
+      lookbackBars: z.number().int().positive().optional(),
+    })).default([]),
+  }).default({ enabled: false, every: '5m', items: [] }),
+  alerts: z.object({
+    enabled: z.boolean().default(false),
+    every: z.string().default('5m'),
+    mode: marketDataAlertModeSchema.default('deterministic'),
+    cooldownMinutes: z.number().int().nonnegative().default(60),
+    lookbackBars: z.number().int().positive().default(300),
+    workspace: marketDataWorkspaceExecutionSchema.optional(),
+    items: z.array(z.object({
+      asset: z.enum(['equity', 'crypto', 'currency', 'commodity']),
+      symbol: z.string().min(1),
+      interval: z.string().min(1),
+      provider: z.string().optional(),
+      enabled: z.boolean().optional(),
+      lookbackBars: z.number().int().positive().optional(),
+      mode: marketDataAlertModeSchema.optional(),
+      cooldownMinutes: z.number().int().nonnegative().optional(),
+      workspace: marketDataWorkspaceExecutionSchema.optional(),
+      options: technicalAnalysisAlertOptionsSchema.optional(),
+      thresholds: z.object({
+        maxSignalAgeBars: z.number().int().positive().optional(),
+        minVolumeScore: z.number().optional(),
+      }).optional(),
+    })).default([]),
+  }).default({
+    enabled: false,
+    every: '5m',
+    mode: 'deterministic',
+    cooldownMinutes: 60,
+    lookbackBars: 300,
+    items: [],
+  }),
   backend: z.enum(['typebb-sdk', 'openbb-api']).default('typebb-sdk'),
 })
+
+const signalEngineAutoStageSchema = z.object({
+  enabled: z.boolean().default(false),
+  defaultUtaId: z.string().optional(),
+  allowedUtaModes: z.array(z.enum(['simulator', 'paper'])).default(['simulator', 'paper']),
+  neverPush: z.boolean().default(true).transform(() => true),
+}).default({
+  enabled: false,
+  allowedUtaModes: ['simulator', 'paper'],
+  neverPush: true,
+})
+
+const signalEngineBaseSchema = z.object({
+  enabled: z.boolean().default(false),
+  dir: z.string().default('data/signal-engine'),
+  every: z.string().default('5m'),
+  strategiesPath: z.string().default('data/signal-engine/strategies.json'),
+  riskTemplatesPath: z.string().default('data/signal-engine/risk-templates.jsonl'),
+  closedBarsOnly: z.boolean().default(true).transform(() => true),
+  autoStage: signalEngineAutoStageSchema,
+  defaults: z.object({
+    orderType: z.literal('LMT').default('LMT'),
+    requireStopLoss: z.boolean().default(true).transform(() => true),
+  }).default({ orderType: 'LMT', requireStopLoss: true }),
+  items: z.array(z.object({
+    asset: z.enum(['equity', 'crypto', 'currency', 'commodity']),
+    symbol: z.string().min(1),
+    interval: z.string().min(1),
+    provider: z.string().optional(),
+    enabled: z.boolean().optional(),
+    strategyId: z.string().min(1),
+    strategyVersion: z.string().min(1),
+    riskTemplateId: z.string().min(1),
+    riskTemplateVersion: z.string().min(1),
+    lookbackBars: z.number().int().positive().default(300),
+  })).default([]),
+}).transform((config) => ({
+  ...config,
+  autoStage: {
+    ...config.autoStage,
+    allowedUtaModes: config.autoStage.allowedUtaModes.length > 0
+      ? config.autoStage.allowedUtaModes
+      : ['simulator', 'paper'],
+    neverPush: true as const,
+  },
+  closedBarsOnly: true as const,
+  defaults: { orderType: 'LMT' as const, requireStopLoss: true as const },
+}))
+
+export const signalEngineSchema = z.preprocess((value) => value ?? {}, signalEngineBaseSchema)
+export type SignalEngineConfig = z.infer<typeof signalEngineSchema>
 
 const compactionSchema = z.object({
   maxContextTokens: z.number().default(200_000),
@@ -362,6 +494,7 @@ export type Config = {
   crypto: z.infer<typeof cryptoSchema>
   securities: z.infer<typeof securitiesSchema>
   marketData: z.infer<typeof marketDataSchema>
+  signalEngine: SignalEngineConfig
   compaction: z.infer<typeof compactionSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
@@ -408,7 +541,7 @@ export async function loadConfig(): Promise<Config> {
   // is pending. See src/migrations/INDEX.md for the full list.
   await runMigrations()
 
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'signal-engine.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'mcp.json', 'connectors.json', 'news.json', 'tools.json', 'webhook.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   const config: Config = {
@@ -417,15 +550,16 @@ export async function loadConfig(): Promise<Config> {
     crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2]),
     securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
     marketData:    await parseAndSeed(files[4], marketDataSchema, raws[4]),
-    compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
-    aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
-    heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
-    snapshot:      await parseAndSeed(files[8], snapshotSchema, raws[8]),
-    mcp:           await parseAndSeed(files[9], mcpSchema, raws[9]),
-    connectors:    await parseAndSeed(files[10], connectorsSchema, raws[10]),
-    news:          await parseAndSeed(files[11], newsCollectorSchema, raws[11]),
-    tools:         await parseAndSeed(files[12], toolsSchema, raws[12]),
-    webhook:       await parseAndSeed(files[13], webhookSchema, raws[13]),
+    signalEngine:  await parseAndSeed(files[5], signalEngineSchema, raws[5]),
+    compaction:    await parseAndSeed(files[6], compactionSchema, raws[6]),
+    aiProvider:    await parseAndSeed(files[7], aiProviderSchema, raws[7]),
+    heartbeat:     await parseAndSeed(files[8], heartbeatSchema, raws[8]),
+    snapshot:      await parseAndSeed(files[9], snapshotSchema, raws[9]),
+    mcp:           await parseAndSeed(files[10], mcpSchema, raws[10]),
+    connectors:    await parseAndSeed(files[11], connectorsSchema, raws[11]),
+    news:          await parseAndSeed(files[12], newsCollectorSchema, raws[12]),
+    tools:         await parseAndSeed(files[13], toolsSchema, raws[13]),
+    webhook:       await parseAndSeed(files[14], webhookSchema, raws[14]),
   }
 
   // Spawn-time-fixed channel: when guardian (Electron main) spawns the
@@ -682,6 +816,16 @@ export async function readMarketDataConfig() {
   }
 }
 
+/** Read signal-engine config from disk (called by schedulers/routes for hot-reload). */
+export async function readSignalEngineConfig(): Promise<SignalEngineConfig> {
+  try {
+    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'signal-engine.json'), 'utf-8'))
+    return signalEngineSchema.parse(raw)
+  } catch {
+    return signalEngineSchema.parse({})
+  }
+}
+
 /** Read tools config from disk (called per-request for hot-reload). */
 export async function readToolsConfig() {
   try {
@@ -916,6 +1060,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   crypto: cryptoSchema,
   securities: securitiesSchema,
   marketData: marketDataSchema,
+  signalEngine: signalEngineSchema,
   compaction: compactionSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
@@ -933,6 +1078,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   crypto: 'crypto.json',
   securities: 'securities.json',
   marketData: 'market-data.json',
+  signalEngine: 'signal-engine.json',
   compaction: 'compaction.json',
   aiProvider: 'ai-provider-manager.json',
   heartbeat: 'heartbeat.json',

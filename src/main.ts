@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
 // Engine removed — AgentCenter is the top-level AI entry point
-import { loadConfig } from './core/config.js'
+import { loadConfig, readMarketDataConfig, readSignalEngineConfig } from './core/config.js'
 import { dataPath, defaultPath } from '@/core/paths.js'
 import type { Plugin, EngineContext, ReconnectResult } from './core/types.js'
 import { McpPlugin } from './server/mcp.js'
@@ -14,6 +14,8 @@ import { createUTAClient } from '@traderalice/uta-protocol'
 import { UTAManagerSDK } from './services/uta-client/index.js'
 import { waitForUTAReady } from './services/uta-supervisor/health.js'
 import { createTradingTools } from './tool/trading.js'
+import { TradeSetupService } from './domain/trading/setup-service.js'
+import { TradeSetupStore } from './domain/trading/setup-store.js'
 import { SymbolIndex } from './domain/market-data/equity/index.js'
 import { CommodityCatalog } from './domain/market-data/commodity/index.js'
 import { createEquityTools } from './tool/equity.js'
@@ -26,6 +28,7 @@ import { OpenBBCurrencyClient } from './domain/market-data/client/openbb-api/cur
 import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/commodity-client.js'
 import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/economy-client.js'
 import { createMarketSearchTools } from './tool/market.js'
+import { createMarketDataTools } from './tool/market-data.js'
 import { createAnalysisTools } from './tool/analysis.js'
 import { createEconomyTools } from './tool/economy.js'
 import { createSessionTools } from './tool/session.js'
@@ -53,6 +56,18 @@ import { createMetricsListener } from './task/metrics/index.js'
 import { createAgentWorkListener } from './core/agent-work-listener.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import {
+  OhlcvCacheService,
+  OhlcvCacheStore,
+  createCachedCommodityClient,
+  createCachedCryptoClient,
+  createCachedCurrencyClient,
+  createCachedEquityClient,
+  createMarketDataAlertScheduler,
+  createMarketDataWatcher,
+} from './domain/market-data/ohlcv/index.js'
+import { createSignalEngineScheduler, createSignalEngineService } from './domain/signal-engine/index.js'
+import type { WorkspaceService } from './workspaces/service.js'
 
 // ==================== Persistence paths ====================
 
@@ -95,6 +110,7 @@ async function main() {
 
   const workspaceToolCenter = new WorkspaceToolCenter()
   workspaceToolCenter.register(inboxPushFactory)
+  const workspaceServiceRef = createWorkspaceServiceRef()
 
   // ==================== UTA SDK (HTTP boundary) ====================
   //
@@ -115,6 +131,8 @@ async function main() {
   }
   console.log(`uta: ready (${utaHealth.utas} accounts, startedAt=${utaHealth.startedAt})`)
   const utaManager = new UTAManagerSDK({ client: utaClient })
+  const tradeSetupStore = new TradeSetupStore()
+  const tradeSetupService = new TradeSetupService({ setupStore: tradeSetupStore, utaManager })
 
   // ==================== Persona ====================
   // Persona + heartbeat default files are seeded on first run so the user
@@ -177,6 +195,29 @@ async function main() {
     economyClient = new SDKEconomyClient(executor, 'economy', 'federal_reserve', credentials, routeMap)
   }
 
+  const rawEquityClient = equityClient
+  const rawCryptoClient = cryptoClient
+  const rawCurrencyClient = currencyClient
+  const rawCommodityClient = commodityClient
+  const ohlcvCacheStore = new OhlcvCacheStore({ rootDir: config.marketData.ohlcvCache.dir })
+  const ohlcvCacheService = new OhlcvCacheService({
+    store: ohlcvCacheStore,
+    config: config.marketData.ohlcvCache,
+    providers: config.marketData.providers,
+  })
+  equityClient = createCachedEquityClient(rawEquityClient, ohlcvCacheService)
+  cryptoClient = createCachedCryptoClient(rawCryptoClient, ohlcvCacheService)
+  currencyClient = createCachedCurrencyClient(rawCurrencyClient, ohlcvCacheService)
+  commodityClient = createCachedCommodityClient(rawCommodityClient, ohlcvCacheService)
+
+  const signalEngineService = createSignalEngineService({
+    config: config.signalEngine,
+    readConfig: readSignalEngineConfig,
+    ohlcvCacheStore,
+    tradeSetupService,
+    utaManager,
+  })
+
   // ==================== Equity Symbol Index ====================
 
   const symbolIndex = new SymbolIndex()
@@ -198,7 +239,35 @@ async function main() {
   )
 
   toolCenter.register(createCronTools(cronEngine), 'cron')
+  let marketDataWatcher: ReturnType<typeof createMarketDataWatcher> | null = null
+  let marketDataAlertScheduler: ReturnType<typeof createMarketDataAlertScheduler> | null = null
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
+  toolCenter.register(createMarketDataTools({
+    runWatchNow: async () => marketDataWatcher
+      ? await marketDataWatcher.runOnce()
+      : {
+          enabled: false,
+          skipped: true,
+          reason: 'disabled',
+          every: config.marketData.watch.every,
+          itemCount: 0,
+          results: [],
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+    runAlertsNow: async () => marketDataAlertScheduler
+      ? await marketDataAlertScheduler.runOnce()
+      : {
+          enabled: false,
+          skipped: true,
+          reason: 'disabled',
+          every: config.marketData.alerts.every,
+          itemCount: 0,
+          results: [],
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+  }), 'market-data')
   toolCenter.register(createEquityTools(equityClient), 'equity')
   if (config.news.enabled) {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
@@ -296,6 +365,82 @@ async function main() {
     console.log(`heartbeat: enabled (every ${config.heartbeat.every})`)
   }
 
+  // ==================== Market Data Watch / Alerts (Pump-driven) ====================
+
+  const runAlertWorkspaceTask = async (input: {
+    prompt: string
+    timeoutMs: number
+    agent?: 'workspace-default' | 'claude' | 'codex'
+    resume?: 'auto' | 'fresh' | 'last'
+    workspaceId?: string
+  }) => {
+    const svc: WorkspaceService | null = workspaceServiceRef.current
+    if (!svc) return { ok: false, skipped: true, error: 'workspace service unavailable' }
+    const meta = input.workspaceId
+      ? svc.registry.get(input.workspaceId)
+      : svc.registry.list()[0]
+    if (!meta) return { ok: false, skipped: true, error: 'workspace not configured' }
+    const adapter = svc.resolveAdapter(meta, input.agent === 'workspace-default' ? undefined : input.agent)
+    const resume = input.resume === 'last' || input.resume === 'auto' ? 'last' : undefined
+    const result = await svc.runHeadlessProbe(meta, adapter, resume, input.prompt, input.timeoutMs)
+    return {
+      ok: true,
+      workspaceId: meta.id,
+      agent: adapter.id,
+      output: result.ptyOutputTail,
+    }
+  }
+
+  marketDataWatcher = createMarketDataWatcher({
+    config: config.marketData.watch,
+    readConfig: async () => (await readMarketDataConfig()).watch,
+    cronEngine,
+    registry: listenerRegistry,
+    cacheService: ohlcvCacheService,
+    clients: {
+      equity: rawEquityClient,
+      crypto: rawCryptoClient,
+      currency: rawCurrencyClient,
+      commodity: rawCommodityClient,
+    },
+  })
+  await marketDataWatcher.start()
+  if (config.marketData.watch.enabled) {
+    console.log(`market-data-watch: enabled (every ${config.marketData.watch.every}, ${config.marketData.watch.items.length} items)`)
+  }
+
+  marketDataAlertScheduler = createMarketDataAlertScheduler({
+    config: config.marketData.alerts,
+    readConfig: async () => (await readMarketDataConfig()).alerts,
+    cronEngine,
+    registry: listenerRegistry,
+    connectorCenter,
+    cacheService: ohlcvCacheService,
+    runWorkspaceTask: runAlertWorkspaceTask,
+    clients: {
+      equity: rawEquityClient,
+      crypto: rawCryptoClient,
+      currency: rawCurrencyClient,
+      commodity: rawCommodityClient,
+    },
+  })
+  await marketDataAlertScheduler.start()
+  if (config.marketData.alerts.enabled) {
+    console.log(`market-data-alert: enabled (every ${config.marketData.alerts.every}, ${config.marketData.alerts.items.length} items)`)
+  }
+
+  const signalEngineScheduler = createSignalEngineScheduler({
+    config: config.signalEngine,
+    readConfig: readSignalEngineConfig,
+    cronEngine,
+    registry: listenerRegistry,
+    service: signalEngineService,
+  })
+  await signalEngineScheduler.start()
+  if (config.signalEngine.enabled) {
+    console.log(`signal-engine: enabled (every ${config.signalEngine.every}, ${config.signalEngine.items.length} items)`)
+  }
+
   // ==================== Event Metrics (wildcard observer) ====================
 
   const metricsListener = createMetricsListener({ registry: listenerRegistry })
@@ -326,10 +471,6 @@ async function main() {
 
   // Core plugins — always-on, not toggleable at runtime
   const corePlugins: Plugin[] = []
-
-  // Cross-plugin ref so McpPlugin can resolve workspaces for `/mcp/:wsId`
-  // even though WebPlugin (the service's actual creator) starts later.
-  const workspaceServiceRef = createWorkspaceServiceRef()
 
   // MCP Server is always active when a port is set — Claude Code provider depends on it for tools.
   // Lives at top-level config (not under connectors:) because it exports
@@ -430,6 +571,33 @@ async function main() {
     fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
     marketSearch,
+    runMarketDataWatchNow: async () => marketDataWatcher
+      ? await marketDataWatcher.runOnce()
+      : {
+          enabled: false,
+          skipped: true,
+          reason: 'disabled',
+          every: config.marketData.watch.every,
+          itemCount: 0,
+          results: [],
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+    runMarketDataAlertsNow: async () => marketDataAlertScheduler
+      ? await marketDataAlertScheduler.runOnce()
+      : {
+          enabled: false,
+          skipped: true,
+          reason: 'disabled',
+          every: config.marketData.alerts.every,
+          itemCount: 0,
+          results: [],
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+    signalEngineService,
+    tradeSetupStore,
+    tradeSetupService,
     utaManager,
     newsProvider: newsStore,
     reconnectConnectors,
@@ -451,6 +619,9 @@ async function main() {
   const shutdown = async () => {
     stopped = true
     newsCollector?.stop()
+    marketDataAlertScheduler?.stop()
+    marketDataWatcher?.stop()
+    signalEngineScheduler.stop()
     heartbeat.stop()
     metricsListener.stop()
     cronListener.stop()

@@ -33,6 +33,83 @@ export interface ContractSearchResponse {
   utasConfigured?: number
 }
 
+export interface TradeSetup {
+  setupId: string
+  status: 'draft' | 'committed' | 'rejected' | 'failed'
+  createdAt: string
+  updatedAt: string
+  symbol: string
+  interval?: string
+  direction: 'bullish' | 'bearish'
+  thesis: string
+  invalidation: string
+  riskNotes?: string
+  signals?: Array<{ id: string; label: string; message: string }>
+  commitHash?: string
+  commitMessage?: string
+  error?: string
+  asset?: string
+  source:
+    | { type: 'market_data_alert'; alertRunId: string }
+    | {
+        type: 'signal_engine'
+        signalRunId: string
+        signalId: string
+        engineVersion?: string
+        strategyId?: string
+        strategyVersion?: string
+        dataFingerprint?: string
+        closedBarTime?: string
+      }
+  order: {
+    source: string
+    aliceId: string
+    symbol?: string
+    action: 'BUY' | 'SELL'
+    orderType: string
+    totalQuantity?: string
+    cashQty?: string
+    lmtPrice?: string
+    auxPrice?: string
+    trailStopPrice?: string
+    trailingPercent?: string
+    tif?: string
+    goodTillDate?: string
+    outsideRth?: boolean
+    stopLoss?: { price: string; limitPrice?: string }
+    takeProfit?: { price: string }
+  }
+  provenance?: {
+    sourceHash?: string
+    canonicalPayloadHash?: string
+    riskTemplateId?: string
+    riskTemplateVersion?: string
+    accountEligibility?: {
+      allowedModes?: string[]
+      resolvedMode?: string
+      accountId?: string
+    }
+    [key: string]: unknown
+  }
+}
+
+export interface CreateTradeSetupRequest {
+  alertRunId: string
+  source: string
+  aliceId: string
+  action?: 'BUY' | 'SELL'
+  orderType?: string
+  totalQuantity?: string
+  cashQty?: string
+  lmtPrice?: string
+  takeProfitPrice?: string
+  stopLossPrice?: string
+  stopLossLimitPrice?: string
+  thesis?: string
+  invalidation: string
+  riskNotes?: string
+}
+
 // ==================== Unified Trading API ====================
 
 export const tradingApi = {
@@ -135,6 +212,39 @@ export const tradingApi = {
 
   async cancelOrder(utaId: string, body: CancelOrderRequest): Promise<WalletPushResult> {
     return postOrder(`/api/trading/uta/${utaId}/wallet/cancel-order`, body)
+  },
+
+  // ==================== Alert-derived setup review ====================
+
+  async tradeSetups(params: { limit?: number; status?: string; symbol?: string; source?: string } = {}): Promise<{ count: number; entries: TradeSetup[] }> {
+    const qs = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value != null && value !== '') qs.set(key, String(value))
+    }
+    return fetchJson(`/api/trading/setups${qs.size ? `?${qs}` : ''}`)
+  },
+
+  async createTradeSetup(body: CreateTradeSetupRequest): Promise<{ ok: boolean; setup?: TradeSetup; error?: string }> {
+    const res = await fetch('/api/trading/setups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return res.json()
+  },
+
+  async stageTradeSetup(setupId: string): Promise<{ ok: boolean; setup?: TradeSetup; error?: string }> {
+    const res = await fetch(`/api/trading/setups/${encodeURIComponent(setupId)}/stage`, { method: 'POST' })
+    return res.json()
+  },
+
+  async rejectTradeSetup(setupId: string, reason?: string): Promise<{ ok: boolean; setup?: TradeSetup; error?: string }> {
+    const res = await fetch(`/api/trading/setups/${encodeURIComponent(setupId)}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reason ? { reason } : {}),
+    })
+    return res.json()
   },
 
   // ==================== Broker Presets ====================

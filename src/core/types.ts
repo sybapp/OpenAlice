@@ -2,6 +2,10 @@ import type { QueryExecutor } from '@traderalice/opentypebb'
 import type { UTAManagerSDK } from '../services/uta-client/index.js'
 import type { INewsProvider } from '../domain/news/types.js'
 import type { MarketSearchDeps } from '../domain/market-data/aggregate-search.js'
+import type { MarketDataAlertRunResult, MarketDataWatchRunResult } from '../domain/market-data/ohlcv/index.js'
+import type { SignalEngineService } from '../domain/signal-engine/index.js'
+import type { TradeSetupService } from '../domain/trading/setup-service.js'
+import type { TradeSetupStore } from '../domain/trading/setup-store.js'
 import type { CronEngine } from '../task/cron/engine.js'
 import type { Heartbeat } from '../task/heartbeat/index.js'
 import type { Config, WebChannel } from './config.js'
@@ -54,6 +58,11 @@ export interface EngineContext {
   /** Deps for cross-asset-class heuristic symbol search. Shared between the
    *  AI tool (marketSearchForResearch) and the /api/market/search HTTP route. */
   marketSearch: MarketSearchDeps
+  runMarketDataWatchNow?: () => Promise<MarketDataWatchRunResult>
+  runMarketDataAlertsNow?: () => Promise<MarketDataAlertRunResult>
+  signalEngineService?: SignalEngineService
+  tradeSetupStore?: TradeSetupStore
+  tradeSetupService?: TradeSetupService
 
   // Trading — HTTP-backed SDK that talks to the co-located UTA service.
   // FxService and SnapshotService live entirely inside UTA after Step 6;
