@@ -37,7 +37,7 @@ Alice runs on your own machine, because trading involves private keys and real m
 
 ### Research & Analysis
 
-- **Market data** — equity, crypto, commodity, currency, and macro data via TypeScript-native OpenBB engine. Unified cross-asset symbol search and technical indicator calculator
+- **Market data & technical analysis** — equity, crypto, commodity, currency, and macro data via TypeScript-native OpenBB engine. Unified cross-asset symbol search, OHLCV access, summary-first Technical Analysis, and focused indicator calculation
 - **Fundamental research** — company profiles, financial statements, ratios, analyst estimates, earnings calendar, insider trading, and market movers. Currently deepest for equities, expanding to other asset classes
 - **News** — background RSS collection with archive search
 
