@@ -85,6 +85,33 @@ describe('OhlcvCacheService', () => {
     ])
   })
 
+  it('returns useful cached daily bars when the trailing provider gap is empty', async () => {
+    const daily = new OhlcvCacheService({
+      store,
+      config: { enabled: true, dir: rootDir, maxGapRequests: 4, writeClosedOnly: true },
+      providers: { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' },
+      now: () => new Date('2026-05-25T12:00:00Z'),
+    })
+    await store.writeMerged({ provider: 'yfinance', asset: 'equity', symbol: 'NOW', interval: '1d' }, [
+      { date: '2026-05-21', open: 1, high: 2, low: 1, close: 2, volume: 100 },
+      { date: '2026-05-22', open: 2, high: 3, low: 2, close: 3, volume: 200 },
+    ])
+    const fetcher = vi.fn().mockRejectedValue(new Error('No historical data returned'))
+
+    const rows = await daily.getHistorical(
+      'equity',
+      { symbol: 'NOW', interval: '1d', start_date: '2026-05-21' },
+      fetcher,
+    )
+
+    expect(fetcher).toHaveBeenCalledWith({
+      symbol: 'NOW',
+      interval: '1d',
+      start_date: '2026-05-23',
+    })
+    expect(rows.map((row) => row.date)).toEqual(['2026-05-21', '2026-05-22'])
+  })
+
   it('bypasses the store when disabled', async () => {
     const disabled = new OhlcvCacheService({
       store,

@@ -46,7 +46,12 @@ export class OhlcvCacheService {
 
     let lastFetched: Record<string, unknown>[] = []
     for (const request of requests) {
-      lastFetched = await fetcher(request)
+      try {
+        lastFetched = await fetcher(request)
+      } catch (error) {
+        if (allCached.length > 0) break
+        throw error
+      }
       const barsToWrite = this.config.writeClosedOnly
         ? filterClosedBars(lastFetched, interval, this.now())
         : normalizeFetched(lastFetched)

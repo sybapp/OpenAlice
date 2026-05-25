@@ -555,6 +555,23 @@ describe('analysis tools', () => {
     await expect(readdir(technicalAnalysisArtifactDir)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('analyzeTechnicalAnalysis converts provider empty-data throws into structured errors', async () => {
+    const equity = mockClient()
+    equity.getHistorical.mockRejectedValue(new Error('EmptyDataError: No historical data returned'))
+    const tools = createAnalysisTools(equity, mockClient(), mockClient(), mockClient())
+
+    const result = await tools.analyzeTechnicalAnalysis.execute!(
+      { asset: 'equity', symbol: 'NOW', interval: '1d', limit: 300, provider: 'yfinance', includeIncomplete: false },
+      toolOptions,
+    ) as any
+
+    expect(result.error).toMatchObject({
+      code: 'NO_OHLCV_DATA',
+      message: 'EmptyDataError: No historical data returned',
+    })
+    expect(result.analysis).toBeUndefined()
+  })
+
   it('readTechnicalAnalysisSection reads focused sections and honors section limit caps', async () => {
     const equity = mockClient()
     equity.getHistorical.mockResolvedValue(buildTechnicalAnalysisBars(260))

@@ -539,7 +539,28 @@ async function fetchOhlcv(
     }
   }
 
-  const raw = await fetchFromClient(request)
+  let raw: Record<string, unknown>[]
+  try {
+    raw = await fetchFromClient(request)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      asset: params.asset,
+      symbol: params.symbol,
+      interval,
+      provider: params.provider ?? null,
+      count: 0,
+      from: '',
+      to: '',
+      truncated: false,
+      warnings,
+      bars: [],
+      error: {
+        code: 'NO_OHLCV_DATA',
+        message,
+      },
+    }
+  }
 
   let candles = normalizeCandles(raw)
   if (!params.includeIncomplete) {
