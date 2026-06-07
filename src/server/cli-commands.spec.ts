@@ -16,6 +16,7 @@ import { createThinkingTools } from '../tool/thinking.js'
 import { inboxPushFactory } from '../tool/inbox-push.js'
 import { entityUpsertFactory } from '../tool/entity-upsert.js'
 import { entitySearchFactory } from '../tool/entity-search.js'
+import { createMarketDataTools } from '../tool/market-data.js'
 
 /**
  * Anti-rot: each export's alias map is hand-authored, so guard it against drift —
@@ -28,6 +29,7 @@ const any = {} as never
 describe('CLI_EXPORTS — data export (global tools)', () => {
   const tc = new ToolCenter()
   tc.register(createThinkingTools(), 'thinking')
+  tc.register(createMarketDataTools(any), 'market-data')
   tc.register(createMarketSearchTools(any), 'market-search')
   tc.register(createEquityTools(any), 'equity')
   tc.register(createNewsArchiveTools(any), 'news')
@@ -97,5 +99,14 @@ describe('CLI_EXPORTS — structure', () => {
       expect(exp.commands['trading']).toBeUndefined()
       expect(exp.commands['cron']).toBeUndefined()
     }
+  })
+
+  it('exposes the generic market-data explorer verbs', () => {
+    expect(getExport('data')?.commands['marketdata']).toEqual({
+      catalog: 'marketDataCatalog',
+      query: 'marketDataQuery',
+      scan: 'marketDataScan',
+      search: 'marketDataSearch',
+    })
   })
 })
