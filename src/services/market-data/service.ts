@@ -301,7 +301,8 @@ export class MarketDataService {
   }
 
   async scan(input: MarketDataScanInput = {}): Promise<MarketDataEnvelope> {
-    const provider = input.provider ?? 'tradingview'
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
     const endpoint = '/scan'
     const limit = clampLimit(input.limit)
 
@@ -311,8 +312,9 @@ export class MarketDataService {
 
     try {
       const query = this.buildTradingViewQuery(input, limit)
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
       const options = {
-        credentials: input.credentials,
+        credentials,
         fetch: input.fetch,
         timeoutMs: input.timeoutMs,
       }

@@ -25,6 +25,7 @@ export interface MarketDataConfig {
     crypto: string
     currency: string
     commodity: string
+    scanner?: string
   }
   providerKeys?: Record<string, string | undefined>
 }

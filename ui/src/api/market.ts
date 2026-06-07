@@ -32,6 +32,16 @@ export interface HistoricalResponse {
   error?: string
 }
 
+export interface MarketDataEnvelope {
+  provider: string
+  endpoint: string
+  totalCount: number
+  fields: string[]
+  rows: Array<Record<string, unknown>>
+  warnings: string[]
+  error?: string
+}
+
 /**
  * Raw OBBject envelope for single-record endpoints (profile, quote, …).
  * The provider schemas are rich and not worth mirroring here — panels pick the
@@ -54,9 +64,21 @@ function equityEndpoint<T>(
   path: string,
   params: Record<string, string | number> = {},
 ): Promise<OBBjectResponse<T>> {
-  const qs = new URLSearchParams()
+  return queryMarketData<T>(`/equity/${path}`, params)
+}
+
+async function queryMarketData<T>(
+  endpoint: string,
+  params: Record<string, string | number> = {},
+): Promise<OBBjectResponse<T>> {
+  const qs = new URLSearchParams({ endpoint })
   for (const [k, v] of Object.entries(params)) qs.set(k, String(v))
-  return fetchJson(`/api/market-data-v1/equity/${path}?${qs}`)
+  const envelope = await fetchJson<MarketDataEnvelope>(`/api/market-data/query?${qs}`)
+  return {
+    results: envelope.rows as T[],
+    provider: envelope.provider,
+    error: envelope.error,
+  }
 }
 
 export type RotationPeriod = '1D' | '1W' | '1M' | '3M' | '6M'
@@ -113,7 +135,13 @@ export const marketApi = {
     qs.set('interval', opts.interval ?? '1d')
     if (opts.startDate) qs.set('start_date', opts.startDate)
     if (opts.endDate) qs.set('end_date', opts.endDate)
-    return fetchJson(`/api/market-data-v1/${assetClass}/price/historical?${qs}`)
+    qs.set('endpoint', `/${assetClass}/price/historical`)
+    const envelope = await fetchJson<MarketDataEnvelope>(`/api/market-data/query?${qs}`)
+    return {
+      results: envelope.rows as unknown as HistoricalBar[],
+      provider: envelope.provider,
+      error: envelope.error,
+    }
   },
 
   /** Equity-specific endpoints — Alice infers provider from config, no ?provider=. */
