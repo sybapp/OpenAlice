@@ -32,6 +32,7 @@ import { createReferenceBoardTools } from './tool/reference-board.js'
 import { createDerivativesTools } from './tool/derivatives.js'
 import { createIndexTools } from './tool/indices.js'
 import { createEconomyTools } from './tool/economy.js'
+import { createMarketDataTools } from './tool/market-data.js'
 import { SessionStore } from './core/session.js'
 import { createInboxStore } from './core/inbox-store.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -50,6 +51,7 @@ import { createCronEngine, createCronListener, createCronTools } from './task/cr
 import { createMetricsListener } from './task/metrics/index.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import { createMarketDataService } from './services/market-data/index.js'
 
 // ==================== Persistence paths ====================
 
@@ -173,6 +175,7 @@ async function main() {
   commodityCatalog.load()
 
   const marketSearch = { symbolIndex, cryptoClient, currencyClient, commodityCatalog }
+  const marketDataService = createMarketDataService()
 
   // Federated bar layer — vendor (OpenTypeBB) + broker (UTA) OHLCV behind one
   // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
@@ -212,6 +215,7 @@ async function main() {
   )
 
   toolCenter.register(createCronTools(cronEngine), 'cron')
+  toolCenter.register(createMarketDataTools(marketDataService), 'market-data')
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
   toolCenter.register(createReferenceBoardTools(reference), 'market-board')
   toolCenter.register(createEquityTools(equityClient), 'equity')
