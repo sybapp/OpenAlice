@@ -14,13 +14,6 @@ function symbolFromUrl(url: string): string {
   return (new URL(url).searchParams.get('symbol') ?? '').toUpperCase()
 }
 
-function aaplOnly(payload: object): (req: { request: Request }) => Response {
-  return ({ request }) => {
-    if (symbolFromUrl(request.url) === AAPL) return HttpResponse.json(payload)
-    return HttpResponse.json(demoMarketEmpty)
-  }
-}
-
 function serviceEnvelope(endpoint: string, payload: { results?: unknown[] | null; provider?: string; error?: string }): MarketDataEnvelope {
   const rows = (payload.results ?? []) as Array<Record<string, unknown>>
   return {
@@ -113,13 +106,7 @@ export const marketHandlers = [
     }
     return HttpResponse.json(demoMarketAAPL.historical)
   }),
-  http.get('/api/market/equity/profile', aaplOnly(demoMarketAAPL.profile)),
   http.get('/api/market-data-v1/equity/price/quote', aaplOnly(demoMarketAAPL.quote)),
-  http.get('/api/market/equity/metrics', aaplOnly(demoMarketAAPL.metrics)),
-  http.get('/api/market/equity/ratios', aaplOnly(demoMarketAAPL.ratios)),
-  http.get('/api/market/equity/balance', aaplOnly(demoMarketAAPL.balance)),
-  http.get('/api/market/equity/income', aaplOnly(demoMarketAAPL.income)),
-  http.get('/api/market/equity/cash', aaplOnly(demoMarketAAPL.cash)),
 
   http.post('/api/market-data/test-provider', () => HttpResponse.json({ ok: true })),
   http.get('/api/market-data/hub-status', () =>

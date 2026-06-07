@@ -11,6 +11,12 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'cashflow', label: 'Cash Flow' },
 ]
 
+const endpointFor: Record<Tab, string> = {
+  balance: '/equity/fundamental/balance',
+  income: '/equity/fundamental/income',
+  cashflow: '/equity/fundamental/cash',
+}
+
 // Curated row picks per statement — the raw rows carry 80+ keys, most of
 // which are duplicates or derived. Pick the common ones every investor wants.
 const ROWS: Record<Tab, Array<{ key: string; label: string; indent?: boolean }>> = {
@@ -104,7 +110,7 @@ export function FinancialStatementsPanel({ symbol }: Props) {
 
   const info = [
     entry?.provider ? `Source: ${entry.provider}` : 'Source: (unknown)',
-    `Endpoint: /api/market/equity/${tab === 'cashflow' ? 'cash' : tab}`,
+    `Endpoint: /api/market-data/query?endpoint=${endpointFor[tab]}`,
     'Annual periods, most recent first. Values scaled (K / M / B / T).',
     'Blank cells are line items this provider doesn\u2019t report for the current period.',
   ].join('\n')

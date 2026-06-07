@@ -17,7 +17,6 @@ import { waitForUTAReady } from './services/uta-supervisor/health.js'
 import { createTradingTools } from './tool/trading.js'
 import { SymbolIndex } from './domain/market-data/equity/index.js'
 import { CommodityCatalog } from './domain/market-data/commodity/index.js'
-import { createEquityTools } from './tool/equity.js'
 import { createEtfTools } from './tool/etf.js'
 import { withHubCalendars } from './domain/market-data/hub-data.js'
 import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKEtfClient, SDKIndexClient, SDKDerivativesClient, SDKCommodityClient, SDKEconomyClient } from './domain/market-data/client/typebb/index.js'
@@ -31,7 +30,6 @@ import { createSectorRotationTools } from './tool/sector-rotation.js'
 import { createReferenceBoardTools } from './tool/reference-board.js'
 import { createDerivativesTools } from './tool/derivatives.js'
 import { createIndexTools } from './tool/indices.js'
-import { createEconomyTools } from './tool/economy.js'
 import { createMarketDataTools } from './tool/market-data.js'
 import { SessionStore } from './core/session.js'
 import { createInboxStore } from './core/inbox-store.js'
@@ -218,7 +216,6 @@ async function main() {
   toolCenter.register(createMarketDataTools(marketDataService), 'market-data')
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
   toolCenter.register(createReferenceBoardTools(reference), 'market-board')
-  toolCenter.register(createEquityTools(equityClient), 'equity')
   if (etfClient) {
     toolCenter.register(createEtfTools(etfClient), 'etf')
   }
@@ -236,7 +233,6 @@ async function main() {
   if (indexClient) {
     toolCenter.register(createIndexTools(indexClient), 'indices')
   }
-  toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
 

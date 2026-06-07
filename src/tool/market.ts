@@ -24,11 +24,11 @@ Equity results come from SEC/TMX listings (~13k US/CA stocks); crypto and curren
 come from Yahoo Finance fuzzy search; commodity results come from a canonical catalog (~25 items).
 Currency results are filtered to XXXUSD pairs only.
 
-For commodities, use the canonical id (e.g. "gold", "crude_oil", "copper") with calculateIndicator
+For commodities, use the canonical id (e.g. "gold", "crude_oil", "copper") with marketDataIndicator
 and other tools — provider-specific tickers (GC=F, GCUSD) are resolved automatically.
 
 If unsure about the symbol, use this to find the correct one for market data tools
-(equityGetProfile, equityGetFinancials, calculateIndicator, etc.).
+(marketDataQuery, marketDataIndicator, etc.).
 This is NOT for trading — use searchContracts to find broker-tradeable contracts.`,
       inputSchema: z.object({
         query: z.string().describe('Keyword to search, e.g. "AAPL", "bitcoin", "EUR"'),

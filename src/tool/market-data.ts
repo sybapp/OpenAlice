@@ -155,8 +155,8 @@ as a JSON object string when using the alice CLI.`,
     marketDataIndicator: tool({
       description: `Calculate technical indicators through the generic market-data service.
 
-Asset classes: "equity", "crypto", "currency", or "commodity". Formula syntax matches
-calculateIndicator: CLOSE/HIGH/LOW/OPEN/VOLUME data access; SMA/EMA/STDEV/MAX/MIN/SUM/AVERAGE;
+Asset classes: "equity", "crypto", "currency", or "commodity". Formula syntax supports
+CLOSE/HIGH/LOW/OPEN/VOLUME data access; SMA/EMA/STDEV/MAX/MIN/SUM/AVERAGE;
 RSI/BBANDS/MACD/ATR; and arithmetic with +, -, *, /.
 
 Returns { value, dataRange } where dataRange shows the actual date span and bar count used.`,

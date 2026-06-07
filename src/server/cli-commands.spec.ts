@@ -9,10 +9,12 @@ import {
 } from './cli-commands.js'
 import { createNewsArchiveTools } from '../tool/news.js'
 import { createMarketSearchTools } from '../tool/market.js'
-import { createEquityTools } from '../tool/equity.js'
-import { createEconomyTools } from '../tool/economy.js'
-import { createQuantTools } from '../tool/quant.js'
 import { createThinkingTools } from '../tool/thinking.js'
+import { createEtfTools } from '../tool/etf.js'
+import { createReferenceBoardTools } from '../tool/reference-board.js'
+import { createSectorRotationTools } from '../tool/sector-rotation.js'
+import { createDerivativesTools } from '../tool/derivatives.js'
+import { createIndexTools } from '../tool/indices.js'
 import { inboxPushFactory } from '../tool/inbox-push.js'
 import { inboxReadFactory } from '../tool/inbox-read.js'
 import { workspacePathFactory } from '../tool/workspace-path.js'
@@ -34,10 +36,7 @@ describe('CLI_EXPORTS — data export (global tools)', () => {
   tc.register(createThinkingTools(), 'thinking')
   tc.register(createMarketDataTools(any), 'market-data')
   tc.register(createMarketSearchTools(any), 'market-search')
-  tc.register(createEquityTools(any), 'equity')
-  tc.register(createNewsArchiveTools(any), 'rss')
-  tc.register(createQuantTools(any), 'quant')
-  tc.register(createEconomyTools(any, any), 'economy')
+  tc.register(createNewsArchiveTools(any), 'news')
 
   it('every mapped verb resolves to a registered global tool', () => {
     for (const name of mappedToolNames('data')) {
@@ -47,6 +46,26 @@ describe('CLI_EXPORTS — data export (global tools)', () => {
 
   it('is scope: global', () => {
     expect(getExport('data')?.scope).toBe('global')
+  })
+})
+
+describe('CLI_EXPORTS — traderhub export (reference market data)', () => {
+  const tc = new ToolCenter()
+  tc.register(createMarketDataTools(any), 'market-data')
+  tc.register(createReferenceBoardTools(any), 'market-board')
+  tc.register(createSectorRotationTools(any), 'sector-rotation')
+  tc.register(createEtfTools(any), 'etf')
+  tc.register(createDerivativesTools(any), 'derivatives')
+  tc.register(createIndexTools(any), 'indices')
+
+  it('every mapped verb resolves to a registered traderhub tool', () => {
+    for (const name of mappedToolNames('traderhub')) {
+      expect(tc.get(name), `traderhub CLI maps to missing tool: ${name}`).not.toBeNull()
+    }
+  })
+
+  it('is scope: global', () => {
+    expect(getExport('traderhub')?.scope).toBe('global')
   })
 })
 
@@ -127,6 +146,12 @@ describe('CLI_EXPORTS — structure', () => {
     for (const exp of Object.values(CLI_EXPORTS)) {
       expect(exp.commands['cron']).toBeUndefined()
     }
+  })
+
+  it('keeps retired domain-specific market-data groups off the CLI surface', () => {
+    expect(getExport('data')?.commands['equity']).toBeUndefined()
+    expect(getExport('data')?.commands['economy']).toBeUndefined()
+    expect(getExport('data')?.commands['analysis']).toBeUndefined()
   })
 
   it('exposes the generic market-data explorer verbs', () => {
