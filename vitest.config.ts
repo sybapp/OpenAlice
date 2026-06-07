@@ -42,6 +42,7 @@ export default defineConfig({
           name: 'ui',
           environment: 'jsdom',
           include: ['ui/**/*.spec.*'],
+          setupFiles: ['ui/src/test/setup.ts'],
         },
       },
     ],
