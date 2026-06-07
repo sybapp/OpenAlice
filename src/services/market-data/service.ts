@@ -16,6 +16,7 @@ import type {
   MarketDataConfig,
   MarketDataEnvelope,
   MarketDataHistoricalInput,
+  MarketDataIndicatorInput,
   MarketDataQueryInput,
   MarketDataScanInput,
   MarketDataScanPreset,
@@ -23,6 +24,7 @@ import type {
   MarketDataServiceDeps,
 } from './types.js'
 import { MARKET_DATA_DEFAULT_LIMIT, MARKET_DATA_MAX_LIMIT } from './types.js'
+import { calculateIndicatorWithService } from './indicator/index.js'
 
 type TradingViewQuery = InstanceType<typeof tradingview.Query>
 
@@ -292,6 +294,10 @@ export class MarketDataService {
         ...input.params,
       },
     })
+  }
+
+  async indicator(input: MarketDataIndicatorInput) {
+    return await calculateIndicatorWithService(input, this)
   }
 
   async scan(input: MarketDataScanInput = {}): Promise<MarketDataEnvelope> {
