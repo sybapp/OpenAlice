@@ -310,6 +310,7 @@ async function main() {
     listenerRegistry,
     fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
+    marketDataService,
     marketSearch,
     equityClient,
     barService,

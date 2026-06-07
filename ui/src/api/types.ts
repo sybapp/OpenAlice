@@ -161,6 +161,7 @@ export interface AIProviderConfig {
 
 export interface AppConfig {
   aiProvider: AIProviderConfig
+  marketData?: MarketDataConfig
   engine: Record<string, unknown>
   agent: { evolutionMode: boolean; claudeCode: Record<string, unknown> }
   compaction: { maxContextTokens: number; maxOutputTokens: number }
@@ -171,6 +172,20 @@ export interface AppConfig {
   mcp: McpConfig
   connectors: ConnectorsConfig
   [key: string]: unknown
+}
+
+export interface MarketDataConfig {
+  enabled?: boolean
+  apiUrl?: string
+  backend?: 'typebb-sdk' | 'openbb-api'
+  providers?: {
+    equity?: string
+    crypto?: string
+    currency?: string
+    commodity?: string
+    scanner?: string
+  }
+  providerKeys?: Record<string, string | undefined>
 }
 
 /**

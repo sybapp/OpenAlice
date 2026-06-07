@@ -5,7 +5,7 @@ import {
   demoMarketEmpty,
   demoSectorRotation,
 } from '../fixtures/market'
-import type { BarSourceCandidate, BarMeta } from '../../api/market'
+import type { BarSourceCandidate, BarMeta, MarketDataEnvelope } from '../../api/market'
 
 const AAPL = 'AAPL'
 
@@ -17,6 +17,34 @@ function aaplOnly(payload: object): (req: { request: Request }) => Response {
   return ({ request }) => {
     if (symbolFromUrl(request.url) === AAPL) return HttpResponse.json(payload)
     return HttpResponse.json(demoMarketEmpty)
+  }
+}
+
+function serviceEnvelope(endpoint: string, payload: { results?: unknown[] | null; provider?: string; error?: string }): MarketDataEnvelope {
+  const rows = (payload.results ?? []) as Array<Record<string, unknown>>
+  return {
+    provider: payload.provider ?? 'demo',
+    endpoint,
+    totalCount: rows.length,
+    fields: rows.length > 0 ? Object.keys(rows[0]) : [],
+    rows,
+    warnings: [],
+    ...(payload.error ? { error: payload.error } : {}),
+  }
+}
+
+function queryPayload(endpoint: string, symbol: string): MarketDataEnvelope {
+  if (symbol !== AAPL) return serviceEnvelope(endpoint, demoMarketEmpty)
+  switch (endpoint) {
+    case '/equity/price/historical': return serviceEnvelope(endpoint, demoMarketAAPL.historical)
+    case '/equity/profile': return serviceEnvelope(endpoint, demoMarketAAPL.profile)
+    case '/equity/price/quote': return serviceEnvelope(endpoint, demoMarketAAPL.quote)
+    case '/equity/fundamental/metrics': return serviceEnvelope(endpoint, demoMarketAAPL.metrics)
+    case '/equity/fundamental/ratios': return serviceEnvelope(endpoint, demoMarketAAPL.ratios)
+    case '/equity/fundamental/balance': return serviceEnvelope(endpoint, demoMarketAAPL.balance)
+    case '/equity/fundamental/income': return serviceEnvelope(endpoint, demoMarketAAPL.income)
+    case '/equity/fundamental/cash': return serviceEnvelope(endpoint, demoMarketAAPL.cash)
+    default: return serviceEnvelope(endpoint, demoMarketEmpty)
   }
 }
 
@@ -59,6 +87,12 @@ export const marketHandlers = [
       provider: sourceId, barCapability: sourceId === 'alpaca-paper' ? 'iex' : 'delayed',
     }
     return HttpResponse.json({ results, meta })
+  }),
+
+  http.get('/api/market-data/query', ({ request }) => {
+    const url = new URL(request.url)
+    const endpoint = url.searchParams.get('endpoint') ?? ''
+    return HttpResponse.json(queryPayload(endpoint, symbolFromUrl(request.url)))
   }),
 
   // ---- equity data ----

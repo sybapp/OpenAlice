@@ -5,8 +5,7 @@ import { ConfigSection, Field, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'
 import { useConfigPage } from '../hooks/useConfigPage'
 import { PageHeader } from '../components/PageHeader'
-
-type MarketDataConfig = Record<string, unknown>
+import type { MarketDataConfig } from '../api/types'
 
 // ==================== Constants ====================
 
@@ -15,6 +14,7 @@ const PROVIDER_OPTIONS: Record<string, string[]> = {
   crypto: ['yfinance', 'fmp'],
   currency: ['yfinance', 'fmp'],
   commodity: ['yfinance', 'fmp'],
+  scanner: ['tradingview'],
 }
 
 const ASSET_LABELS: Record<string, string> = {
@@ -22,6 +22,7 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: 'Crypto',
   currency: 'Currency',
   commodity: 'Commodity',
+  scanner: 'Scanner',
 }
 
 const ALL_PROVIDERS = [
@@ -31,6 +32,7 @@ const ALL_PROVIDERS = [
   { key: 'eia', name: 'EIA', desc: 'Energy Information Administration — petroleum status, energy reports.', hint: 'Free — eia.gov/opendata/register.php' },
   { key: 'econdb', name: 'EconDB', desc: 'Global macro indicators, country profiles, shipping data.', hint: 'Required (free signup) — econdb.com' },
   { key: 'intrinio', name: 'Intrinio', desc: 'Equities, ETFs, fundamentals, news, options snapshots.', hint: 'intrinio.com' },
+  { key: 'tradingview_sessionid', name: 'TradingView', desc: 'Market scanner data across stocks, crypto, forex, futures, bonds, CFDs, and options.', hint: 'Optional sessionid cookie value from tradingview.com' },
 ] as const
 
 // ==================== Test Button ====================
@@ -82,9 +84,18 @@ export function MarketDataPage() {
     )
   }
 
-  const dataBackend = (config.backend as string) || 'typebb-sdk'
-  const apiUrl = (config.apiUrl as string) || 'http://localhost:6900'
-  const providers = (config.providers ?? { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' }) as Record<string, string>
+  const dataBackend: 'typebb-sdk' | 'openbb-api' = config.backend || 'typebb-sdk'
+  const apiUrl = config.apiUrl || 'http://localhost:6900'
+  const providers: Record<string, string> = {
+    equity: 'yfinance',
+    crypto: 'yfinance',
+    currency: 'yfinance',
+    commodity: 'yfinance',
+    scanner: 'tradingview',
+  }
+  for (const [key, value] of Object.entries(config.providers ?? {})) {
+    if (value) providers[key] = value
+  }
   const providerKeys = (config.providerKeys ?? {}) as Record<string, string>
 
   const handleProviderChange = (asset: string, provider: string) => {
@@ -255,9 +266,9 @@ function AdvancedSection({
   onBackendChange,
   onApiUrlChange,
 }: {
-  backend: string
+  backend: 'typebb-sdk' | 'openbb-api'
   apiUrl: string
-  onBackendChange: (backend: string) => void
+  onBackendChange: (backend: 'typebb-sdk' | 'openbb-api') => void
   onApiUrlChange: (url: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
