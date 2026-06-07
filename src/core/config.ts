@@ -210,11 +210,13 @@ const marketDataSchema = z.object({
     crypto: z.string().default('yfinance'),
     currency: z.string().default('yfinance'),
     commodity: z.string().default('yfinance'),
+    scanner: z.string().default('tradingview'),
   }).default({
     equity: 'yfinance',
     crypto: 'yfinance',
     currency: 'yfinance',
     commodity: 'yfinance',
+    scanner: 'tradingview',
   }),
   providerKeys: z.object({
     fred: z.string().optional(),
@@ -225,6 +227,7 @@ const marketDataSchema = z.object({
     tradingeconomics: z.string().optional(),
     econdb: z.string().optional(),
     intrinio: z.string().optional(),
+    tradingview_sessionid: z.string().optional(),
     benzinga: z.string().optional(),
     tiingo: z.string().optional(),
     biztoc: z.string().optional(),
