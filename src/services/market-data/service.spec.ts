@@ -9,9 +9,11 @@ const config: MarketDataConfig = {
     crypto: 'yfinance',
     currency: 'yfinance',
     commodity: 'yfinance',
+    scanner: 'tradingview',
   },
   providerKeys: {
     fmp: 'fmp-key',
+    tradingview_sessionid: 'session-123',
   },
 }
 
@@ -73,12 +75,12 @@ function deps(
     handler,
   })
 
-  return {
-    executor: new QueryExecutor(registry),
-    registry,
-    router,
-    readConfig,
-    credentialsForConfig: () => ({ fmp_api_key: 'fmp-key' }),
+    return {
+      executor: new QueryExecutor(registry),
+      registry,
+      router,
+      readConfig,
+    credentialsForConfig: () => ({ fmp_api_key: 'fmp-key', tradingview_sessionid: 'session-123' }),
   }
 }
 
@@ -255,6 +257,28 @@ describe('MarketDataService', () => {
     expect(result.provider).toBe('tradingview')
     expect(result.totalCount).toBe(2)
     expect(result.rows).toEqual([{ ticker: 'NASDAQ:AAPL', name: 'Apple', close: 190 }])
+  })
+
+  it('uses configured scanner provider and credentials for TradingView scans', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ totalCount: 0, data: [] }),
+    })) as unknown as typeof fetch
+
+    await service.scan({
+      preset: 'stocks',
+      fetch: fetchMock,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          cookie: 'sessionid=session-123',
+        }),
+      }),
+    )
   })
 
   it('requires a TradingView query payload for query/raw scan modes', async () => {
