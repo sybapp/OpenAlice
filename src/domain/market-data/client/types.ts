@@ -85,8 +85,8 @@ export interface CommodityClientLike {
   getSpotPrices(params: Record<string, unknown>): Promise<CommoditySpotPriceData[]>
   // EIA endpoints — semantically macro/economy data, but OpenBB upstream
   // routes them under /commodity/* (output is oil/gas prices + inventories).
-  // The SDK clients carry them; the tool layer surfaces them under
-  // tool/economy.ts so AI agents see one coherent macro namespace.
+  // The SDK clients carry them; generic marketDataQuery exposes the raw
+  // endpoint path without a domain-specific economy tool wrapper.
   getPetroleumStatus(params: Record<string, unknown>): Promise<PetroleumStatusReportData[]>
   getEnergyOutlook(params: Record<string, unknown>): Promise<ShortTermEnergyOutlookData[]>
 }

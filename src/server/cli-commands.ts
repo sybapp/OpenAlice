@@ -53,26 +53,6 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
         scan: 'marketDataScan',
         search: 'marketDataSearch',
       },
-      equity: {
-        profile: 'equityGetProfile',
-        financials: 'equityGetFinancials',
-        ratios: 'equityGetRatios',
-        earnings: 'equityGetEarningsCalendar',
-        insiders: 'equityGetInsiderTrading',
-        discover: 'equityDiscover',
-      },
-      economy: {
-        'fred-search': 'economyFredSearch',
-        'fred-series': 'economyFredSeries',
-        'fred-regional': 'economyFredRegional',
-        'bls-search': 'economyBlsSearch',
-        'bls-series': 'economyBlsSeries',
-        energy: 'economyEnergyOutlook',
-        petroleum: 'economyPetroleumStatus',
-      },
-      analysis: {
-        indicator: 'calculateIndicator',
-      },
       think: {
         calc: 'calculate',
       },

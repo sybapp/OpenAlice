@@ -11,7 +11,7 @@
  * histories and returns the ranked table. Fetching lives in the tool layer.
  */
 
-import type { OhlcvData } from './indicator/types.js'
+import type { OhlcvData } from '@/services/market-data/indicator/types.js'
 import type { EquityClientLike } from '../market-data/client/types.js'
 
 export interface SectorEtf {
