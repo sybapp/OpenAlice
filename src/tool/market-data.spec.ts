@@ -18,6 +18,7 @@ function makeService() {
       endpoints: [{ endpoint: '/equity/search', model: 'EquitySearch', description: 'Search', providers: ['provider-a'] }],
     })),
     query: vi.fn(async () => envelope),
+    indicator: vi.fn(async () => ({ value: 144.5, dataRange: { AAPL: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-31', bars: 20 } } })),
     scan: vi.fn(async () => ({ ...envelope, endpoint: '/scan', provider: 'tradingview' })),
     search: vi.fn(async () => envelope),
   }
@@ -34,14 +35,14 @@ describe('createMarketDataTools', () => {
     tools = createMarketDataTools(service)
   })
 
-  it('exposes only the read-only generic market-data tools for Task 3', () => {
+  it('exposes generic market-data tools plus indicator calculation', () => {
     expect(Object.keys(tools).sort()).toEqual([
       'marketDataCatalog',
+      'marketDataIndicator',
       'marketDataQuery',
       'marketDataScan',
       'marketDataSearch',
     ])
-    expect('marketDataIndicator' in tools).toBe(false)
   })
 
   it('marketDataCatalog returns the service catalog unchanged', async () => {
@@ -143,9 +144,32 @@ describe('createMarketDataTools', () => {
     })
   })
 
+  it('marketDataIndicator forwards calculation input and parses credentials', async () => {
+    const result = await exec(tools.marketDataIndicator, {
+      asset: 'equity',
+      formula: "SMA(CLOSE('AAPL', '1d'), 20)",
+      precision: 2,
+      provider: 'fmp',
+      credentials: '{"fmp_api_key":"secret"}',
+    })
+
+    expect(result).toEqual({
+      value: 144.5,
+      dataRange: { AAPL: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-31', bars: 20 } },
+    })
+    expect(service.indicator).toHaveBeenCalledWith({
+      asset: 'equity',
+      formula: "SMA(CLOSE('AAPL', '1d'), 20)",
+      precision: 2,
+      provider: 'fmp',
+      credentials: { fmp_api_key: 'secret' },
+    })
+  })
+
   it('schemas reject unsupported search asset classes and scan presets', () => {
     expect((tools.marketDataSearch as any).inputSchema.safeParse({ assetClass: 'economy', query: 'GDP' }).success).toBe(false)
     expect((tools.marketDataScan as any).inputSchema.safeParse({ preset: 'unknown' }).success).toBe(false)
+    expect((tools.marketDataIndicator as any).inputSchema.safeParse({ asset: 'etf', formula: '1 + 1' }).success).toBe(false)
   })
 
   it('throws a clear error for invalid JSON-string object flags', async () => {

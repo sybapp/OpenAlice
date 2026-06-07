@@ -48,6 +48,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       },
       marketdata: {
         catalog: 'marketDataCatalog',
+        indicator: 'marketDataIndicator',
         query: 'marketDataQuery',
         scan: 'marketDataScan',
         search: 'marketDataSearch',

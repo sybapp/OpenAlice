@@ -38,6 +38,13 @@ function deps(
         static transformData(_query: unknown, data: unknown) { return data }
         static async fetchData() { return [] }
       },
+      CommoditySpotPrice: class {
+        static requireCredentials = false
+        static transformQuery(params: Record<string, unknown>) { return params }
+        static async extractData() { return [] }
+        static transformData(_query: unknown, data: unknown) { return data }
+        static async fetchData() { return [] }
+      },
     },
   }))
   registry.includeProvider(new Provider({
@@ -57,6 +64,12 @@ function deps(
     model: 'EquityHistorical',
     path: '/equity/price/historical',
     description: 'Get equity history.',
+    handler,
+  })
+  router.command({
+    model: 'CommoditySpotPrice',
+    path: '/commodity/price/spot',
+    description: 'Get commodity spot prices.',
     handler,
   })
 
@@ -150,6 +163,61 @@ describe('MarketDataService', () => {
 
     expect(handler.mock.calls[0]?.[2]).toEqual({ symbol: 'NVDA', start_date: '2024-01-01' })
     expect(result.endpoint).toBe('/equity/price/historical')
+  })
+
+  it('calculates indicators through the generic historical path with stable filtering and metadata', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-07T12:00:00Z'))
+    const handler = vi.fn(async (_executor, _provider, params) => {
+      expect(params).toEqual({ symbol: 'AAPL', start_date: '2024-06-07', interval: '1d' })
+      return [
+        { date: '2024-06-09', open: 3, high: 4, low: 2, close: 3, volume: null },
+        { date: '2024-06-08', open: null, high: 2, low: 1, close: 2, volume: 20 },
+        { date: '2024-06-07', open: 1, high: 2, low: 0, close: 1, volume: 10 },
+      ]
+    })
+    const service = new MarketDataService(deps(handler))
+
+    try {
+      const result = await service.indicator({
+        asset: 'equity',
+        formula: "CLOSE('AAPL', '1d')",
+      })
+
+      expect(result).toEqual({
+        value: [1, 3],
+        dataRange: {
+          AAPL: { symbol: 'AAPL', from: '2024-06-07', to: '2024-06-09', bars: 2 },
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('calculates commodity indicators through spot prices without forwarding interval', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-07T12:00:00Z'))
+    const handler = vi.fn(async (_executor, _provider, params) => {
+      expect(params).toEqual({ symbol: 'gold', start_date: '2024-06-07' })
+      return [
+        { date: '2024-06-07', open: 100, high: 101, low: 99, close: 100, volume: null },
+        { date: '2024-06-08', open: 102, high: 103, low: 101, close: 102, volume: null },
+      ]
+    })
+    const service = new MarketDataService(deps(handler))
+
+    try {
+      const result = await service.indicator({
+        asset: 'commodity',
+        formula: "CLOSE('gold', '1d')[-1]",
+      })
+
+      expect(result.value).toBe(102)
+      expect(result.dataRange.gold).toEqual({ symbol: 'gold', from: '2024-06-07', to: '2024-06-08', bars: 2 })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('returns a boundary error for unsupported search asset classes', async () => {

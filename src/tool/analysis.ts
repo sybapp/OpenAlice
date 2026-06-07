@@ -8,35 +8,18 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { BarService } from '@/domain/market-data/bars/index'
-import { IndicatorCalculator } from '@/domain/analysis/indicator/calculator'
-import type { IndicatorContext, HistoricalDataResult } from '@/domain/analysis/indicator/types'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, CommodityClientLike } from '@/domain/market-data/client/types.js'
+import { calculateIndicatorWithClients } from '@/services/market-data/index.js'
 
-/**
- * Build the indicator context over the federated bar service. v1 keeps its
- * plain-symbol / vendor-default contract (the AI still writes `CLOSE('AAPL','1d')`
- * and passes `asset`); the federation resolves transparently and the returned
- * `meta` reports the actual source (UTA vs vendor). Window heuristics + null
- * filtering now live in the bar service.
- */
-function buildContext(
-  asset: 'equity' | 'crypto' | 'currency' | 'commodity',
-  barService: BarService,
-): IndicatorContext {
-  return {
-    getHistoricalData: async (symbol, interval): Promise<HistoricalDataResult> => {
-      const { bars, meta } = await barService.getBars({ symbol, assetClass: asset }, { interval })
-      return { data: bars, meta }
-    },
-  }
-}
-
-export function createAnalysisTools(barService: BarService) {
+export function createAnalysisTools(
+  equityClient: EquityClientLike,
+  cryptoClient: CryptoClientLike,
+  currencyClient: CurrencyClientLike,
+  commodityClient: CommodityClientLike,
+) {
   return {
     calculateIndicator: tool({
-      description: `Calculate technical indicators by ticker (vendor data, auto-selected). Quick path for "what's AAPL's RSI".
-
-For a SPECIFIC source (a broker's K-lines matching a held position's symbology), or to mix sources in one expression, use **calculateQuant** instead — it's barId-keyed. This tool (calculateIndicator) is the simpler vendor-default path: plain ticker + asset class, no barId. Note the syntax differs: HERE functions are UPPERCASE in a formula string (SMA(CLOSE('AAPL','1d'),50)); calculateQuant uses a lowercase pandas-style script (sma(s.close, 50)).
+      description: `Calculate technical indicators for any asset using formula expressions.
 
 Asset classes: "equity" for stocks, "crypto" for cryptocurrencies, "currency" for forex pairs, "commodity" for commodities (use canonical names: gold, crude_oil, copper, etc.).
 
@@ -75,9 +58,10 @@ Use marketSearchForResearch to find the correct symbol first.`,
         precision: z.number().int().min(0).max(10).optional().describe('Decimal places (default: 4)'),
       }).meta({ examples: [{ asset: 'equity', formula: "SMA(CLOSE('AAPL', '1d'), 50)" }] }),
       execute: async ({ asset, formula, precision }) => {
-        const context = buildContext(asset, barService)
-        const calculator = new IndicatorCalculator(context)
-        return await calculator.calculate(formula, precision)
+        return await calculateIndicatorWithClients(
+          { asset, formula, precision },
+          { equityClient, cryptoClient, currencyClient, commodityClient },
+        )
       },
     }),
   }

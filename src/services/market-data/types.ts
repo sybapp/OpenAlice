@@ -85,6 +85,14 @@ export interface MarketDataHistoricalInput {
   credentials?: Record<string, string>
 }
 
+export interface MarketDataIndicatorInput {
+  asset: 'equity' | 'crypto' | 'currency' | 'commodity'
+  formula: string
+  precision?: number
+  provider?: string
+  credentials?: Record<string, string>
+}
+
 export type MarketDataScanPreset =
   | 'stocks'
   | 'coin'
