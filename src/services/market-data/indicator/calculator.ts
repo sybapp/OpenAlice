@@ -1,14 +1,3 @@
-/**
- * Indicator Calculator — AST 表达式解析与求值
- *
- * 通用量化因子计算器，支持 equity / crypto / currency。
- *
- * 支持类 Excel 公式语法：
- * - SMA(CLOSE('AAPL', '1d'), 50)
- * - RSI(CLOSE('BTCUSD', '1d'), 14)
- * - (CLOSE('EURUSD', '1d')[-1] - SMA(CLOSE('EURUSD', '1d'), 50)) / SMA(CLOSE('EURUSD', '1d'), 50) * 100
- */
-
 import type {
   ASTNode,
   CalculationResult,
@@ -18,11 +7,11 @@ import type {
   ArrayAccessNode,
   DataSourceMeta,
   TrackedValues,
-} from './types'
-import { toValues } from './types'
-import * as DataAccess from './functions/data-access'
-import * as Statistics from './functions/statistics'
-import * as Technical from './functions/technical'
+} from './types.js'
+import { toValues } from './types.js'
+import * as DataAccess from './functions/data-access.js'
+import * as Statistics from './functions/statistics.js'
+import * as Technical from './functions/technical.js'
 
 export interface CalculateOutput {
   value: number | number[] | Record<string, number>
@@ -59,7 +48,6 @@ export class IndicatorCalculator {
     if (typeof result === 'number') {
       return parseFloat(result.toFixed(precision))
     }
-    // TrackedValues — apply precision to values array
     if (!Array.isArray(result) && typeof result === 'object' && 'values' in result && 'source' in result) {
       return (result as TrackedValues).values.map((v) => parseFloat(v.toFixed(precision)))
     }
@@ -75,8 +63,6 @@ export class IndicatorCalculator {
     }
     return rounded
   }
-
-  // ==================== Parser ====================
 
   private parse(formula: string): ASTNode {
     let pos = 0
@@ -203,12 +189,12 @@ export class IndicatorCalculator {
     }
 
     const parseArrayAccess = (array: ASTNode): ASTNode => {
-      consume() // [
+      consume()
       skipWhitespace()
       const index = parseExpression()
       skipWhitespace()
       if (peek() !== ']') throw new Error(`Expected ']' at position ${pos}`)
-      consume() // ]
+      consume()
       return { type: 'arrayAccess', array, index }
     }
 
@@ -232,8 +218,6 @@ export class IndicatorCalculator {
 
     return result
   }
-
-  // ==================== Evaluator ====================
 
   private async evaluate(node: ASTNode): Promise<CalculationResult> {
     switch (node.type) {
@@ -265,7 +249,6 @@ export class IndicatorCalculator {
     const { name, args } = node
     const evaluatedArgs = await Promise.all(args.map((arg) => this.evaluate(arg)))
 
-    // Data access functions: FUNC('symbol', 'interval') → TrackedValues
     if (name === 'CLOSE' || name === 'HIGH' || name === 'LOW' || name === 'OPEN' || name === 'VOLUME') {
       const fn = DataAccess[name]
       const result = await fn(evaluatedArgs[0] as string, evaluatedArgs[1] as string, this.context)
@@ -273,7 +256,6 @@ export class IndicatorCalculator {
       return result
     }
 
-    // Statistics functions — accept number[] | TrackedValues
     if (name === 'SMA') return Statistics.SMA(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
     if (name === 'EMA') return Statistics.EMA(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
     if (name === 'STDEV') return Statistics.STDEV(evaluatedArgs[0] as number[] | TrackedValues)
@@ -282,7 +264,6 @@ export class IndicatorCalculator {
     if (name === 'SUM') return Statistics.SUM(evaluatedArgs[0] as number[] | TrackedValues)
     if (name === 'AVERAGE') return Statistics.AVERAGE(evaluatedArgs[0] as number[] | TrackedValues)
 
-    // Technical indicator functions — accept number[] | TrackedValues
     if (name === 'RSI') return Technical.RSI(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
     if (name === 'BBANDS')
       return Technical.BBANDS(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number, evaluatedArgs[2] as number)
@@ -329,8 +310,6 @@ export class IndicatorCalculator {
   private async executeArrayAccess(node: ArrayAccessNode): Promise<number> {
     const array = await this.evaluate(node.array)
     const index = await this.evaluate(node.index)
-
-    // Extract values from TrackedValues or use raw array
     const values = toValues(array as number[] | TrackedValues)
 
     if (!Array.isArray(values)) {

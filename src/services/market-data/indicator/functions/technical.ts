@@ -1,16 +1,8 @@
-/**
- * Technical indicator functions — 纯数学计算
- *
- * RSI, BBANDS, MACD, ATR
- * 接受 number[] 或 TrackedValues（自动提取 values）
- */
-
-import { toValues, type TrackedValues } from '../types'
-import { EMA } from './statistics'
+import { toValues, type TrackedValues } from '../types.js'
+import { EMA } from './statistics.js'
 
 type NumericInput = number[] | TrackedValues
 
-/** Relative Strength Index (RSI) */
 export function RSI(data: NumericInput, period: number = 14): number {
   const v = toValues(data)
   if (v.length < period + 1) {
@@ -41,7 +33,6 @@ export function RSI(data: NumericInput, period: number = 14): number {
   return 100 - 100 / (1 + rs)
 }
 
-/** Bollinger Bands (BBANDS) */
 export function BBANDS(
   data: NumericInput,
   period: number = 20,
@@ -64,7 +55,6 @@ export function BBANDS(
   }
 }
 
-/** MACD (Moving Average Convergence Divergence) */
 export function MACD(
   data: NumericInput,
   fastPeriod: number = 12,
@@ -100,7 +90,6 @@ export function MACD(
   }
 }
 
-/** Average True Range (ATR) */
 export function ATR(
   highs: NumericInput,
   lows: NumericInput,

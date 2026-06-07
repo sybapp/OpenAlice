@@ -22,25 +22,12 @@ export const CLI_COMMANDS: Record<string, Record<string, string>> = {
   market: {
     search: 'marketSearchForResearch',
   },
-  equity: {
-    profile: 'equityGetProfile',
-    financials: 'equityGetFinancials',
-    ratios: 'equityGetRatios',
-    earnings: 'equityGetEarningsCalendar',
-    insiders: 'equityGetInsiderTrading',
-    discover: 'equityDiscover',
-  },
-  economy: {
-    'fred-search': 'economyFredSearch',
-    'fred-series': 'economyFredSeries',
-    'fred-regional': 'economyFredRegional',
-    'bls-search': 'economyBlsSearch',
-    'bls-series': 'economyBlsSeries',
-    energy: 'economyEnergyOutlook',
-    petroleum: 'economyPetroleumStatus',
-  },
-  analysis: {
-    indicator: 'calculateIndicator',
+  marketdata: {
+    catalog: 'marketDataCatalog',
+    indicator: 'marketDataIndicator',
+    query: 'marketDataQuery',
+    scan: 'marketDataScan',
+    search: 'marketDataSearch',
   },
   think: {
     calc: 'calculate',

@@ -3,10 +3,8 @@ import { ToolCenter } from '../core/tool-center.js'
 import { CLI_COMMANDS, mappedToolNames } from './cli-commands.js'
 import { createNewsArchiveTools } from '../tool/news.js'
 import { createMarketSearchTools } from '../tool/market.js'
-import { createEquityTools } from '../tool/equity.js'
-import { createEconomyTools } from '../tool/economy.js'
-import { createAnalysisTools } from '../tool/analysis.js'
 import { createThinkingTools } from '../tool/thinking.js'
+import { createMarketDataTools } from '../tool/market-data.js'
 
 /**
  * Anti-rot: the alias map is hand-authored, so guard it against drift — a verb
@@ -18,11 +16,9 @@ describe('CLI_COMMANDS', () => {
   const tc = new ToolCenter()
   const any = {} as never
   tc.register(createThinkingTools(), 'thinking')
+  tc.register(createMarketDataTools(any), 'market-data')
   tc.register(createMarketSearchTools(any), 'market-search')
-  tc.register(createEquityTools(any), 'equity')
   tc.register(createNewsArchiveTools(any), 'news')
-  tc.register(createAnalysisTools(any, any, any, any), 'analysis')
-  tc.register(createEconomyTools(any, any), 'economy')
 
   it('every mapped verb resolves to a registered tool', () => {
     for (const name of mappedToolNames()) {
@@ -43,5 +39,21 @@ describe('CLI_COMMANDS', () => {
   it('keeps trading + cron OFF the CLI surface (boundary discipline)', () => {
     expect(CLI_COMMANDS['trading']).toBeUndefined()
     expect(CLI_COMMANDS['cron']).toBeUndefined()
+  })
+
+  it('keeps retired domain-specific market-data groups off the CLI surface', () => {
+    expect(CLI_COMMANDS['equity']).toBeUndefined()
+    expect(CLI_COMMANDS['economy']).toBeUndefined()
+    expect(CLI_COMMANDS['analysis']).toBeUndefined()
+  })
+
+  it('exposes the generic market-data explorer verbs', () => {
+    expect(CLI_COMMANDS['marketdata']).toEqual({
+      catalog: 'marketDataCatalog',
+      indicator: 'marketDataIndicator',
+      query: 'marketDataQuery',
+      scan: 'marketDataScan',
+      search: 'marketDataSearch',
+    })
   })
 })

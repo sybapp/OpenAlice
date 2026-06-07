@@ -1,15 +1,7 @@
-/**
- * Statistics functions — 纯数学计算
- *
- * SMA, EMA, STDEV, MAX, MIN, SUM, AVERAGE
- * 接受 number[] 或 TrackedValues（自动提取 values）
- */
-
-import { toValues, type TrackedValues } from '../types'
+import { toValues, type TrackedValues } from '../types.js'
 
 type NumericInput = number[] | TrackedValues
 
-/** Simple Moving Average */
 export function SMA(data: NumericInput, period: number): number {
   const v = toValues(data)
   if (v.length < period) {
@@ -20,7 +12,6 @@ export function SMA(data: NumericInput, period: number): number {
   return sum / period
 }
 
-/** Exponential Moving Average */
 export function EMA(data: NumericInput, period: number): number {
   const v = toValues(data)
   if (v.length < period) {
@@ -34,7 +25,6 @@ export function EMA(data: NumericInput, period: number): number {
   return ema
 }
 
-/** Standard Deviation */
 export function STDEV(data: NumericInput): number {
   const v = toValues(data)
   if (v.length === 0) {
@@ -45,7 +35,6 @@ export function STDEV(data: NumericInput): number {
   return Math.sqrt(variance)
 }
 
-/** Maximum value */
 export function MAX(data: NumericInput): number {
   const v = toValues(data)
   if (v.length === 0) {
@@ -54,7 +43,6 @@ export function MAX(data: NumericInput): number {
   return Math.max(...v)
 }
 
-/** Minimum value */
 export function MIN(data: NumericInput): number {
   const v = toValues(data)
   if (v.length === 0) {
@@ -63,13 +51,11 @@ export function MIN(data: NumericInput): number {
   return Math.min(...v)
 }
 
-/** Sum */
 export function SUM(data: NumericInput): number {
   const v = toValues(data)
   return v.reduce((acc, val) => acc + val, 0)
 }
 
-/** Average */
 export function AVERAGE(data: NumericInput): number {
   const v = toValues(data)
   if (v.length === 0) {

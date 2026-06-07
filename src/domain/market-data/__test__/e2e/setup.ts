@@ -19,6 +19,7 @@ import { buildSDKCredentials } from '@/domain/market-data/credential-map.js'
 import { createExecutor, type QueryExecutor } from '@traderalice/opentypebb'
 import { mountOpenTypeBB } from '@/server/opentypebb.js'
 import { createMarketDataRoutes } from '@/webui/routes/config.js'
+import { createMarketDataService } from '@/services/market-data/index.js'
 import type { EngineContext } from '@/core/types.js'
 
 export interface TestApp {
@@ -42,9 +43,9 @@ async function init(): Promise<TestApp> {
   const executor = createExecutor()
   const credentials = buildSDKCredentials(config.marketData.providerKeys)
 
-  // createMarketDataRoutes only reads ctx.bbEngine — pass a partial ctx
-  // shape with only the fields it needs.
-  const ctx = { bbEngine: executor, config } as unknown as EngineContext
+  // createMarketDataRoutes reads the market-data service and config; pass a
+  // partial ctx shape with only the fields this route needs.
+  const ctx = { bbEngine: executor, config, marketDataService: createMarketDataService() } as unknown as EngineContext
 
   const app = new Hono()
   app.route('/api/market-data', createMarketDataRoutes(ctx))
