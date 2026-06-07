@@ -27,6 +27,7 @@ import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/econ
 import { createMarketSearchTools } from './tool/market.js'
 import { createAnalysisTools } from './tool/analysis.js'
 import { createEconomyTools } from './tool/economy.js'
+import { createMarketDataTools } from './tool/market-data.js'
 import { SessionStore } from './core/session.js'
 import { createInboxStore } from './core/inbox-store.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -50,6 +51,7 @@ import { createMetricsListener } from './task/metrics/index.js'
 import { createAgentWorkListener } from './core/agent-work-listener.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import { createMarketDataService } from './services/market-data/index.js'
 
 // ==================== Persistence paths ====================
 
@@ -185,6 +187,7 @@ async function main() {
   commodityCatalog.load()
 
   const marketSearch = { symbolIndex, cryptoClient, currencyClient, commodityCatalog }
+  const marketDataService = createMarketDataService()
 
   // ==================== Tool Registration ====================
 
@@ -197,6 +200,7 @@ async function main() {
   )
 
   toolCenter.register(createCronTools(cronEngine), 'cron')
+  toolCenter.register(createMarketDataTools(marketDataService), 'market-data')
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
   toolCenter.register(createEquityTools(equityClient), 'equity')
   if (config.news.enabled) {
