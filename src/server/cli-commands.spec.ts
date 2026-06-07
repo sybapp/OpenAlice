@@ -7,6 +7,7 @@ import { createEquityTools } from '../tool/equity.js'
 import { createEconomyTools } from '../tool/economy.js'
 import { createAnalysisTools } from '../tool/analysis.js'
 import { createThinkingTools } from '../tool/thinking.js'
+import { createMarketDataTools } from '../tool/market-data.js'
 
 /**
  * Anti-rot: the alias map is hand-authored, so guard it against drift — a verb
@@ -18,6 +19,7 @@ describe('CLI_COMMANDS', () => {
   const tc = new ToolCenter()
   const any = {} as never
   tc.register(createThinkingTools(), 'thinking')
+  tc.register(createMarketDataTools(any), 'market-data')
   tc.register(createMarketSearchTools(any), 'market-search')
   tc.register(createEquityTools(any), 'equity')
   tc.register(createNewsArchiveTools(any), 'news')
@@ -43,5 +45,14 @@ describe('CLI_COMMANDS', () => {
   it('keeps trading + cron OFF the CLI surface (boundary discipline)', () => {
     expect(CLI_COMMANDS['trading']).toBeUndefined()
     expect(CLI_COMMANDS['cron']).toBeUndefined()
+  })
+
+  it('exposes the generic market-data explorer verbs', () => {
+    expect(CLI_COMMANDS['marketdata']).toEqual({
+      catalog: 'marketDataCatalog',
+      query: 'marketDataQuery',
+      scan: 'marketDataScan',
+      search: 'marketDataSearch',
+    })
   })
 })

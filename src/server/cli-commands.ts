@@ -22,6 +22,12 @@ export const CLI_COMMANDS: Record<string, Record<string, string>> = {
   market: {
     search: 'marketSearchForResearch',
   },
+  marketdata: {
+    catalog: 'marketDataCatalog',
+    query: 'marketDataQuery',
+    scan: 'marketDataScan',
+    search: 'marketDataSearch',
+  },
   equity: {
     profile: 'equityGetProfile',
     financials: 'equityGetFinancials',
