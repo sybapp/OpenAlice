@@ -8,6 +8,7 @@ export {
   type MarketDataConfig,
   type MarketDataEnvelope,
   type MarketDataHistoricalInput,
+  type MarketDataIndicatorInput,
   type MarketDataQueryInput,
   type MarketDataScanInput,
   type MarketDataScanPreset,
@@ -15,3 +16,29 @@ export {
   type MarketDataServiceDeps,
 } from './types.js'
 export { MarketDataService, createMarketDataService } from './service.js'
+export {
+  IndicatorCalculator,
+  buildClientIndicatorContext,
+  buildIndicatorStartDate,
+  buildServiceIndicatorContext,
+  calculateIndicatorWithClients,
+  calculateIndicatorWithContext,
+  calculateIndicatorWithService,
+  type CalculateOutput,
+  type DataSourceMeta,
+  type HistoricalDataResult,
+  type IndicatorAssetClass,
+  type IndicatorCalculationInput,
+  type IndicatorClientBundle,
+  type IndicatorContext,
+  type OhlcvData,
+} from './indicator/index.js'
+export {
+  calculateSectorRotation,
+  type SectorRotationDataRange,
+  type SectorRotationFailure,
+  type SectorRotationHistoricalFetcher,
+  type SectorRotationInput,
+  type SectorRotationResult,
+  type SectorRotationSymbolResult,
+} from './sector-rotation.js'

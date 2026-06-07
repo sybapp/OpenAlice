@@ -7,6 +7,7 @@ import type {
 } from '@/services/market-data/index.js'
 
 type MarketDataToolService = Pick<MarketDataService, 'catalog' | 'query' | 'scan' | 'search'>
+  & Pick<MarketDataService, 'indicator'>
 
 const jsonRecordInput = z.union([
   z.record(z.string(), z.unknown()),
@@ -147,6 +148,30 @@ as a JSON object string when using the alice CLI.`,
         provider,
         limit,
         params: parseJsonRecord(params, 'params'),
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    marketDataIndicator: tool({
+      description: `Calculate technical indicators through the generic market-data service.
+
+Asset classes: "equity", "crypto", "currency", or "commodity". Formula syntax matches
+calculateIndicator: CLOSE/HIGH/LOW/OPEN/VOLUME data access; SMA/EMA/STDEV/MAX/MIN/SUM/AVERAGE;
+RSI/BBANDS/MACD/ATR; and arithmetic with +, -, *, /.
+
+Returns { value, dataRange } where dataRange shows the actual date span and bar count used.`,
+      inputSchema: z.object({
+        asset: z.enum(['equity', 'crypto', 'currency', 'commodity']).describe('Asset class.'),
+        formula: z.string().describe("Formula expression, e.g. SMA(CLOSE('AAPL', '1d'), 50)."),
+        precision: z.number().int().min(0).max(10).optional().describe('Decimal places. Defaults to 4.'),
+        provider: z.string().optional().describe('Provider override. Defaults to configured provider for the asset class.'),
+        credentials: credentialsInput.optional().describe('Provider credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ asset: 'equity', formula: "SMA(CLOSE('AAPL', '1d'), 50)" }] }),
+      execute: async ({ asset, formula, precision, provider, credentials }) => service.indicator({
+        asset,
+        formula,
+        precision,
+        provider,
         credentials: parseCredentials(credentials),
       }),
     }),

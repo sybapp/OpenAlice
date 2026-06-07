@@ -132,6 +132,7 @@ describe('CLI_EXPORTS — structure', () => {
   it('exposes the generic market-data explorer verbs', () => {
     expect(getExport('data')?.commands['marketdata']).toEqual({
       catalog: 'marketDataCatalog',
+      indicator: 'marketDataIndicator',
       query: 'marketDataQuery',
       scan: 'marketDataScan',
       search: 'marketDataSearch',
