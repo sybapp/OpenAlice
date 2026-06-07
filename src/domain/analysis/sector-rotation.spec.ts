@@ -6,7 +6,7 @@
  * fade). Asserts ranking, structure, and the derived metrics.
  */
 import { describe, it, expect } from 'vitest'
-import type { OhlcvData } from './indicator/types'
+import type { OhlcvData } from '@/services/market-data/indicator/types.js'
 import {
   computeSectorRotation,
   GICS_SECTOR_ETFS,
