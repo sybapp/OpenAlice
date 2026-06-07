@@ -13,6 +13,11 @@
       "openalice-source": "./src/server.ts",
       "import": "./dist/server.js",
       "types": "./dist/server.d.ts"
+    },
+    "./tradingview": {
+      "openalice-source": "./src/providers/tradingview/index.ts",
+      "import": "./dist/tradingview.js",
+      "types": "./dist/tradingview.d.ts"
     }
   },
   "files": [
@@ -33,6 +38,10 @@
       "./server": {
         "import": "./dist/server.js",
         "types": "./dist/server.d.ts"
+      },
+      "./tradingview": {
+        "import": "./dist/tradingview.js",
+        "types": "./dist/tradingview.d.ts"
       }
     }
   },
