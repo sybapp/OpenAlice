@@ -50,6 +50,7 @@ describe('CLI_COMMANDS', () => {
   it('exposes the generic market-data explorer verbs', () => {
     expect(CLI_COMMANDS['marketdata']).toEqual({
       catalog: 'marketDataCatalog',
+      indicator: 'marketDataIndicator',
       query: 'marketDataQuery',
       scan: 'marketDataScan',
       search: 'marketDataSearch',
