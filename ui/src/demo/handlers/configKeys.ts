@@ -19,7 +19,7 @@ export const configKeysHandlers = [
       mcp: { port: 47332 },
       marketData: {
         enabled: true,
-        providers: { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' },
+        providers: { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance', scanner: 'tradingview' },
         providerKeys: {},
         hub: { enabled: true, baseUrl: 'https://traderhub.openalice.ai' },
       },

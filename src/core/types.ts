@@ -14,6 +14,7 @@ import type { ListenerRegistry } from './listener-registry.js'
 import type { EventBus } from './event-bus.js'
 import type { IInboxStore } from './inbox-store.js'
 import type { IEntityStore } from './entity-store.js'
+import type { MarketDataService } from '../services/market-data/index.js'
 
 export type { Config, WebChannel }
 
@@ -54,6 +55,7 @@ export interface EngineContext {
 
   // Market data
   bbEngine: QueryExecutor
+  marketDataService: MarketDataService
   /** Deps for cross-asset-class heuristic symbol search. Shared between the
    *  AI tool (marketSearchForResearch) and the /api/market/search HTTP route. */
   marketSearch: MarketSearchDeps

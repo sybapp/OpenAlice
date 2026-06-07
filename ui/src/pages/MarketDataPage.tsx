@@ -15,6 +15,7 @@ const PROVIDER_OPTIONS: Record<string, string[]> = {
   crypto: ['yfinance', 'fmp'],
   currency: ['yfinance', 'fmp'],
   commodity: ['yfinance', 'fmp'],
+  scanner: ['tradingview'],
 }
 
 const ASSET_LABELS: Record<string, string> = {
@@ -22,6 +23,7 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: 'Crypto',
   currency: 'Currency',
   commodity: 'Commodity',
+  scanner: 'Scanner',
 }
 
 interface ProviderEntry {
@@ -54,6 +56,7 @@ const KEY_GROUPS: { label: string | null; providers: ProviderEntry[] }[] = [
     providers: [
       { key: 'econdb', name: 'EconDB', desc: 'Global macro indicators, country profiles, shipping data.', hint: 'econdb.com' },
       { key: 'intrinio', name: 'Intrinio', desc: 'Equities, ETFs, fundamentals, news, options snapshots.', hint: 'intrinio.com' },
+      { key: 'tradingview_sessionid', name: 'TradingView', desc: 'Market scanner data across stocks, crypto, forex, futures, bonds, CFDs, and options.', hint: 'Optional sessionid cookie value from tradingview.com' },
     ],
   },
 ]
@@ -184,7 +187,14 @@ export function MarketDataPage() {
     )
   }
 
-  const providers = (config.providers ?? { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' }) as Record<string, string>
+  const providers = {
+    equity: 'yfinance',
+    crypto: 'yfinance',
+    currency: 'yfinance',
+    commodity: 'yfinance',
+    scanner: 'tradingview',
+    ...((config.providers ?? {}) as Record<string, string>),
+  }
   const providerKeys = (config.providerKeys ?? {}) as Record<string, string>
   const sourceRows = deriveSourceRows(hub.enabled, ping, providers, providerKeys)
 
