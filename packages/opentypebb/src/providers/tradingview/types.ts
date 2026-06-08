@@ -15,4 +15,10 @@ export type {
   TradingViewScan2Row,
   TradingViewScanRawResponse,
   TradingViewScanRow,
+  TradingViewSymbolSearchOptions,
+  TradingViewSymbolSearchResult,
+  TradingViewSymbolSearchType,
+  TradingViewTechnicalAnalysis,
+  TradingViewTechnicalAnalysisInput,
+  TradingViewTechnicalSignal,
 } from './scanner/types.js'

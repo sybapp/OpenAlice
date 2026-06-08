@@ -400,4 +400,52 @@ describe('MarketDataService', () => {
       onData: () => {},
     })).rejects.toThrow('Only the tradingview provider supports realtime quote subscriptions.')
   })
+
+  it('gets TradingView technical analysis through the service layer', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        totalCount: 1,
+        data: [{ s: 'NASDAQ:AAPL', d: [0.1, 0.2, 0.3] }],
+      }),
+    })) as unknown as typeof fetch
+
+    const result = await service.technicalAnalysis({
+      symbol: 'NASDAQ:AAPL',
+      periods: ['1D'],
+      fetch: fetchMock,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://scanner.tradingview.com/global/scan',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          cookie: 'sessionid=session-123',
+        }),
+      }),
+    )
+    expect(result).toEqual({
+      provider: 'tradingview',
+      endpoint: '/technical-analysis',
+      totalCount: 1,
+      fields: ['symbol', 'period', 'Other', 'All', 'MA'],
+      rows: [{ symbol: 'NASDAQ:AAPL', period: '1D', Other: 0.2, All: 0.4, MA: 0.6 }],
+      warnings: [],
+    })
+  })
+
+  it('rejects technical analysis for non-TradingView providers', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    const result = await service.technicalAnalysis({
+      provider: 'yfinance',
+      symbol: 'NASDAQ:AAPL',
+    })
+
+    expect(result.provider).toBe('yfinance')
+    expect(result.rows).toEqual([])
+    expect(result.error).toBe('Only the tradingview provider supports technical analysis at the service layer.')
+  })
 })
