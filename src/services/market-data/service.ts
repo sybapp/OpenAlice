@@ -18,6 +18,8 @@ import type {
   MarketDataHistoricalInput,
   MarketDataIndicatorInput,
   MarketDataQueryInput,
+  MarketDataQuoteSubscription,
+  MarketDataQuoteSubscriptionInput,
   MarketDataScanInput,
   MarketDataScanPreset,
   MarketDataSearchInput,
@@ -324,6 +326,41 @@ export class MarketDataService {
       return this.toEnvelope(provider, endpoint, result, limit)
     } catch (error) {
       return errorEnvelope(provider, endpoint, error)
+    }
+  }
+
+  async subscribeQuote(input: MarketDataQuoteSubscriptionInput): Promise<MarketDataQuoteSubscription> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+
+    if (provider !== 'tradingview') {
+      throw new Error('Only the tradingview provider supports realtime quote subscriptions.')
+    }
+
+    const credentials =
+      input.credentials ??
+      this.deps.credentialsForConfig?.(config.providerKeys) ??
+      {}
+    const clientFactory =
+      this.deps.createTradingViewRealtimeClient ??
+      ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
+    const client = clientFactory({
+      credentials,
+      socketFactory: input.socketFactory,
+    })
+    const session = new tradingview.TradingViewQuoteSession(client, {
+      fields: input.fields,
+      customFields: input.customFields,
+    })
+    const subscription = session.subscribe(input.symbol, input.onData, input.session)
+
+    return {
+      provider,
+      close: () => {
+        subscription.close()
+        session.close()
+        client.close()
+      },
     }
   }
 

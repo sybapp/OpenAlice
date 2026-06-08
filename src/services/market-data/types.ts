@@ -3,6 +3,13 @@ import type {
   QueryExecutor,
   Registry,
   Router,
+  TradingViewQuoteData,
+  TradingViewQuoteField,
+  TradingViewQuoteFieldPreset,
+  TradingViewRealtimeClient,
+  TradingViewRealtimeClientOptions,
+  TradingViewRealtimeCredentials,
+  TradingViewRealtimeSocketFactory,
 } from '@traderalice/opentypebb'
 
 export const MARKET_DATA_DEFAULT_LIMIT = 500
@@ -119,12 +126,31 @@ export interface MarketDataScanInput {
   rawResponse?: boolean
 }
 
+export interface MarketDataQuoteSubscriptionInput {
+  provider?: 'tradingview' | string
+  symbol: string
+  session?: string
+  fields?: TradingViewQuoteFieldPreset
+  customFields?: TradingViewQuoteField[]
+  credentials?: TradingViewRealtimeCredentials | null
+  socketFactory?: TradingViewRealtimeSocketFactory
+  onData: (data: TradingViewQuoteData) => void
+}
+
+export interface MarketDataQuoteSubscription {
+  provider: string
+  close: () => void
+}
+
 export interface MarketDataServiceDeps {
   executor: QueryExecutor
   registry: Registry
   router: Router
   readConfig: () => Promise<MarketDataConfig> | MarketDataConfig
   credentialsForConfig?: (providerKeys: MarketDataConfig['providerKeys']) => Record<string, string>
+  createTradingViewRealtimeClient?: (
+    options: TradingViewRealtimeClientOptions,
+  ) => TradingViewRealtimeClient
 }
 
 export type MarketDataCommandMap = Map<string, CommandDef>
