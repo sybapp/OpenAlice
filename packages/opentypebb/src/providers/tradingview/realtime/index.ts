@@ -15,6 +15,14 @@ export {
   type TradingViewQuoteSessionOptions,
   type TradingViewQuoteSubscription,
 } from './quote-session.js'
+export {
+  TradingViewChartSession,
+  type TradingViewCandle,
+  type TradingViewChartMarketOptions,
+  type TradingViewChartSubscription,
+  type TradingViewChartUpdate,
+  type TradingViewTimeframe,
+} from './chart-session.js'
 export type {
   TradingViewRealtimeClientOptions,
   TradingViewRealtimeCredentials,
