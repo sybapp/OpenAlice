@@ -401,6 +401,141 @@ describe('MarketDataService', () => {
     })).rejects.toThrow('Only the tradingview provider supports realtime quote subscriptions.')
   })
 
+  it('subscribes to TradingView realtime candles through the unified provider path', async () => {
+    const socket = new FakeRealtimeSocket()
+    const updates: unknown[] = []
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const subscription = await service.subscribeCandles({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '60', range: 2 },
+      onData: (data) => updates.push(data),
+    })
+    socket.open()
+
+    const chartCreate = socket.sent.find((packet) => packet.includes('chart_create_session'))
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    expect(subscription.provider).toBe('tradingview')
+    expect(socket.sent).toContain(formatRealtimeCommand('create_series', [
+      chartSessionId,
+      '$prices',
+      's1',
+      'ser_1',
+      '60',
+      2,
+    ]))
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123.456] }],
+        },
+      },
+    ]))
+
+    expect(updates).toEqual([{
+      symbol: 'NASDAQ:AAPL',
+      candles: [{ time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 }],
+      changes: ['$prices'],
+    }])
+    expect(subscription.getCandles()).toEqual([
+      { time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 },
+    ])
+
+    subscription.close()
+    expect(socket.readyState).toBe(3)
+  })
+
+  it('rejects realtime candle subscriptions for non-TradingView providers', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    await expect(service.subscribeCandles({
+      provider: 'yfinance',
+      symbol: 'NASDAQ:AAPL',
+      onData: () => {},
+    })).rejects.toThrow('Only the tradingview provider supports realtime candle subscriptions.')
+  })
+
+  it('searches TradingView symbols through the service layer', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        symbols: [
+          {
+            prefix: 'NASDAQ',
+            exchange: 'NASDAQ Global Select',
+            symbol: 'AAPL',
+            description: 'Apple Inc.',
+            type: 'stock',
+          },
+          {
+            prefix: 'NYSE',
+            exchange: 'NYSE',
+            symbol: 'A',
+            description: 'Agilent',
+            type: 'stock',
+          },
+        ],
+      }),
+    })) as unknown as typeof fetch
+
+    const result = await service.searchTradingViewSymbols({
+      query: 'AAPL',
+      type: 'stock',
+      limit: 1,
+      fetch: fetchMock,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('https://symbol-search.tradingview.com/symbol_search/v3?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          cookie: 'sessionid=session-123',
+        }),
+      }),
+    )
+    expect(result).toEqual({
+      provider: 'tradingview',
+      endpoint: '/tradingview/symbol-search',
+      totalCount: 2,
+      fields: ['id', 'exchange', 'fullExchange', 'symbol', 'description', 'type'],
+      rows: [{
+        id: 'NASDAQ:AAPL',
+        exchange: 'NASDAQ',
+        fullExchange: 'NASDAQ Global Select',
+        symbol: 'AAPL',
+        description: 'Apple Inc.',
+        type: 'stock',
+      }],
+      warnings: [],
+    })
+  })
+
+  it('rejects TradingView symbol search for non-TradingView providers', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    const result = await service.searchTradingViewSymbols({
+      provider: 'yfinance',
+      query: 'AAPL',
+    })
+
+    expect(result.provider).toBe('yfinance')
+    expect(result.rows).toEqual([])
+    expect(result.error).toBe('Only the tradingview provider supports TradingView symbol search at the service layer.')
+  })
+
   it('gets TradingView technical analysis through the service layer', async () => {
     const service = new MarketDataService(deps(async () => []))
     const fetchMock = vi.fn(async () => ({

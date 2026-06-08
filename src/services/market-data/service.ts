@@ -12,6 +12,8 @@ import type {
   MarketDataCatalog,
   MarketDataCatalogEndpoint,
   MarketDataCatalogProvider,
+  MarketDataCandleSubscription,
+  MarketDataCandleSubscriptionInput,
   MarketDataCommandMap,
   MarketDataConfig,
   MarketDataEnvelope,
@@ -24,6 +26,7 @@ import type {
   MarketDataScanPreset,
   MarketDataSearchInput,
   MarketDataTechnicalAnalysisInput,
+  MarketDataTradingViewSymbolSearchInput,
   MarketDataServiceDeps,
 } from './types.js'
 import { MARKET_DATA_DEFAULT_LIMIT, MARKET_DATA_MAX_LIMIT } from './types.js'
@@ -362,6 +365,67 @@ export class MarketDataService {
         session.close()
         client.close()
       },
+    }
+  }
+
+  async subscribeCandles(input: MarketDataCandleSubscriptionInput): Promise<MarketDataCandleSubscription> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+
+    if (provider !== 'tradingview') {
+      throw new Error('Only the tradingview provider supports realtime candle subscriptions.')
+    }
+
+    const credentials =
+      input.credentials ??
+      this.deps.credentialsForConfig?.(config.providerKeys) ??
+      {}
+    const clientFactory =
+      this.deps.createTradingViewRealtimeClient ??
+      ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
+    const client = clientFactory({
+      credentials,
+      socketFactory: input.socketFactory,
+    })
+    const session = new tradingview.TradingViewChartSession(client)
+    const subscription = session.subscribe(input.symbol, input.onData, input.options)
+
+    return {
+      provider,
+      getCandles: () => session.currentCandles,
+      close: () => {
+        subscription.close()
+        session.close()
+        client.close()
+      },
+    }
+  }
+
+  async searchTradingViewSymbols(input: MarketDataTradingViewSymbolSearchInput): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/tradingview/symbol-search'
+    const limit = clampLimit(input.limit)
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports TradingView symbol search at the service layer.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const rows = await tradingview.searchSymbols(input.query, {
+        type: input.type,
+        offset: input.offset,
+        credentials,
+        fetch: input.fetch,
+        timeoutMs: input.timeoutMs,
+      })
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: rows.length,
+        rows,
+      }, limit)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
     }
   }
 
