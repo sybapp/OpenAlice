@@ -23,6 +23,7 @@ import type {
   MarketDataScanInput,
   MarketDataScanPreset,
   MarketDataSearchInput,
+  MarketDataTechnicalAnalysisInput,
   MarketDataServiceDeps,
 } from './types.js'
 import { MARKET_DATA_DEFAULT_LIMIT, MARKET_DATA_MAX_LIMIT } from './types.js'
@@ -361,6 +362,39 @@ export class MarketDataService {
         session.close()
         client.close()
       },
+    }
+  }
+
+  async technicalAnalysis(input: MarketDataTechnicalAnalysisInput): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/technical-analysis'
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports technical analysis at the service layer.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const result = await tradingview.getTechnicalAnalysis({
+        symbol: input.symbol,
+        periods: input.periods,
+      }, {
+        credentials,
+        fetch: input.fetch,
+        timeoutMs: input.timeoutMs,
+      })
+      const rows = Object.entries(result.periods).map(([period, values]) => ({
+        symbol: result.symbol,
+        period,
+        ...values,
+      }))
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: rows.length,
+        rows,
+      }, MARKET_DATA_MAX_LIMIT)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
     }
   }
 

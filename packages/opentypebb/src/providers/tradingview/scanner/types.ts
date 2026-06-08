@@ -124,3 +124,43 @@ export interface TradingViewRequestOptions {
   timeoutMs?: number
   signal?: AbortSignal
 }
+
+export type TradingViewSymbolSearchType =
+  | 'stock'
+  | 'futures'
+  | 'forex'
+  | 'cfd'
+  | 'crypto'
+  | 'index'
+  | 'economic'
+  | string
+
+export interface TradingViewSymbolSearchOptions extends TradingViewRequestOptions {
+  type?: TradingViewSymbolSearchType
+  offset?: number
+}
+
+export interface TradingViewSymbolSearchResult {
+  id: string
+  exchange: string
+  fullExchange: string
+  symbol: string
+  description: string
+  type: string
+}
+
+export interface TradingViewTechnicalAnalysisInput {
+  symbol: string
+  periods?: string[]
+}
+
+export type TradingViewTechnicalSignal = {
+  Other: number | null
+  All: number | null
+  MA: number | null
+}
+
+export interface TradingViewTechnicalAnalysis {
+  symbol: string
+  periods: Record<string, TradingViewTechnicalSignal>
+}

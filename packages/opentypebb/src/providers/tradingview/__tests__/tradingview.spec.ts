@@ -8,6 +8,7 @@ import {
   OPTIONS_SCAN2_URL,
   Or,
   Query,
+  getTechnicalAnalysis,
   bond,
   cfd,
   coin,
@@ -17,6 +18,7 @@ import {
   forex,
   futures,
   options,
+  searchSymbols,
   stocks,
 } from '../index.js'
 
@@ -242,6 +244,78 @@ describe('TradingView scanner HTTP and normalization', () => {
 
     expect(calls[0]?.init.headers).toMatchObject({
       cookie: 'theme=dark; sessionid=session-123',
+    })
+  })
+
+  it('searches symbols through TradingView symbol search v3', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fetch = mockFetch({
+      symbols: [
+        {
+          prefix: 'NASDAQ',
+          exchange: 'NASDAQ Global Select',
+          symbol: 'AAPL',
+          description: 'Apple Inc.',
+          type: 'stock',
+        },
+      ],
+    }, calls)
+
+    const result = await searchSymbols('nasdaq:aapl', {
+      type: 'stock',
+      offset: 10,
+      fetch,
+      credentials: { tradingview_sessionid: 'session-123' },
+    })
+
+    const url = new URL(calls[0]!.url)
+    expect(url.origin + url.pathname).toBe('https://symbol-search.tradingview.com/symbol_search/v3')
+    expect(url.searchParams.get('exchange')).toBe('NASDAQ')
+    expect(url.searchParams.get('text')).toBe('AAPL')
+    expect(url.searchParams.get('search_type')).toBe('stock')
+    expect(url.searchParams.get('start')).toBe('10')
+    expect(calls[0]?.init.headers).toMatchObject({ cookie: 'sessionid=session-123' })
+    expect(result).toEqual([{
+      id: 'NASDAQ:AAPL',
+      exchange: 'NASDAQ',
+      fullExchange: 'NASDAQ Global Select',
+      symbol: 'AAPL',
+      description: 'Apple Inc.',
+      type: 'stock',
+    }])
+  })
+
+  it('gets TradingView technical analysis values by period', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fetch = mockFetch({
+      totalCount: 1,
+      data: [{ s: 'NASDAQ:AAPL', d: [0.1, 0.2, 0.3, -0.5, 0, 0.5] }],
+    }, calls)
+
+    const result = await getTechnicalAnalysis({
+      symbol: 'NASDAQ:AAPL',
+      periods: ['1', '1D'],
+    }, { fetch })
+
+    expect(calls[0]?.url).toBe('https://scanner.tradingview.com/global/scan')
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(parseBody(calls[0]!.init)).toEqual({
+      symbols: { tickers: ['NASDAQ:AAPL'] },
+      columns: [
+        'Recommend.Other|1',
+        'Recommend.All|1',
+        'Recommend.MA|1',
+        'Recommend.Other',
+        'Recommend.All',
+        'Recommend.MA',
+      ],
+    })
+    expect(result).toEqual({
+      symbol: 'NASDAQ:AAPL',
+      periods: {
+        '1': { Other: 0.2, All: 0.4, MA: 0.6 },
+        '1D': { Other: -1, All: 0, MA: 1 },
+      },
     })
   })
 })
