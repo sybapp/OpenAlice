@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Provider, QueryExecutor, Registry, Router, type CommandHandler } from '@traderalice/opentypebb'
+import {
+  Provider,
+  QueryExecutor,
+  Registry,
+  Router,
+  TradingViewRealtimeClient,
+  formatRealtimeCommand,
+  parseRealtimeFrames,
+  type CommandHandler,
+  type TradingViewRealtimeClientOptions,
+  type TradingViewRealtimeSocket,
+} from '@traderalice/opentypebb'
 import { MarketDataService } from './service.js'
 import type { MarketDataConfig, MarketDataServiceDeps } from './types.js'
 
@@ -20,6 +31,7 @@ const config: MarketDataConfig = {
 function deps(
   handler: CommandHandler,
   readConfig: MarketDataServiceDeps['readConfig'] = () => config,
+  overrides: Partial<MarketDataServiceDeps> = {},
 ): MarketDataServiceDeps {
   const registry = new Registry()
   registry.includeProvider(new Provider({
@@ -75,12 +87,56 @@ function deps(
     handler,
   })
 
-    return {
-      executor: new QueryExecutor(registry),
-      registry,
-      router,
-      readConfig,
+  return {
+    executor: new QueryExecutor(registry),
+    registry,
+    router,
+    readConfig,
     credentialsForConfig: () => ({ fmp_api_key: 'fmp-key', tradingview_sessionid: 'session-123' }),
+    ...overrides,
+  }
+}
+
+class FakeRealtimeSocket implements TradingViewRealtimeSocket {
+  readyState = 0
+  readonly sent: string[] = []
+  private readonly listeners = new Map<string, Set<(event?: unknown) => void>>()
+
+  send(data: string): void {
+    this.sent.push(data)
+  }
+
+  close(): void {
+    this.readyState = 3
+    this.emit('close')
+  }
+
+  addEventListener(type: 'open', listener: () => void): void
+  addEventListener(type: 'close', listener: () => void): void
+  addEventListener(type: 'error', listener: (event: unknown) => void): void
+  addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void
+  addEventListener(
+    type: 'open' | 'close' | 'error' | 'message',
+    listener: (() => void) | ((event: unknown) => void) | ((event: { data: unknown }) => void),
+  ): void {
+    const listeners = this.listeners.get(type) ?? new Set<(event?: unknown) => void>()
+    listeners.add(listener as (event?: unknown) => void)
+    this.listeners.set(type, listeners)
+  }
+
+  open(): void {
+    this.readyState = 1
+    this.emit('open')
+  }
+
+  message(data: string): void {
+    this.emit('message', { data })
+  }
+
+  private emit(type: string, event?: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event)
+    }
   }
 }
 
@@ -287,5 +343,61 @@ describe('MarketDataService', () => {
     const result = await service.scan({ mode: 'query' })
 
     expect(result.error).toBe('TradingView query scan requires a query payload.')
+  })
+
+  it('subscribes to TradingView realtime quotes through the unified provider path', async () => {
+    const socket = new FakeRealtimeSocket()
+    const clientOptions: TradingViewRealtimeClientOptions[] = []
+    const updates: unknown[] = []
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => {
+        clientOptions.push(options)
+        return new TradingViewRealtimeClient({
+          ...options,
+          socketFactory: () => socket,
+        })
+      },
+    }))
+
+    const subscription = await service.subscribeQuote({
+      symbol: 'NASDAQ:AAPL',
+      fields: 'price',
+      onData: (data) => updates.push(data),
+    })
+    socket.open()
+
+    expect(subscription.provider).toBe('tradingview')
+    expect(clientOptions[0]?.credentials).toMatchObject({ tradingview_sessionid: 'session-123' })
+    expect(socket.sent).toContain(formatRealtimeCommand('set_auth_token', ['unauthorized_user_token']))
+
+    const quoteCreate = socket.sent.find((packet) => packet.includes('quote_create_session'))
+    const quoteFrame = quoteCreate ? parseRealtimeFrames(quoteCreate)[0] : null
+    const quoteSessionId = quoteFrame && typeof quoteFrame === 'object' && Array.isArray(quoteFrame.p)
+      ? String(quoteFrame.p[0])
+      : ''
+    const key = '= {"session":"regular","symbol":"NASDAQ:AAPL"}'.replace(' ', '')
+
+    expect(socket.sent).toContain(formatRealtimeCommand('quote_set_fields', [quoteSessionId, 'lp']))
+    expect(socket.sent).toContain(formatRealtimeCommand('quote_add_symbols', [quoteSessionId, key]))
+
+    socket.message(formatRealtimeCommand('qsd', [
+      quoteSessionId,
+      { n: key, s: 'ok', v: { lp: 190 } },
+    ]))
+
+    expect(updates).toEqual([{ symbol: key, values: { lp: 190 } }])
+
+    subscription.close()
+    expect(socket.readyState).toBe(3)
+  })
+
+  it('rejects realtime quote subscriptions for non-TradingView providers', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    await expect(service.subscribeQuote({
+      provider: 'yfinance',
+      symbol: 'NASDAQ:AAPL',
+      onData: () => {},
+    })).rejects.toThrow('Only the tradingview provider supports realtime quote subscriptions.')
   })
 })
