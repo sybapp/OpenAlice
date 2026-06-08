@@ -137,6 +137,15 @@ export interface MarketDataQuoteSubscriptionInput {
   onData: (data: TradingViewQuoteData) => void
 }
 
+export interface MarketDataTechnicalAnalysisInput {
+  provider?: 'tradingview' | string
+  symbol: string
+  periods?: string[]
+  credentials?: { tradingview_sessionid?: string } | null
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
 export interface MarketDataQuoteSubscription {
   provider: string
   close: () => void

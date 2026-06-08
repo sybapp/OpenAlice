@@ -10,13 +10,21 @@ import type {
   TradingViewRawResponse,
   TradingViewRequestOptions,
   TradingViewRow,
+  TradingViewScanRawResponse,
   TradingViewScannerData,
+  TradingViewSymbolSearchOptions,
+  TradingViewSymbolSearchResult,
+  TradingViewTechnicalAnalysis,
+  TradingViewTechnicalAnalysisInput,
+  TradingViewTechnicalSignal,
 } from './types.js'
 
 export const DEFAULT_RANGE: [number, number] = [0, 50]
 export const SCAN_URL = 'https://scanner.tradingview.com/{market}/scan'
+export const GLOBAL_SCAN_URL = 'https://scanner.tradingview.com/global/scan'
 export const OPTIONS_SCAN2_URL =
   'https://scanner.tradingview.com/options/scan2?label-product=options-builder'
+export const SYMBOL_SEARCH_URL = 'https://symbol-search.tradingview.com/symbol_search/v3'
 
 export const DEFAULT_HEADERS: Record<string, string> = {
   authority: 'scanner.tradingview.com',
@@ -194,6 +202,43 @@ function applySessionCookie(
   return headers
 }
 
+async function requestJson<T>(
+  url: string,
+  init: RequestInit,
+  options: TradingViewRequestOptions,
+  errorPrefix: string,
+): Promise<T> {
+  const fetchImpl = options.fetch ?? globalThis.fetch
+  if (!fetchImpl) {
+    throw new Error(`No fetch implementation available for ${errorPrefix}`)
+  }
+
+  const controller = options.signal ? null : new AbortController()
+  const timeoutMs = options.timeoutMs ?? 20_000
+  const timeout =
+    controller && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null
+
+  try {
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: options.signal ?? controller?.signal,
+    })
+
+    if (!response.ok) {
+      const body = await response.text()
+      throw new Error(`${errorPrefix} failed: ${response.status} ${response.statusText}\n Body: ${body}\n`)
+    }
+
+    return await response.json() as T
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
 function normalizeScanResponse(
   payload: TradingViewQueryPayload,
   raw: TradingViewRawResponse,
@@ -308,42 +353,21 @@ export class Query {
   async getScannerDataRaw(options: TradingViewRequestOptions = {}): Promise<TradingViewRawResponse> {
     ensureRange(this.query)
 
-    const fetchImpl = options.fetch ?? globalThis.fetch
-    if (!fetchImpl) {
-      throw new Error('No fetch implementation available for TradingView request')
-    }
-
-    const controller = options.signal ? null : new AbortController()
-    const timeoutMs = options.timeoutMs ?? 20_000
-    const timeout =
-      controller && timeoutMs > 0
-        ? setTimeout(() => controller.abort(), timeoutMs)
-        : null
-
     const headers = applySessionCookie(
       { ...DEFAULT_HEADERS, ...headersToRecord(options.headers) },
       options.credentials,
     )
 
-    try {
-      const response = await fetchImpl(this.url, {
+    return await requestJson<TradingViewRawResponse>(
+      this.url,
+      {
         method: 'POST',
         headers,
         body: JSON.stringify(this.query),
-        signal: options.signal ?? controller?.signal,
-      })
-
-      if (!response.ok) {
-        const body = await response.text()
-        throw new Error(`TradingView scanner request failed: ${response.status} ${response.statusText}\n Body: ${body}\n`)
-      }
-
-      return await response.json() as TradingViewRawResponse
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout)
-      }
-    }
+      },
+      options,
+      'TradingView scanner request',
+    )
   }
 
   async getScannerData(options: TradingViewRequestOptions = {}): Promise<TradingViewScannerData> {
@@ -384,5 +408,108 @@ export class Query {
 
   get_scanner_data(options: TradingViewRequestOptions = {}): Promise<TradingViewScannerData> {
     return this.getScannerData(options)
+  }
+}
+
+type SymbolSearchRaw = {
+  symbols?: Array<{
+    prefix?: string
+    exchange?: string
+    symbol?: string
+    description?: string
+    type?: string
+  }>
+}
+
+export async function searchSymbols(
+  search: string,
+  options: TradingViewSymbolSearchOptions = {},
+): Promise<TradingViewSymbolSearchResult[]> {
+  const [maybeExchange, ...rest] = search.toUpperCase().trim().replace(/ /g, '+').split(':')
+  const hasExchange = rest.length > 0
+  const text = hasExchange ? rest.join(':') : maybeExchange
+  const params = new URLSearchParams({
+    text,
+    start: String(options.offset ?? 0),
+  })
+  if (hasExchange) {
+    params.set('exchange', maybeExchange)
+  }
+  if (options.type) {
+    params.set('search_type', options.type)
+  }
+
+  const headers = applySessionCookie(
+    { origin: 'https://www.tradingview.com', ...headersToRecord(options.headers) },
+    options.credentials,
+  )
+  const raw = await requestJson<SymbolSearchRaw>(
+    `${SYMBOL_SEARCH_URL}?${params.toString()}`,
+    { method: 'GET', headers },
+    options,
+    'TradingView symbol search request',
+  )
+
+  return (raw.symbols ?? []).map((symbol) => {
+    const exchange = String(symbol.exchange ?? '').split(' ')[0]
+    const prefix = symbol.prefix ? String(symbol.prefix) : exchange.toUpperCase()
+    const rawSymbol = String(symbol.symbol ?? '')
+    return {
+      id: prefix ? `${prefix}:${rawSymbol}` : rawSymbol,
+      exchange,
+      fullExchange: String(symbol.exchange ?? ''),
+      symbol: rawSymbol,
+      description: String(symbol.description ?? ''),
+      type: String(symbol.type ?? ''),
+    }
+  })
+}
+
+const technicalIndicators = ['Recommend.Other', 'Recommend.All', 'Recommend.MA'] as const
+const defaultTechnicalPeriods = ['1', '5', '15', '60', '240', '1D', '1W', '1M']
+
+function technicalColumns(periods: string[]): string[] {
+  return periods.flatMap((period) =>
+    technicalIndicators.map((indicator) => (period === '1D' ? indicator : `${indicator}|${period}`)),
+  )
+}
+
+export async function getTechnicalAnalysis(
+  input: TradingViewTechnicalAnalysisInput,
+  options: TradingViewRequestOptions = {},
+): Promise<TradingViewTechnicalAnalysis> {
+  const periods = input.periods?.length ? input.periods : defaultTechnicalPeriods
+  const columns = technicalColumns(periods)
+  const headers = applySessionCookie(
+    { ...DEFAULT_HEADERS, ...headersToRecord(options.headers) },
+    options.credentials,
+  )
+  const raw = await requestJson<TradingViewScanRawResponse>(
+    GLOBAL_SCAN_URL,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        symbols: { tickers: [input.symbol] },
+        columns,
+      }),
+    },
+    options,
+    'TradingView technical analysis request',
+  )
+
+  const values = raw.data[0]?.d ?? []
+  const byPeriod: TradingViewTechnicalAnalysis['periods'] = {}
+  for (const [index, column] of columns.entries()) {
+    const [indicator, period = '1D'] = column.split('|')
+    const key = indicator.replace('Recommend.', '') as keyof TradingViewTechnicalSignal
+    byPeriod[period] ??= { Other: null, All: null, MA: null }
+    const value = values[index]
+    byPeriod[period][key] = typeof value === 'number' ? Math.round(value * 1000) / 500 : null
+  }
+
+  return {
+    symbol: input.symbol,
+    periods: byPeriod,
   }
 }
