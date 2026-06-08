@@ -61,6 +61,7 @@ export { intrinioProvider } from './providers/intrinio/index.js'
 export { tradingviewProvider } from './providers/tradingview/index.js'
 export * as tradingview from './providers/tradingview/index.js'
 export {
+  TradingViewChartSession,
   TradingViewQuoteSession,
   TradingViewRealtimeClient,
   formatHeartbeat,
@@ -68,6 +69,10 @@ export {
   formatRealtimeFrame,
   parseRealtimeFrames,
   type TradingViewQuoteData,
+  type TradingViewCandle,
+  type TradingViewChartMarketOptions,
+  type TradingViewChartSubscription,
+  type TradingViewChartUpdate,
   type TradingViewQuoteField,
   type TradingViewQuoteFieldPreset,
   type TradingViewQuoteSessionOptions,
@@ -83,4 +88,5 @@ export {
   type TradingViewRealtimeSocket,
   type TradingViewRealtimeSocketFactory,
   type TradingViewRealtimeSocketFactoryInput,
+  type TradingViewTimeframe,
 } from './providers/tradingview/index.js'

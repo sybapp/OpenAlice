@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  TradingViewChartSession,
   TradingViewQuoteSession,
   TradingViewRealtimeClient,
   formatHeartbeat,
@@ -77,6 +78,59 @@ describe('TradingView realtime protocol', () => {
   it('ignores malformed fragments instead of throwing', () => {
     expect(parseRealtimeFrames(`${formatRealtimeFrame('{bad json')}${formatRealtimeCommand('ok')}`))
       .toEqual([{ m: 'ok', p: [] }])
+  })
+})
+
+describe('TradingView chart session', () => {
+  it('resolves a market, creates a series, normalizes candle updates, and fetches more data', () => {
+    const { client, socket } = createClient()
+    const session = new TradingViewChartSession(client)
+    const updates: unknown[] = []
+
+    const subscription = session.subscribe('NASDAQ:AAPL', (data) => updates.push(data), {
+      timeframe: '60',
+      range: 2,
+      session: 'extended',
+    })
+
+    expect(socket.sent).toContain(formatRealtimeCommand('chart_create_session', [session.sessionId]))
+    expect(socket.sent.some((packet) => packet.includes('resolve_symbol') && packet.includes('NASDAQ:AAPL'))).toBe(true)
+    expect(socket.sent).toContain(formatRealtimeCommand('create_series', [
+      session.sessionId,
+      '$prices',
+      's1',
+      'ser_1',
+      '60',
+      2,
+    ]))
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      session.sessionId,
+      {
+        $prices: {
+          s: [
+            { i: 1, v: [1717200000, 190, 195, 189, 194, 123.456] },
+            { i: 2, v: [1717203600, 194, 196, 193, 195, 10] },
+          ],
+        },
+      },
+    ]))
+
+    expect(updates).toEqual([{
+      symbol: 'NASDAQ:AAPL',
+      candles: [
+        { time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 },
+        { time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 10 },
+      ],
+      changes: ['$prices'],
+    }])
+
+    session.fetchMore(5)
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('request_more_data', [session.sessionId, '$prices', 5]))
+
+    subscription.close()
+    session.close()
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('chart_delete_session', [session.sessionId]))
   })
 })
 
