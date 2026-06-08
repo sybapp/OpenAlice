@@ -3,6 +3,9 @@ import type {
   QueryExecutor,
   Registry,
   Router,
+  TradingViewCandle,
+  TradingViewChartMarketOptions,
+  TradingViewChartUpdate,
   TradingViewQuoteData,
   TradingViewQuoteField,
   TradingViewQuoteFieldPreset,
@@ -137,6 +140,26 @@ export interface MarketDataQuoteSubscriptionInput {
   onData: (data: TradingViewQuoteData) => void
 }
 
+export interface MarketDataCandleSubscriptionInput {
+  provider?: 'tradingview' | string
+  symbol: string
+  options?: TradingViewChartMarketOptions
+  credentials?: TradingViewRealtimeCredentials | null
+  socketFactory?: TradingViewRealtimeSocketFactory
+  onData: (data: TradingViewChartUpdate) => void
+}
+
+export interface MarketDataTradingViewSymbolSearchInput {
+  provider?: 'tradingview' | string
+  query: string
+  type?: string
+  offset?: number
+  limit?: number
+  credentials?: { tradingview_sessionid?: string } | null
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
 export interface MarketDataTechnicalAnalysisInput {
   provider?: 'tradingview' | string
   symbol: string
@@ -148,6 +171,12 @@ export interface MarketDataTechnicalAnalysisInput {
 
 export interface MarketDataQuoteSubscription {
   provider: string
+  close: () => void
+}
+
+export interface MarketDataCandleSubscription {
+  provider: string
+  getCandles: () => TradingViewCandle[]
   close: () => void
 }
 
