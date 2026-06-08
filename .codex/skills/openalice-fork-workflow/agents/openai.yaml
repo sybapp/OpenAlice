@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenAlice Fork Workflow"
+  short_description: "Manage OpenAlice fork branches, issues, and PRs"
+  default_prompt: "Use $openalice-fork-workflow to sync upstream, create a feature branch, and open a PR into dev."
