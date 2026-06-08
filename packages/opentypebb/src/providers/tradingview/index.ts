@@ -1,46 +1,8 @@
 import { Provider } from '../../core/provider/abstract/provider.js'
+import * as scanner from './scanner/index.js'
 
-export { Column, col } from './column.js'
-export {
-  And,
-  DEFAULT_HEADERS,
-  DEFAULT_RANGE,
-  OPTIONS_SCAN2_URL,
-  Or,
-  Query,
-  SCAN_URL,
-  STOCKS_QUERY,
-} from './query.js'
-export {
-  bond,
-  cfd,
-  coin,
-  crypto,
-  crypto_dex,
-  cryptoDex,
-  forex,
-  futures,
-  options,
-  stocks,
-} from './screeners.js'
-export type {
-  Expression,
-  FilterOperation,
-  Operation,
-  OperationComparison,
-  SortBy,
-  Symbols,
-  TradingViewCredentials,
-  TradingViewQueryPayload,
-  TradingViewRawResponse,
-  TradingViewRequestOptions,
-  TradingViewRow,
-  TradingViewScannerData,
-  TradingViewScan2RawResponse,
-  TradingViewScan2Row,
-  TradingViewScanRawResponse,
-  TradingViewScanRow,
-} from './types.js'
+export { scanner }
+export * from './scanner/index.js'
 
 export const tradingviewProvider = new Provider({
   name: 'tradingview',
