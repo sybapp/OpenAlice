@@ -175,9 +175,20 @@ export class TradingViewQuoteSession {
     session = 'regular',
   ): TradingViewQuoteSubscription {
     const key = symbolKey(symbol, session)
+
+    // Wrap listener to handle errors and prevent listener failures from breaking the subscription
+    const safeListener: TradingViewRealtimeListener<[TradingViewQuoteData]> = (data) => {
+      try {
+        listener(data)
+      } catch (error) {
+        console.error('TradingView quote listener error:', error)
+        // Don't propagate listener errors to prevent breaking other listeners
+      }
+    }
+
     const listeners = this.listeners.get(key) ?? new Set<TradingViewRealtimeListener<[TradingViewQuoteData]>>()
     const isNewSymbol = listeners.size === 0
-    listeners.add(listener)
+    listeners.add(safeListener)
     this.listeners.set(key, listeners)
 
     if (isNewSymbol) {
@@ -186,7 +197,7 @@ export class TradingViewQuoteSession {
 
     return {
       close: () => {
-        listeners.delete(listener)
+        listeners.delete(safeListener)
         if (listeners.size === 0) {
           this.listeners.delete(key)
           this.lastValues.delete(key)
