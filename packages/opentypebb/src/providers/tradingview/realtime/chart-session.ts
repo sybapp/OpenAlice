@@ -166,18 +166,39 @@ export class TradingViewChartSession {
   }
 
   onSymbolResolved(listener: TradingViewRealtimeListener<[TradingViewMarketInfo]>): () => void {
-    this.symbolListeners.add(listener)
-    return () => this.symbolListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[TradingViewMarketInfo]> = (info) => {
+      try {
+        listener(info)
+      } catch (error) {
+        console.error('TradingView symbol resolved listener error:', error)
+      }
+    }
+    this.symbolListeners.add(safeListener)
+    return () => this.symbolListeners.delete(safeListener)
   }
 
   onError(listener: TradingViewRealtimeListener<[TradingViewChartError]>): () => void {
-    this.errorListeners.add(listener)
-    return () => this.errorListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[TradingViewChartError]> = (error) => {
+      try {
+        listener(error)
+      } catch (listenerError) {
+        console.error('TradingView error listener failed:', listenerError)
+      }
+    }
+    this.errorListeners.add(safeListener)
+    return () => this.errorListeners.delete(safeListener)
   }
 
   onReplay(listener: TradingViewRealtimeListener<[TradingViewReplayEvent]>): () => void {
-    this.replayListeners.add(listener)
-    return () => this.replayListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[TradingViewReplayEvent]> = (event) => {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('TradingView replay listener error:', error)
+      }
+    }
+    this.replayListeners.add(safeListener)
+    return () => this.replayListeners.delete(safeListener)
   }
 
   registerStudy(studyId: string, listener: TradingViewStudyPacketListener): void {
@@ -197,12 +218,22 @@ export class TradingViewChartSession {
     listener: TradingViewRealtimeListener<[TradingViewChartUpdate]>,
     options: TradingViewChartMarketOptions = {},
   ): TradingViewChartSubscription {
-    this.listeners.add(listener)
+    // Wrap listener to handle errors and prevent listener failures from breaking the subscription
+    const safeListener: TradingViewRealtimeListener<[TradingViewChartUpdate]> = (update) => {
+      try {
+        listener(update)
+      } catch (error) {
+        console.error('TradingView chart listener error:', error)
+        // Don't propagate listener errors to prevent breaking other listeners
+      }
+    }
+
+    this.listeners.add(safeListener)
     this.setMarket(symbol, options)
 
     return {
       close: () => {
-        this.listeners.delete(listener)
+        this.listeners.delete(safeListener)
       },
     }
   }
