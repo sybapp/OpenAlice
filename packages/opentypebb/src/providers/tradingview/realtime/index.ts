@@ -38,6 +38,10 @@ export {
   type TradingViewStudyUpdate,
 } from './study-session.js'
 export type {
+  TradingViewGraphicData,
+  TradingViewGraphicStore,
+} from './graphic-parser.js'
+export type {
   TradingViewRealtimeClientOptions,
   TradingViewRealtimeCredentials,
   TradingViewRealtimeEvent,
