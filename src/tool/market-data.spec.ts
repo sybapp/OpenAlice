@@ -21,6 +21,10 @@ function makeService() {
     indicator: vi.fn(async () => ({ value: 144.5, dataRange: { AAPL: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-31', bars: 20 } } })),
     scan: vi.fn(async () => ({ ...envelope, endpoint: '/scan', provider: 'tradingview' })),
     search: vi.fn(async () => envelope),
+    searchTradingViewSymbols: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/symbol-search', provider: 'tradingview' })),
+    technicalAnalysis: vi.fn(async () => ({ ...envelope, endpoint: '/technical-analysis', provider: 'tradingview' })),
+    searchTradingViewIndicators: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator-search', provider: 'tradingview' })),
+    getTradingViewIndicator: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator', provider: 'tradingview' })),
   }
 }
 
@@ -42,6 +46,10 @@ describe('createMarketDataTools', () => {
       'marketDataQuery',
       'marketDataScan',
       'marketDataSearch',
+      'tradingViewIndicatorGet',
+      'tradingViewIndicatorSearch',
+      'tradingViewSymbolSearch',
+      'tradingViewTechnicalAnalysis',
     ])
   })
 
@@ -163,6 +171,68 @@ describe('createMarketDataTools', () => {
       precision: 2,
       provider: 'fmp',
       credentials: { fmp_api_key: 'secret' },
+    })
+  })
+
+  it('tradingViewSymbolSearch forwards symbol lookup input', async () => {
+    await exec(tools.tradingViewSymbolSearch, {
+      query: 'nasdaq:aapl',
+      type: 'stock',
+      offset: 5,
+      limit: 10,
+      credentials: '{"tradingview_sessionid":"session"}',
+    })
+
+    expect(service.searchTradingViewSymbols).toHaveBeenCalledWith({
+      query: 'nasdaq:aapl',
+      type: 'stock',
+      offset: 5,
+      limit: 10,
+      credentials: { tradingview_sessionid: 'session' },
+    })
+  })
+
+  it('tradingViewTechnicalAnalysis forwards TA input', async () => {
+    await exec(tools.tradingViewTechnicalAnalysis, {
+      symbol: 'NASDAQ:AAPL',
+      periods: ['1D', '1W'],
+      credentials: '{"tradingview_sessionid":"session","tradingview_sessionid_sign":"sign"}',
+    })
+
+    expect(service.technicalAnalysis).toHaveBeenCalledWith({
+      symbol: 'NASDAQ:AAPL',
+      periods: ['1D', '1W'],
+      credentials: { tradingview_sessionid: 'session', tradingview_sessionid_sign: 'sign' },
+    })
+  })
+
+  it('tradingViewIndicatorSearch forwards indicator discovery input', async () => {
+    await exec(tools.tradingViewIndicatorSearch, {
+      query: 'RSI',
+      includeBuiltIn: true,
+      limit: 25,
+      credentials: '{"tradingview_sessionid":"session"}',
+    })
+
+    expect(service.searchTradingViewIndicators).toHaveBeenCalledWith({
+      query: 'RSI',
+      includeBuiltIn: true,
+      limit: 25,
+      credentials: { tradingview_sessionid: 'session' },
+    })
+  })
+
+  it('tradingViewIndicatorGet forwards indicator metadata input', async () => {
+    await exec(tools.tradingViewIndicatorGet, {
+      id: 'PUB;abc',
+      version: 'last',
+      credentials: '{"tradingview_sessionid":"session"}',
+    })
+
+    expect(service.getTradingViewIndicator).toHaveBeenCalledWith({
+      id: 'PUB;abc',
+      version: 'last',
+      credentials: { tradingview_sessionid: 'session' },
     })
   })
 
