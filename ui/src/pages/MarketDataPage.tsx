@@ -10,10 +10,10 @@ import type { MarketDataConfig } from '../api/types'
 // ==================== Constants ====================
 
 const PROVIDER_OPTIONS: Record<string, string[]> = {
-  equity: ['yfinance', 'fmp', 'intrinio'],
-  crypto: ['yfinance', 'fmp'],
-  currency: ['yfinance', 'fmp'],
-  commodity: ['yfinance', 'fmp'],
+  equity: ['yfinance', 'fmp', 'intrinio', 'tradingview'],
+  crypto: ['yfinance', 'fmp', 'tradingview'],
+  currency: ['yfinance', 'fmp', 'tradingview'],
+  commodity: ['yfinance', 'fmp', 'tradingview'],
   scanner: ['tradingview'],
 }
 
