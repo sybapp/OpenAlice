@@ -100,6 +100,8 @@ export interface TradingViewReplayEvent {
   extra?: unknown
 }
 
+export type TradingViewStudyPacketListener = (packet: { type: string; data: unknown[] }) => void
+
 function normalizeCandle(values: unknown[]): TradingViewCandle | null {
   const [time, open, high, low, close, volume] = values
   if (
@@ -136,6 +138,7 @@ export class TradingViewChartSession {
   private readonly errorListeners = new Set<TradingViewRealtimeListener<[TradingViewChartError]>>()
   private readonly replayListeners = new Set<TradingViewRealtimeListener<[TradingViewReplayEvent]>>()
   private readonly replayRequests = new Map<string, () => void>()
+  private readonly studyListeners = new Map<string, TradingViewStudyPacketListener>()
   private symbol = ''
   private marketInfo: TradingViewMarketInfo | null = null
   private currentSeries = 0
@@ -175,6 +178,18 @@ export class TradingViewChartSession {
   onReplay(listener: TradingViewRealtimeListener<[TradingViewReplayEvent]>): () => void {
     this.replayListeners.add(listener)
     return () => this.replayListeners.delete(listener)
+  }
+
+  registerStudy(studyId: string, listener: TradingViewStudyPacketListener): void {
+    this.studyListeners.set(studyId, listener)
+  }
+
+  unregisterStudy(studyId: string): void {
+    this.studyListeners.delete(studyId)
+  }
+
+  send(command: string, params: unknown[] = []): void {
+    this.client.send(command, params)
   }
 
   subscribe(
@@ -306,6 +321,7 @@ export class TradingViewChartSession {
     this.errorListeners.clear()
     this.replayListeners.clear()
     this.replayRequests.clear()
+    this.studyListeners.clear()
     this.candles.clear()
     this.marketInfo = null
   }
@@ -350,6 +366,12 @@ export class TradingViewChartSession {
       return
     }
 
+    const studyId = typeof packet.data[1] === 'string' ? packet.data[1] : null
+    if (studyId && this.studyListeners.has(studyId)) {
+      this.studyListeners.get(studyId)?.(packet)
+      return
+    }
+
     if (packet.type !== 'timescale_update' && packet.type !== 'du') {
       return
     }
@@ -363,6 +385,10 @@ export class TradingViewChartSession {
     const source = update as Record<string, unknown>
     for (const key of Object.keys(source)) {
       changes.push(key)
+      if (this.studyListeners.has(key)) {
+        this.studyListeners.get(key)?.(packet)
+        continue
+      }
       if (key !== '$prices') {
         continue
       }
