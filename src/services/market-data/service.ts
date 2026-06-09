@@ -26,8 +26,11 @@ import type {
   MarketDataScanPreset,
   MarketDataSearchInput,
   MarketDataTechnicalAnalysisInput,
+  MarketDataTradingViewCandlesInput,
   MarketDataTradingViewIndicatorInput,
   MarketDataTradingViewIndicatorSearchInput,
+  MarketDataTradingViewStudyInput,
+  MarketDataTradingViewStudyResult,
   MarketDataTradingViewSymbolSearchInput,
   MarketDataServiceDeps,
 } from './types.js'
@@ -35,6 +38,8 @@ import { MARKET_DATA_DEFAULT_LIMIT, MARKET_DATA_MAX_LIMIT } from './types.js'
 import { calculateIndicatorWithService } from './indicator/index.js'
 
 type TradingViewQuery = InstanceType<typeof tradingview.Query>
+
+const DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS = 10000
 
 type RowSource = {
   rows?: unknown
@@ -81,6 +86,36 @@ function normalizeEndpoint(endpoint: string): string {
     return ''
   }
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+function createTimeoutError(message: string, timeoutMs: number): Error {
+  return new Error(`${message} within ${timeoutMs}ms.`)
+}
+
+function applyTradingViewStudyInputs(
+  indicator: tradingview.TradingViewPineIndicator | tradingview.TradingViewBuiltInIndicator,
+  inputs: Record<string, string | number | boolean> | undefined,
+): void {
+  if (!inputs) return
+  for (const [key, value] of Object.entries(inputs)) {
+    if (indicator instanceof tradingview.TradingViewBuiltInIndicator) {
+      indicator.setOption(key, value, true)
+      continue
+    }
+    indicator.setOption(key, value)
+  }
+}
+
+function isBuiltInTradingViewIndicator(id: string): boolean {
+  return id.includes('@tv-')
+}
+
+function tradingViewStudyIndicatorId(input: MarketDataTradingViewStudyInput): string {
+  return input.builtInType ?? input.indicatorId ?? input.indicator?.id ?? ''
+}
+
+function tradingViewStudyIndicatorVersion(input: MarketDataTradingViewStudyInput): string {
+  return input.indicatorVersion ?? input.indicator?.version ?? 'last'
 }
 
 function clampLimit(limit: number | undefined): number {
@@ -407,6 +442,150 @@ export class MarketDataService {
         session.close()
         client.close()
       },
+    }
+  }
+
+  async tradingViewCandles(input: MarketDataTradingViewCandlesInput): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/tradingview/candles'
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports TradingView realtime candles at the service layer.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const clientFactory =
+        this.deps.createTradingViewRealtimeClient ??
+        ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
+      const client = clientFactory({
+        credentials,
+        socketFactory: input.socketFactory,
+      })
+      const session = new tradingview.TradingViewChartSession(client)
+      const timeoutMs = input.timeoutMs ?? DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS
+
+      const update = await new Promise<tradingview.TradingViewChartUpdate>((resolve, reject) => {
+        let subscription: tradingview.TradingViewChartSubscription | null = null
+        const cleanup = () => {
+          clearTimeout(timer)
+          subscription?.close()
+          session.close()
+          client.close()
+        }
+        const timer = setTimeout(() => {
+          cleanup()
+          reject(createTimeoutError('Timed out waiting for TradingView candle data', timeoutMs))
+        }, timeoutMs)
+        session.onError((error) => {
+          cleanup()
+          reject(new Error(error.message))
+        })
+        subscription = session.subscribe(input.symbol, (data) => {
+          cleanup()
+          resolve(data)
+        }, input.options)
+      })
+
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: update.candles.length,
+        rows: update.candles.map((candle) => ({
+          symbol: update.symbol,
+          ...candle,
+          marketInfo: update.marketInfo,
+        })),
+        warnings: update.changes.map((change) => `TradingView chart update: ${change}`),
+      }, update.candles.length)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
+    }
+  }
+
+  async runTradingViewStudy(input: MarketDataTradingViewStudyInput): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/tradingview/study'
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports TradingView study execution at the service layer.')
+    }
+    const indicatorId = tradingViewStudyIndicatorId(input)
+    if (!indicatorId) {
+      return errorEnvelope(provider, endpoint, 'TradingView study execution requires indicator, indicatorId, or builtInType.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const indicator = input.builtInType || isBuiltInTradingViewIndicator(indicatorId)
+        ? new tradingview.TradingViewBuiltInIndicator(indicatorId)
+        : await tradingview.getIndicator(indicatorId, tradingViewStudyIndicatorVersion(input), {
+          credentials,
+          fetch: input.fetch,
+          timeoutMs: input.timeoutMs,
+        })
+      applyTradingViewStudyInputs(indicator, input.inputs)
+
+      const clientFactory =
+        this.deps.createTradingViewRealtimeClient ??
+        ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
+      const client = clientFactory({
+        credentials,
+        socketFactory: input.socketFactory,
+      })
+      const chart = new tradingview.TradingViewChartSession(client)
+      const timeoutMs = input.timeoutMs ?? DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS
+
+      const result = await new Promise<MarketDataTradingViewStudyResult>((resolve, reject) => {
+        let chartSubscription: tradingview.TradingViewChartSubscription | null = null
+        let study: tradingview.TradingViewChartStudy | null = null
+        let latestCandles: tradingview.TradingViewCandle[] = []
+        const cleanup = () => {
+          clearTimeout(timer)
+          study?.remove()
+          chartSubscription?.close()
+          chart.close()
+          client.close()
+        }
+        const timer = setTimeout(() => {
+          cleanup()
+          reject(createTimeoutError('Timed out waiting for TradingView study data', timeoutMs))
+        }, timeoutMs)
+        chart.onError((error) => {
+          cleanup()
+          reject(new Error(error.message))
+        })
+        chartSubscription = chart.subscribe(input.symbol, (data) => {
+          latestCandles = data.candles
+        }, input.options)
+        study = new tradingview.TradingViewChartStudy(chart, indicator)
+        study.onError((error) => {
+          cleanup()
+          reject(new Error(error.message))
+        })
+        study.onUpdate((update) => {
+          cleanup()
+          resolve({
+            symbol: input.symbol,
+            candles: latestCandles,
+            study: update,
+          })
+        })
+      })
+
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: result.study.points.length,
+        rows: [{
+          symbol: result.symbol,
+          candles: result.candles,
+          points: result.study.points,
+          graphics: result.study.graphics,
+          strategyReport: result.study.strategyReport,
+          changes: result.study.changes,
+        }],
+      }, 1)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
     }
   }
 

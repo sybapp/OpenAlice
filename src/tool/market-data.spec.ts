@@ -25,6 +25,8 @@ function makeService() {
     technicalAnalysis: vi.fn(async () => ({ ...envelope, endpoint: '/technical-analysis', provider: 'tradingview' })),
     searchTradingViewIndicators: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator-search', provider: 'tradingview' })),
     getTradingViewIndicator: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator', provider: 'tradingview' })),
+    tradingViewCandles: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/candles', provider: 'tradingview' })),
+    runTradingViewStudy: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/study', provider: 'tradingview' })),
   }
 }
 
@@ -46,8 +48,10 @@ describe('createMarketDataTools', () => {
       'marketDataQuery',
       'marketDataScan',
       'marketDataSearch',
+      'tradingViewCandles',
       'tradingViewIndicatorGet',
       'tradingViewIndicatorSearch',
+      'tradingViewStudy',
       'tradingViewSymbolSearch',
       'tradingViewTechnicalAnalysis',
     ])
@@ -233,6 +237,64 @@ describe('createMarketDataTools', () => {
       id: 'PUB;abc',
       version: 'last',
       credentials: { tradingview_sessionid: 'session' },
+    })
+  })
+
+  it('tradingViewCandles forwards one-shot candle input', async () => {
+    await exec(tools.tradingViewCandles, {
+      symbol: 'NASDAQ:AAPL',
+      options: '{"timeframe":"60","range":100}',
+      credentials: '{"tradingview_sessionid":"session"}',
+      timeoutMs: 5000,
+    })
+
+    expect(service.tradingViewCandles).toHaveBeenCalledWith({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '60', range: 100 },
+      credentials: { tradingview_sessionid: 'session' },
+      timeoutMs: 5000,
+    })
+  })
+
+  it('tradingViewStudy forwards study execution input', async () => {
+    await exec(tools.tradingViewStudy, {
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '15', range: 50 },
+      builtInType: 'Volume@tv-basicstudies-241',
+      inputs: '{"length":10,"col_prev_close":false}',
+      credentials: '{"tradingview_sessionid":"session"}',
+      timeoutMs: 7000,
+    })
+
+    expect(service.runTradingViewStudy).toHaveBeenCalledWith({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '15', range: 50 },
+      indicator: undefined,
+      indicatorId: undefined,
+      indicatorVersion: undefined,
+      builtInType: 'Volume@tv-basicstudies-241',
+      inputs: { length: 10, col_prev_close: false },
+      credentials: { tradingview_sessionid: 'session' },
+      timeoutMs: 7000,
+    })
+  })
+
+  it('tradingViewStudy accepts indicator search result references', async () => {
+    await exec(tools.tradingViewStudy, {
+      symbol: 'NASDAQ:AAPL',
+      indicator: '{"id":"PUB;abc","version":"5","name":"RSI"}',
+    })
+
+    expect(service.runTradingViewStudy).toHaveBeenCalledWith({
+      symbol: 'NASDAQ:AAPL',
+      options: undefined,
+      indicator: { id: 'PUB;abc', version: '5' },
+      indicatorId: undefined,
+      indicatorVersion: undefined,
+      builtInType: undefined,
+      inputs: undefined,
+      credentials: undefined,
+      timeoutMs: undefined,
     })
   })
 
