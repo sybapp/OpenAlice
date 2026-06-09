@@ -140,6 +140,26 @@ class FakeRealtimeSocket implements TradingViewRealtimeSocket {
   }
 }
 
+function waitForSocketPacket(socket: FakeRealtimeSocket, pattern: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let attempts = 0
+    const poll = () => {
+      const packet = socket.sent.find((sent) => sent.includes(pattern))
+      if (packet) {
+        resolve(packet)
+        return
+      }
+      attempts += 1
+      if (attempts > 20) {
+        reject(new Error(`Timed out waiting for socket packet containing ${pattern}`))
+        return
+      }
+      setTimeout(poll, 0)
+    }
+    poll()
+  })
+}
+
 describe('MarketDataService', () => {
   it('catalogs router endpoints with provider support', () => {
     const service = new MarketDataService(deps(async () => []))
@@ -418,7 +438,7 @@ describe('MarketDataService', () => {
     })
     socket.open()
 
-    const chartCreate = socket.sent.find((packet) => packet.includes('chart_create_session'))
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
     const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
     const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
       ? String(chartFrame.p[0])
@@ -487,6 +507,177 @@ describe('MarketDataService', () => {
 
     subscription.close()
     expect(socket.readyState).toBe(3)
+  })
+
+  it('gets a one-shot TradingView candle snapshot through the service layer', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.tradingViewCandles({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '60', range: 2 },
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [
+            { i: 1, v: [1717200000, 190, 195, 189, 194, 123.456] },
+            { i: 2, v: [1717203600, 194, 196, 193, 195, 456] },
+          ],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toEqual({
+      provider: 'tradingview',
+      endpoint: '/tradingview/candles',
+      totalCount: 2,
+      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'marketInfo'],
+      rows: [
+        { symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46, marketInfo: null },
+        { symbol: 'NASDAQ:AAPL', time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 456, marketInfo: null },
+      ],
+      warnings: ['TradingView chart update: $prices'],
+    })
+    expect(socket.readyState).toBe(3)
+  })
+
+  it('runs a one-shot TradingView study and returns parsed values', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.runTradingViewStudy({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '60', range: 2 },
+      builtInType: 'Volume@tv-basicstudies-241',
+      inputs: { length: 10 },
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+    const createStudy = await waitForSocketPacket(socket, 'create_study')
+    const studyFrame = createStudy ? parseRealtimeFrames(createStudy)[0] : null
+    const studyId = studyFrame && typeof studyFrame === 'object' && Array.isArray(studyFrame.p)
+      ? String(studyFrame.p[1])
+      : ''
+
+    expect(createStudy).toContain('Volume@tv-basicstudies-241')
+    expect(createStudy).toContain('"length":10')
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123] }],
+        },
+      },
+    ]))
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        [studyId]: {
+          st: [
+            { v: [1717200000, 123] },
+            { v: [1717203600, 456] },
+          ],
+        },
+      },
+    ]))
+
+    const result = await resultPromise
+    expect(result.provider).toBe('tradingview')
+    expect(result.endpoint).toBe('/tradingview/study')
+    expect(result.totalCount).toBe(2)
+    expect(result.rows).toEqual([{
+      symbol: 'NASDAQ:AAPL',
+      candles: [{ time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123 }],
+      points: [
+        { $time: 1717200000, plot_0: 123 },
+        { $time: 1717203600, plot_0: 456 },
+      ],
+      graphics: {
+        labels: [],
+        lines: [],
+        boxes: [],
+        tables: [],
+        horizLines: [],
+        polygons: [],
+        horizHists: [],
+        raw: {},
+      },
+      strategyReport: { trades: [], history: {} },
+      changes: ['plots'],
+    }])
+    expect(socket.readyState).toBe(3)
+  })
+
+  it('runs a TradingView study from an indicator reference', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.runTradingViewStudy({
+      symbol: 'NASDAQ:AAPL',
+      indicator: { id: 'Volume@tv-basicstudies-241', version: 'last' },
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+    const createStudy = await waitForSocketPacket(socket, 'create_study')
+    const studyFrame = createStudy ? parseRealtimeFrames(createStudy)[0] : null
+    const studyId = studyFrame && typeof studyFrame === 'object' && Array.isArray(studyFrame.p)
+      ? String(studyFrame.p[1])
+      : ''
+
+    expect(createStudy).toContain('Volume@tv-basicstudies-241')
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        [studyId]: {
+          st: [{ v: [1717200000, 100] }],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'tradingview',
+      endpoint: '/tradingview/study',
+      rows: [{
+        symbol: 'NASDAQ:AAPL',
+        points: [{ $time: 1717200000, plot_0: 100 }],
+      }],
+    })
   })
 
   it('rejects realtime candle subscriptions for non-TradingView providers', async () => {

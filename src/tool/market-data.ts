@@ -13,6 +13,8 @@ type MarketDataToolService = Pick<MarketDataService, 'catalog' | 'query' | 'scan
     | 'technicalAnalysis'
     | 'searchTradingViewIndicators'
     | 'getTradingViewIndicator'
+    | 'tradingViewCandles'
+    | 'runTradingViewStudy'
   >
 
 const jsonRecordInput = z.union([
@@ -74,6 +76,38 @@ function parseCredentials(value: unknown): Record<string, string> | undefined {
     credentials[key] = credential
   }
   return credentials
+}
+
+function parsePrimitiveRecord(value: unknown, field: string): Record<string, string | number | boolean> | undefined {
+  const parsed = parseJsonRecord(value, field)
+  if (!parsed) {
+    return undefined
+  }
+  const result: Record<string, string | number | boolean> = {}
+  for (const [key, item] of Object.entries(parsed)) {
+    if (typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean') {
+      throw new Error(`${field}.${key} must be a string, number, or boolean.`)
+    }
+    result[key] = item
+  }
+  return result
+}
+
+function parseTradingViewIndicatorRef(value: unknown): { id: string; version?: string } | undefined {
+  const parsed = parseJsonRecord(value, 'indicator')
+  if (!parsed) {
+    return undefined
+  }
+  if (typeof parsed['id'] !== 'string') {
+    throw new Error('indicator.id must be a string.')
+  }
+  if (parsed['version'] !== undefined && typeof parsed['version'] !== 'string') {
+    throw new Error('indicator.version must be a string.')
+  }
+  return {
+    id: parsed['id'],
+    version: parsed['version'],
+  }
 }
 
 export function createMarketDataTools(service: MarketDataToolService) {
@@ -253,6 +287,57 @@ TradingView chart study.`,
         id,
         version,
         credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    tradingViewCandles: tool({
+      description: `Get a one-shot TradingView candle snapshot through the realtime chart adapter.
+
+Use this when an agent needs TradingView-normalized OHLCV data, custom chart
+types, replay initialization, or TradingView-specific symbol handling without
+holding an open subscription.`,
+      inputSchema: z.object({
+        symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL or BINANCE:BTCUSDT.'),
+        options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+        timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
+      }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', options: { timeframe: '60', range: 100 } }] }),
+      execute: async ({ symbol, options, credentials, timeoutMs }) => service.tradingViewCandles({
+        symbol,
+        options: parseJsonRecord(options, 'options'),
+        credentials: parseCredentials(credentials),
+        timeoutMs,
+      }),
+    }),
+
+    tradingViewStudy: tool({
+      description: `Run a TradingView chart study once and return parsed indicator values.
+
+Use builtInType for built-in studies like "Volume@tv-basicstudies-241", or
+indicatorId for public Pine indicators returned by tradingViewIndicatorSearch.
+The result includes points, graphics, strategyReport, and the latest candles
+seen before the study update.`,
+      inputSchema: z.object({
+        symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL.'),
+        options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
+        indicator: jsonRecordInput.optional().describe('Indicator search result object or JSON string from tradingViewIndicatorSearch.'),
+        indicatorId: z.string().optional().describe('Public Pine indicator id, e.g. PUB;XXXXXXXXXXXXXXXX, or a built-in @tv-* study id.'),
+        indicatorVersion: z.string().optional().describe('Pine indicator version. Defaults to last.'),
+        builtInType: z.string().optional().describe('Built-in TradingView study type, e.g. Volume@tv-basicstudies-241.'),
+        inputs: jsonRecordInput.optional().describe('Study input overrides object or JSON string. Values must be string, number, or boolean.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+        timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first study update.'),
+      }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', builtInType: 'Volume@tv-basicstudies-241', options: { timeframe: '60', range: 100 } }] }),
+      execute: async ({ symbol, options, indicator, indicatorId, indicatorVersion, builtInType, inputs, credentials, timeoutMs }) => service.runTradingViewStudy({
+        symbol,
+        options: parseJsonRecord(options, 'options'),
+        indicator: parseTradingViewIndicatorRef(indicator),
+        indicatorId,
+        indicatorVersion,
+        builtInType,
+        inputs: parsePrimitiveRecord(inputs, 'inputs'),
+        credentials: parseCredentials(credentials),
+        timeoutMs,
       }),
     }),
   }

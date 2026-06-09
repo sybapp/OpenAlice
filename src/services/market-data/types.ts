@@ -13,6 +13,7 @@ import type {
   TradingViewRealtimeClientOptions,
   TradingViewRealtimeCredentials,
   TradingViewRealtimeSocketFactory,
+  TradingViewStudyUpdate,
   TradingViewTimeframe,
 } from '@traderalice/opentypebb'
 
@@ -187,6 +188,36 @@ export interface MarketDataTechnicalAnalysisInput {
   credentials?: { tradingview_sessionid?: string; tradingview_sessionid_sign?: string } | null
   fetch?: typeof fetch
   timeoutMs?: number
+}
+
+export interface MarketDataTradingViewCandlesInput {
+  provider?: 'tradingview' | string
+  symbol: string
+  options?: TradingViewChartMarketOptions
+  credentials?: TradingViewRealtimeCredentials | null
+  socketFactory?: TradingViewRealtimeSocketFactory
+  timeoutMs?: number
+}
+
+export interface MarketDataTradingViewStudyInput {
+  provider?: 'tradingview' | string
+  symbol: string
+  options?: TradingViewChartMarketOptions
+  indicatorId?: string
+  indicatorVersion?: string
+  indicator?: { id: string; version?: string }
+  builtInType?: string
+  inputs?: Record<string, string | number | boolean>
+  credentials?: TradingViewRealtimeCredentials | null
+  socketFactory?: TradingViewRealtimeSocketFactory
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
+export interface MarketDataTradingViewStudyResult {
+  symbol: string
+  candles: TradingViewCandle[]
+  study: TradingViewStudyUpdate
 }
 
 export interface MarketDataQuoteSubscription {
