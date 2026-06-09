@@ -22,17 +22,26 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: 'Crypto',
   currency: 'Currency',
   commodity: 'Commodity',
-  scanner: 'Scanner',
+  scanner: 'TradingView',
 }
 
-const ALL_PROVIDERS = [
+type ProviderKeyConfig = {
+  key: string
+  name: string
+  desc: string
+  hint: string
+  testable?: boolean
+}
+
+const ALL_PROVIDERS: readonly ProviderKeyConfig[] = [
   { key: 'fmp', name: 'FMP', desc: 'Equity, crypto, currency, commodity, ETF, index — fundamentals, calendars, discovery.', hint: 'financialmodelingprep.com' },
   { key: 'fred', name: 'FRED', desc: 'Federal Reserve Economic Data — CPI, GDP, interest rates, macro indicators.', hint: 'Free — fred.stlouisfed.org → My Account → API Keys' },
   { key: 'bls', name: 'BLS', desc: 'Bureau of Labor Statistics — employment, payrolls, wages, CPI.', hint: 'Free — data.bls.gov/registrationEngine/' },
   { key: 'eia', name: 'EIA', desc: 'Energy Information Administration — petroleum status, energy reports.', hint: 'Free — eia.gov/opendata/register.php' },
   { key: 'econdb', name: 'EconDB', desc: 'Global macro indicators, country profiles, shipping data.', hint: 'Required (free signup) — econdb.com' },
   { key: 'intrinio', name: 'Intrinio', desc: 'Equities, ETFs, fundamentals, news, options snapshots.', hint: 'intrinio.com' },
-  { key: 'tradingview_sessionid', name: 'TradingView', desc: 'Market scanner data across stocks, crypto, forex, futures, bonds, CFDs, and options.', hint: 'Optional sessionid cookie value from tradingview.com' },
+  { key: 'tradingview_sessionid', name: 'TradingView Session ID', desc: 'TradingView scanner, symbol search, realtime candles, quotes, TA, and chart studies.', hint: 'Optional sessionid cookie value from tradingview.com' },
+  { key: 'tradingview_sessionid_sign', name: 'TradingView Session Signature', desc: 'Optional signed-session companion value for TradingView Pine indicator metadata.', hint: 'Optional sessionid_sign cookie value from tradingview.com', testable: false },
 ] as const
 
 // ==================== Test Button ====================
@@ -165,7 +174,7 @@ function AssetProvidersSection({
   return (
     <ConfigSection
       title="Asset Providers"
-      description="Select a data provider for each asset class. API keys are managed separately below."
+      description="Select a data provider for each asset class. TradingView controls scanner, symbol search, realtime candles, quotes, TA, and chart studies. API keys are managed separately below."
     >
       <div className="space-y-3">
         {Object.entries(PROVIDER_OPTIONS).map(([asset, options]) => {
@@ -231,7 +240,7 @@ function ApiKeysSection({
       description="Manage credentials for data providers. Keys are used across all asset classes that route to the provider."
     >
       <div className="space-y-4">
-        {ALL_PROVIDERS.map(({ key, name, desc, hint }) => {
+        {ALL_PROVIDERS.map(({ key, name, desc, hint, testable = true }) => {
           const status = testStatus[key] || 'idle'
           return (
             <Field key={key} label={name} description={hint}>
@@ -244,11 +253,13 @@ function ApiKeysSection({
                   onChange={(e) => handleKeyChange(key, e.target.value)}
                   placeholder="Not configured"
                 />
-                <TestButton
-                  status={status}
-                  disabled={!localKeys[key] || status === 'testing'}
-                  onClick={() => testProvider(key)}
-                />
+                {testable && (
+                  <TestButton
+                    status={status}
+                    disabled={!localKeys[key] || status === 'testing'}
+                    onClick={() => testProvider(key)}
+                  />
+                )}
               </div>
             </Field>
           )

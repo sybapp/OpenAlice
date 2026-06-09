@@ -228,6 +228,7 @@ const marketDataSchema = z.object({
     econdb: z.string().optional(),
     intrinio: z.string().optional(),
     tradingview_sessionid: z.string().optional(),
+    tradingview_sessionid_sign: z.string().optional(),
     benzinga: z.string().optional(),
     tiingo: z.string().optional(),
     biztoc: z.string().optional(),
