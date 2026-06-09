@@ -31,7 +31,7 @@ import type { WorkspaceToolCenter } from '../core/workspace-tool-center.js'
 import type { IInboxStore } from '../core/inbox-store.js'
 import type { IEntityStore } from '../core/entity-store.js'
 import type { WorkspaceService } from '../workspaces/service.js'
-import { extractMcpShape, wrapToolExecute } from '../core/mcp-export.js'
+import { formatZodError, wrapToolExecute, mcpInputSchema } from '../core/mcp-export.js'
 import { type CliExport, getExport, mappedToolNames } from './cli-commands.js'
 
 export interface CliGatewayDeps {
@@ -156,12 +156,12 @@ export function registerCliRoutes(app: Hono, deps: CliGatewayDeps): void {
 
     // Same validate+coerce path as the MCP boundary (string -> number etc.),
     // so the client may send every flag as a raw string.
-    const schema = z.object(extractMcpShape(tool))
     let validated: Record<string, unknown>
     try {
-      validated = await schema.parseAsync(rawArgs)
+      validated = await mcpInputSchema(tool).parseAsync(rawArgs)
     } catch (err) {
-      return c.json({ error: 'Validation failed', details: String(err) }, 400)
+      const details = formatZodError(err)
+      return c.json({ error: `Validation failed: ${details}`, details }, 400)
     }
 
     const result = await wrapToolExecute(tool)(validated)

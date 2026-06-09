@@ -17,7 +17,7 @@ import type {
   TradingViewTimeframe,
 } from '@traderalice/opentypebb'
 
-export const MARKET_DATA_DEFAULT_LIMIT = 500
+export const MARKET_DATA_DEFAULT_LIMIT = 50
 export const MARKET_DATA_MAX_LIMIT = 500
 
 export type MarketDataAssetClass =
@@ -80,6 +80,14 @@ export interface MarketDataQueryInput {
   credentials?: Record<string, string>
 }
 
+export interface MarketDataEndpointSearchInput {
+  query?: string
+  assetClass?: MarketDataAssetClass
+  provider?: string
+  model?: string
+  limit?: number
+}
+
 export interface MarketDataSearchInput {
   assetClass: Exclude<MarketDataAssetClass, 'derivatives' | 'economy' | 'news'>
   query: string
@@ -124,11 +132,47 @@ export interface MarketDataScanInput {
   preset?: MarketDataScanPreset
   market?: string
   query?: Record<string, unknown>
+  columns?: string[]
+  compact?: boolean
   limit?: number
   credentials?: { tradingview_sessionid?: string } | null
   fetch?: typeof fetch
   timeoutMs?: number
   rawResponse?: boolean
+}
+
+export type MarketDataFundamentalStatement =
+  | 'income'
+  | 'balance'
+  | 'cash'
+  | 'ratios'
+  | 'metrics'
+  | 'reported'
+
+export interface MarketDataFundamentalInput {
+  symbol: string
+  statement: MarketDataFundamentalStatement
+  provider?: string
+  period?: string
+  limit?: number
+  params?: Record<string, unknown>
+  credentials?: Record<string, string>
+}
+
+export interface MarketDataEarningsInput {
+  symbol?: string
+  provider?: string
+  limit?: number
+  params?: Record<string, unknown>
+  credentials?: Record<string, string>
+}
+
+export interface MarketDataFilingsInput {
+  symbol: string
+  provider?: string
+  limit?: number
+  params?: Record<string, unknown>
+  credentials?: Record<string, string>
 }
 
 export interface MarketDataQuoteSubscriptionInput {
@@ -198,6 +242,8 @@ export interface MarketDataTradingViewCandlesInput {
   socketFactory?: TradingViewRealtimeSocketFactory
   timeoutMs?: number
 }
+
+export interface MarketDataTradingViewQuoteInput extends MarketDataTradingViewCandlesInput {}
 
 export interface MarketDataTradingViewStudyInput {
   provider?: 'tradingview' | string

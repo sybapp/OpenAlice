@@ -65,14 +65,14 @@ export function toMcpContent(result: unknown): McpContent[] {
 // ==================== Schema coercion ====================
 
 /**
- * If the schema is a Zod v4 number type (possibly wrapped in optional),
- * return a coerced copy that accepts string → number conversion.
+ * If the schema is a Zod v4 number/boolean type (possibly wrapped in optional),
+ * return a coerced copy that accepts string values from CLI/MCP clients.
  * Preserves all refinements (int, positive, min, max, nonnegative).
  *
  * This is the MCP boundary adaptation: tool definitions stay strict,
  * but MCP clients that send "80" instead of 80 won't be rejected.
  */
-function coerceIfNumber(schema: z.ZodType): z.ZodType {
+function coerceBoundaryScalar(schema: z.ZodType): z.ZodType {
   const def = (schema as any)._zod?.def
   if (!def) return schema
 
@@ -83,12 +83,32 @@ function coerceIfNumber(schema: z.ZodType): z.ZodType {
     return coerced
   }
 
+  if (def.type === 'boolean' && !def.coerce) {
+    return z.preprocess((value) => {
+      if (typeof value !== 'string') return value
+      const normalized = value.trim().toLowerCase()
+      if (normalized === 'true') return true
+      if (normalized === 'false') return false
+      return value
+    }, z.boolean())
+  }
+
   // z.number().optional()
   if (def.type === 'optional' && def.innerType?._zod?.def?.type === 'number' && !def.innerType._zod.def.coerce) {
     let coerced: any = z.coerce.number()
     const innerChecks = def.innerType._zod.def.checks
     if (innerChecks?.length > 0) coerced = coerced.with(...innerChecks)
     return coerced.optional()
+  }
+
+  if (def.type === 'optional' && def.innerType?._zod?.def?.type === 'boolean' && !def.innerType._zod.def.coerce) {
+    return z.preprocess((value) => {
+      if (typeof value !== 'string') return value
+      const normalized = value.trim().toLowerCase()
+      if (normalized === 'true') return true
+      if (normalized === 'false') return false
+      return value
+    }, z.boolean()).optional()
   }
 
   return schema
@@ -102,9 +122,17 @@ export function extractMcpShape(tool: Tool): Record<string, z.ZodType> {
   const rawShape: Record<string, z.ZodType> = (tool.inputSchema as any)?.shape ?? {}
   const coerced: Record<string, z.ZodType> = {}
   for (const [key, schema] of Object.entries(rawShape)) {
-    coerced[key] = coerceIfNumber(schema)
+    coerced[key] = coerceBoundaryScalar(schema)
   }
   return coerced
+}
+
+export function mcpInputSchema(tool: Tool): z.ZodObject<Record<string, z.ZodType>> {
+  return z.object(extractMcpShape(tool)).strict()
+}
+
+export function formatZodError(err: unknown): string {
+  return err instanceof z.ZodError ? z.prettifyError(err) : String(err)
 }
 
 // ==================== Execute wrapper ====================
@@ -116,7 +144,8 @@ export function extractMcpShape(tool: Tool): Record<string, z.ZodType> {
 export function wrapToolExecute(tool: Tool): (args: any) => Promise<McpToolResult> {
   return async (args: any) => {
     try {
-      const result = await tool.execute!(args, {
+      const validated = await mcpInputSchema(tool).parseAsync(args ?? {})
+      const result = await tool.execute!(validated, {
         toolCallId: crypto.randomUUID(),
         messages: [],
       })
