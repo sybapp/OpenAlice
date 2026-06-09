@@ -57,6 +57,57 @@ const TRADINGVIEW_SCAN_COMPACT_COLUMNS = [
   'AnalystRating',
 ]
 
+const TRADINGVIEW_GENERIC_ENDPOINTS = [
+  {
+    endpoint: '/tradingview/scan',
+    model: 'TradingViewScan',
+    description: 'Run a TradingView market scanner preset or custom scanner query.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/symbol-search',
+    model: 'TradingViewSymbolSearch',
+    description: 'Search TradingView symbols and return TradingView-qualified symbol ids.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/technical-analysis',
+    model: 'TradingViewTechnicalAnalysis',
+    description: 'Fetch TradingView technical-analysis recommendation values by symbol and period.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/candles',
+    model: 'TradingViewCandles',
+    description: 'Get a one-shot TradingView realtime chart candle snapshot.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/quote',
+    model: 'TradingViewQuote',
+    description: 'Get a one-row latest-price snapshot for a TradingView symbol.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/indicator-search',
+    model: 'TradingViewIndicatorSearch',
+    description: 'Search public and built-in TradingView Pine indicators.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/indicator',
+    model: 'TradingViewIndicator',
+    description: 'Get TradingView Pine indicator metadata and script payload by id.',
+    providers: ['tradingview'],
+  },
+  {
+    endpoint: '/tradingview/study',
+    model: 'TradingViewStudy',
+    description: 'Run a TradingView chart study once and return parsed indicator values.',
+    providers: ['tradingview'],
+  },
+] satisfies MarketDataCatalogEndpoint[]
+
 const FUNDAMENTAL_ENDPOINTS = {
   income: '/equity/fundamental/income',
   balance: '/equity/fundamental/balance',
@@ -257,6 +308,102 @@ function errorEnvelope(provider: string, endpoint: string, error: unknown): Mark
   }
 }
 
+function tradingViewStringParam(params: Record<string, unknown>, key: string): string | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`params.${key} must be a string.`)
+  }
+  return value
+}
+
+function tradingViewRequiredStringParam(params: Record<string, unknown>, key: string, endpoint: string): string {
+  const value = tradingViewStringParam(params, key)
+  if (!value) {
+    throw new Error(`${endpoint} requires params.${key}.`)
+  }
+  return value
+}
+
+function tradingViewNumberParam(params: Record<string, unknown>, key: string): number | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  throw new Error(`params.${key} must be a finite number.`)
+}
+
+function tradingViewBooleanParam(params: Record<string, unknown>, key: string): boolean | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    if (value === 'true') return true
+    if (value === 'false') return false
+  }
+  throw new Error(`params.${key} must be a boolean.`)
+}
+
+function tradingViewRecordParam(params: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  throw new Error(`params.${key} must be an object.`)
+}
+
+function tradingViewPrimitiveRecordParam(params: Record<string, unknown>, key: string): Record<string, string | number | boolean> | undefined {
+  const value = tradingViewRecordParam(params, key)
+  if (!value) {
+    return undefined
+  }
+  const result: Record<string, string | number | boolean> = {}
+  for (const [itemKey, itemValue] of Object.entries(value)) {
+    if (typeof itemValue !== 'string' && typeof itemValue !== 'number' && typeof itemValue !== 'boolean') {
+      throw new Error(`params.${key}.${itemKey} must be a string, number, or boolean.`)
+    }
+    result[itemKey] = itemValue
+  }
+  return result
+}
+
+function tradingViewStringArrayParam(params: Record<string, unknown>, key: string): string[] | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (Array.isArray(value)) {
+    if (!value.every((item) => typeof item === 'string')) {
+      throw new Error(`params.${key} must contain only strings.`)
+    }
+    return value
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    return trimmed.split(',').map((item) => item.trim()).filter(Boolean)
+  }
+  throw new Error(`params.${key} must be a string array or comma-separated string.`)
+}
+
 function assetClassFromEndpoint(endpoint: string): MarketDataAssetClass | undefined {
   const [first] = normalizeEndpoint(endpoint).split('/').filter(Boolean)
   if (!first) {
@@ -307,18 +454,30 @@ function endpointCatalog(commands: MarketDataCommandMap, modelsByProvider: Map<s
       providers,
     })
   }
+  endpoints.push(...TRADINGVIEW_GENERIC_ENDPOINTS)
   return endpoints.sort((a, b) => a.endpoint.localeCompare(b.endpoint))
 }
 
 function providerCatalog(registry: MarketDataServiceDeps['registry']): MarketDataCatalogProvider[] {
   return [...registry.providers.entries()]
-    .map(([name, provider]) => ({
-      name,
-      description: provider.description,
-      website: provider.website,
-      credentials: provider.credentials,
-      models: Object.keys(provider.fetcherDict).sort(),
-    }))
+    .map(([name, provider]) => {
+      const models = new Set(Object.keys(provider.fetcherDict))
+      if (name === 'tradingview') {
+        for (const endpoint of TRADINGVIEW_GENERIC_ENDPOINTS) {
+          models.add(endpoint.model)
+        }
+      }
+      const credentials = name === 'tradingview'
+        ? [...new Set([...provider.credentials, 'tradingview_sessionid', 'tradingview_sessionid_sign'])]
+        : provider.credentials
+      return {
+        name,
+        description: provider.description,
+        website: provider.website,
+        credentials,
+        models: [...models].sort(),
+      }
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -339,7 +498,7 @@ export class MarketDataService {
     const endpoint = normalizeEndpoint(input.endpoint)
     const command = this.resolveCommand(endpoint)
     const config = await this.deps.readConfig()
-    const provider = input.provider ?? defaultProviderForAsset(config, assetClassFromEndpoint(endpoint))
+    const provider = input.provider ?? (this.resolveTradingViewEndpoint(endpoint) ? config.providers.scanner ?? 'tradingview' : defaultProviderForAsset(config, assetClassFromEndpoint(endpoint)))
     const limit = clampLimit(input.limit)
 
     if (!provider) {
@@ -347,6 +506,15 @@ export class MarketDataService {
     }
 
     try {
+      const tradingViewEndpoint = this.resolveTradingViewEndpoint(endpoint)
+      if (tradingViewEndpoint) {
+        return await this.queryTradingViewEndpoint(tradingViewEndpoint.endpoint, {
+          provider,
+          params: input.params ?? {},
+          limit,
+          credentials: input.credentials,
+        })
+      }
       const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
       const params = { ...input.params }
       const result = command
@@ -468,7 +636,7 @@ export class MarketDataService {
   async scan(input: MarketDataScanInput = {}): Promise<MarketDataEnvelope> {
     const config = await this.deps.readConfig()
     const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
-    const endpoint = '/scan'
+    const endpoint = '/tradingview/scan'
     const limit = clampLimit(input.limit)
 
     if (provider !== 'tradingview') {
@@ -872,7 +1040,7 @@ export class MarketDataService {
   async technicalAnalysis(input: MarketDataTechnicalAnalysisInput): Promise<MarketDataEnvelope> {
     const config = await this.deps.readConfig()
     const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
-    const endpoint = '/technical-analysis'
+    const endpoint = '/tradingview/technical-analysis'
 
     if (provider !== 'tradingview') {
       return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports technical analysis at the service layer.')
@@ -911,6 +1079,105 @@ export class MarketDataService {
 
   private resolveCommand(endpoint: string): CommandDef | undefined {
     return this.commands().get(endpoint)
+  }
+
+  private resolveTradingViewEndpoint(endpoint: string): MarketDataCatalogEndpoint | undefined {
+    return TRADINGVIEW_GENERIC_ENDPOINTS.find((entry) => entry.endpoint === endpoint)
+  }
+
+  private async queryTradingViewEndpoint(
+    endpoint: string,
+    input: {
+      provider: string
+      params: Record<string, unknown>
+      limit: number
+      credentials?: Record<string, string>
+    },
+  ): Promise<MarketDataEnvelope> {
+    const { provider, params, limit, credentials } = input
+    switch (endpoint) {
+      case '/tradingview/scan':
+        return await this.scan({
+          provider,
+          mode: tradingViewStringParam(params, 'mode') as MarketDataScanInput['mode'],
+          preset: tradingViewStringParam(params, 'preset') as MarketDataScanPreset | undefined,
+          market: tradingViewStringParam(params, 'market'),
+          query: tradingViewRecordParam(params, 'query'),
+          columns: tradingViewStringArrayParam(params, 'columns'),
+          compact: tradingViewBooleanParam(params, 'compact'),
+          limit,
+          credentials,
+          rawResponse: tradingViewBooleanParam(params, 'rawResponse'),
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/symbol-search':
+        return await this.searchTradingViewSymbols({
+          provider,
+          query: tradingViewRequiredStringParam(params, 'query', endpoint),
+          type: tradingViewStringParam(params, 'type'),
+          offset: tradingViewNumberParam(params, 'offset'),
+          limit,
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/technical-analysis':
+        return await this.technicalAnalysis({
+          provider,
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          periods: tradingViewStringArrayParam(params, 'periods'),
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/candles':
+        return await this.tradingViewCandles({
+          provider,
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          options: tradingViewRecordParam(params, 'options') as MarketDataTradingViewCandlesInput['options'],
+          includeMarketInfo: tradingViewBooleanParam(params, 'includeMarketInfo'),
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/quote':
+        return await this.tradingViewQuote({
+          provider,
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          options: tradingViewRecordParam(params, 'options') as MarketDataTradingViewQuoteInput['options'],
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/indicator-search':
+        return await this.searchTradingViewIndicators({
+          provider,
+          query: tradingViewStringParam(params, 'query'),
+          includeBuiltIn: tradingViewBooleanParam(params, 'includeBuiltIn'),
+          limit,
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/indicator':
+        return await this.getTradingViewIndicator({
+          provider,
+          id: tradingViewRequiredStringParam(params, 'id', endpoint),
+          version: tradingViewStringParam(params, 'version'),
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      case '/tradingview/study':
+        return await this.runTradingViewStudy({
+          provider,
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          options: tradingViewRecordParam(params, 'options') as MarketDataTradingViewStudyInput['options'],
+          indicator: tradingViewRecordParam(params, 'indicator') as MarketDataTradingViewStudyInput['indicator'],
+          indicatorId: tradingViewStringParam(params, 'indicatorId'),
+          indicatorVersion: tradingViewStringParam(params, 'indicatorVersion'),
+          builtInType: tradingViewStringParam(params, 'builtInType'),
+          inputs: tradingViewPrimitiveRecordParam(params, 'inputs'),
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+      default:
+        return errorEnvelope(provider, endpoint, `Unsupported TradingView endpoint '${endpoint}'.`)
+    }
   }
 
   private toEnvelope(provider: string, endpoint: string, result: unknown, limit: number): MarketDataEnvelope {
