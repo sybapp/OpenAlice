@@ -521,10 +521,13 @@ indicator APIs.
 
 Use builtInType for built-in studies like "Volume@tv-basicstudies-241", or
 indicatorId for public Pine indicators returned by tradingViewIndicatorSearch.
-The result includes points, graphics, strategyReport, and the latest candles
-seen before the study update. Study points keep TradingView's original
-second-level Unix timestamp in $time and add $timeISO for agent-friendly UTC
-time; returned candles include time and timeISO.`,
+The result includes points, graphics, graphicTextItems, graphicPlainText,
+strategyReport, and the latest candles seen before the study update. For
+graphics-heavy public indicators such as Smart Money Concepts (SMC) [LuxAlgo],
+use graphicTextItems/graphicPlainText to read labels, lines, boxes, and table
+cells as text. Study points keep TradingView's original second-level Unix
+timestamp in $time and add $timeISO for agent-friendly UTC time; returned
+candles include time and timeISO.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL.'),
         options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
