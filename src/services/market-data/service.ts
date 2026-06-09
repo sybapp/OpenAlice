@@ -26,6 +26,8 @@ import type {
   MarketDataScanPreset,
   MarketDataSearchInput,
   MarketDataTechnicalAnalysisInput,
+  MarketDataTradingViewIndicatorInput,
+  MarketDataTradingViewIndicatorSearchInput,
   MarketDataTradingViewSymbolSearchInput,
   MarketDataServiceDeps,
 } from './types.js'
@@ -424,6 +426,67 @@ export class MarketDataService {
         totalCount: rows.length,
         rows,
       }, limit)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
+    }
+  }
+
+  async searchTradingViewIndicators(input: MarketDataTradingViewIndicatorSearchInput = {}): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/tradingview/indicator-search'
+    const limit = clampLimit(input.limit)
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports TradingView indicator search at the service layer.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const rows = await tradingview.searchIndicators(input.query ?? '', {
+        includeBuiltIn: input.includeBuiltIn,
+        credentials,
+        fetch: input.fetch,
+        timeoutMs: input.timeoutMs,
+      })
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: rows.length,
+        rows,
+      }, limit)
+    } catch (error) {
+      return errorEnvelope(provider, endpoint, error)
+    }
+  }
+
+  async getTradingViewIndicator(input: MarketDataTradingViewIndicatorInput): Promise<MarketDataEnvelope> {
+    const config = await this.deps.readConfig()
+    const provider = input.provider ?? config.providers.scanner ?? 'tradingview'
+    const endpoint = '/tradingview/indicator'
+
+    if (provider !== 'tradingview') {
+      return errorEnvelope(provider, endpoint, 'Only the tradingview provider supports TradingView indicator metadata at the service layer.')
+    }
+
+    try {
+      const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
+      const indicator = await tradingview.getIndicator(input.id, input.version ?? 'last', {
+        credentials,
+        fetch: input.fetch,
+        timeoutMs: input.timeoutMs,
+      })
+      return this.toEnvelope(provider, endpoint, {
+        totalCount: 1,
+        rows: [{
+          id: indicator.pineId,
+          version: indicator.pineVersion,
+          description: indicator.description,
+          shortDescription: indicator.shortDescription,
+          type: indicator.type,
+          inputs: indicator.inputs,
+          plots: indicator.plots,
+          script: indicator.script,
+        }],
+      }, 1)
     } catch (error) {
       return errorEnvelope(provider, endpoint, error)
     }
