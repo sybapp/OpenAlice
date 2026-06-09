@@ -16,7 +16,11 @@ import type {
   MarketDataCandleSubscriptionInput,
   MarketDataCommandMap,
   MarketDataConfig,
+  MarketDataEndpointSearchInput,
+  MarketDataEarningsInput,
   MarketDataEnvelope,
+  MarketDataFilingsInput,
+  MarketDataFundamentalInput,
   MarketDataHistoricalInput,
   MarketDataIndicatorInput,
   MarketDataQueryInput,
@@ -29,6 +33,7 @@ import type {
   MarketDataTradingViewCandlesInput,
   MarketDataTradingViewIndicatorInput,
   MarketDataTradingViewIndicatorSearchInput,
+  MarketDataTradingViewQuoteInput,
   MarketDataTradingViewStudyInput,
   MarketDataTradingViewStudyResult,
   MarketDataTradingViewSymbolSearchInput,
@@ -40,6 +45,26 @@ import { calculateIndicatorWithService } from './indicator/index.js'
 type TradingViewQuery = InstanceType<typeof tradingview.Query>
 
 const DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS = 10000
+const TRADINGVIEW_SCAN_COMPACT_COLUMNS = [
+  'name',
+  'close',
+  'change',
+  'volume',
+  'market_cap_basic',
+  'currency',
+  'type',
+  'sector',
+  'AnalystRating',
+]
+
+const FUNDAMENTAL_ENDPOINTS = {
+  income: '/equity/fundamental/income',
+  balance: '/equity/fundamental/balance',
+  cash: '/equity/fundamental/cash',
+  ratios: '/equity/fundamental/ratios',
+  metrics: '/equity/fundamental/metrics',
+  reported: '/equity/fundamental/reported_financials',
+} satisfies Record<MarketDataFundamentalInput['statement'], string>
 
 type RowSource = {
   rows?: unknown
@@ -326,6 +351,33 @@ export class MarketDataService {
     }
   }
 
+  async endpointSearch(input: MarketDataEndpointSearchInput = {}): Promise<MarketDataEnvelope> {
+    const limit = clampLimit(input.limit)
+    const query = input.query?.trim().toLowerCase()
+    const model = input.model?.trim().toLowerCase()
+    const provider = input.provider?.trim().toLowerCase()
+    const assetClass = input.assetClass
+
+    const rows = this.catalog().endpoints.filter((endpoint) => {
+      if (assetClass && assetClassFromEndpoint(endpoint.endpoint) !== assetClass) return false
+      if (model && !endpoint.model.toLowerCase().includes(model)) return false
+      if (provider && !endpoint.providers.some((name) => name.toLowerCase() === provider)) return false
+      if (!query) return true
+      const haystack = [
+        endpoint.endpoint,
+        endpoint.model,
+        endpoint.description,
+        endpoint.providers.join(' '),
+      ].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+
+    return this.toEnvelope('catalog', '/catalog/endpoints', {
+      totalCount: rows.length,
+      rows,
+    }, limit)
+  }
+
   async search(input: MarketDataSearchInput): Promise<MarketDataEnvelope> {
     const endpoint = SEARCH_ENDPOINTS[input.assetClass]
     if (!endpoint) {
@@ -364,6 +416,46 @@ export class MarketDataService {
 
   async indicator(input: MarketDataIndicatorInput) {
     return await calculateIndicatorWithService(input, this)
+  }
+
+  async fundamentals(input: MarketDataFundamentalInput): Promise<MarketDataEnvelope> {
+    return this.query({
+      endpoint: FUNDAMENTAL_ENDPOINTS[input.statement],
+      provider: input.provider,
+      limit: input.limit,
+      credentials: input.credentials,
+      params: {
+        symbol: input.symbol,
+        ...(input.period ? { period: input.period } : {}),
+        ...input.params,
+      },
+    })
+  }
+
+  async earnings(input: MarketDataEarningsInput = {}): Promise<MarketDataEnvelope> {
+    return this.query({
+      endpoint: '/equity/calendar/earnings',
+      provider: input.provider,
+      limit: input.limit,
+      credentials: input.credentials,
+      params: {
+        ...(input.symbol ? { symbol: input.symbol } : {}),
+        ...input.params,
+      },
+    })
+  }
+
+  async filings(input: MarketDataFilingsInput): Promise<MarketDataEnvelope> {
+    return this.query({
+      endpoint: '/equity/fundamental/filings',
+      provider: input.provider,
+      limit: input.limit,
+      credentials: input.credentials,
+      params: {
+        symbol: input.symbol,
+        ...input.params,
+      },
+    })
   }
 
   async scan(input: MarketDataScanInput = {}): Promise<MarketDataEnvelope> {
@@ -534,6 +626,42 @@ export class MarketDataService {
     } catch (error) {
       return errorEnvelope(provider, endpoint, error)
     }
+  }
+
+  async tradingViewQuote(input: MarketDataTradingViewQuoteInput): Promise<MarketDataEnvelope> {
+    const candles = await this.tradingViewCandles({
+      ...input,
+      options: {
+        timeframe: '1D',
+        range: 2,
+        ...input.options,
+      },
+    })
+    const endpoint = '/tradingview/quote'
+    if (candles.error) {
+      return { ...candles, endpoint }
+    }
+    const latest = candles.rows.at(-1)
+    if (!latest) {
+      return errorEnvelope(candles.provider, endpoint, `No TradingView candle data returned for '${input.symbol}'.`)
+    }
+    return this.toEnvelope(candles.provider, endpoint, {
+      totalCount: 1,
+      rows: [{
+        symbol: latest.symbol ?? input.symbol,
+        price: latest.close,
+        close: latest.close,
+        open: latest.open,
+        high: latest.high,
+        low: latest.low,
+        volume: latest.volume,
+        time: latest.time,
+        timeISO: latest.timeISO,
+        currency: latest.currency,
+        source: '/tradingview/candles',
+      }],
+      warnings: candles.warnings,
+    }, 1)
   }
 
   async runTradingViewStudy(input: MarketDataTradingViewStudyInput): Promise<MarketDataEnvelope> {
@@ -794,6 +922,9 @@ export class MarketDataService {
       }
       const query = new tradingview.Query(input.market)
       query.query = structuredClone(input.query) as typeof query.query
+      if (input.columns?.length) {
+        query.select(...input.columns)
+      }
       query.limit(limit)
       return query
     }
@@ -805,6 +936,11 @@ export class MarketDataService {
     }
 
     const query = factory(input.market)
+    if (input.columns?.length) {
+      query.select(...input.columns)
+    } else if (input.compact !== false) {
+      query.select(...TRADINGVIEW_SCAN_COMPACT_COLUMNS)
+    }
     query.limit(limit)
     return query
   }

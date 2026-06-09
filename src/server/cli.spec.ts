@@ -51,6 +51,11 @@ describe('CLI gateway — data export', () => {
     }
     expect(body.export).toBe('data')
     expect(body.groups['think']?.['calc']?.tool).toBe('calculate')
+    expect(body.groups['think']?.['calc']).toMatchObject({
+      schema: {
+        examples: [{ expression: '(1000 * 0.1) / 2' }],
+      },
+    })
   })
 
   it('manifest 404s on unknown workspace', async () => {
@@ -79,6 +84,17 @@ describe('CLI gateway — data export', () => {
   it('invoke 400s on invalid args', async () => {
     const res = await post('/cli/ws1/data/invoke', { tool: 'calculate', args: {} })
     expect(res.status).toBe(400)
+  })
+
+  it('invoke 400s on unknown args instead of silently ignoring them', async () => {
+    const res = await post('/cli/ws1/data/invoke', {
+      tool: 'calculate',
+      args: { expression: '2 + 2', path: '/wrong' },
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('Unrecognized key')
+    expect(body.error).toContain('path')
   })
 
   it('invoke 404s on unknown workspace', async () => {
