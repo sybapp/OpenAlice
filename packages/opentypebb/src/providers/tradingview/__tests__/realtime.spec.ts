@@ -123,6 +123,7 @@ describe('TradingView chart session', () => {
         { time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 10 },
       ],
       changes: ['$prices'],
+      marketInfo: null,
     }])
 
     session.fetchMore(5)
@@ -131,6 +132,116 @@ describe('TradingView chart session', () => {
     subscription.close()
     session.close()
     expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('chart_delete_session', [session.sessionId]))
+  })
+
+  it('tracks resolved symbol metadata, emits chart errors, and switches timezone', () => {
+    const { client, socket } = createClient()
+    const session = new TradingViewChartSession(client)
+    const infos: unknown[] = []
+    const errors: unknown[] = []
+    const updates: unknown[] = []
+
+    session.onSymbolResolved((info) => infos.push(info))
+    session.onError((error) => errors.push(error))
+    session.subscribe('NASDAQ:AAPL', (data) => updates.push(data))
+
+    socket.message(formatRealtimeCommand('symbol_resolved', [
+      session.sessionId,
+      'ser_1',
+      { full_name: 'NASDAQ:AAPL', currency_code: 'USD', timezone: 'America/New_York' },
+    ]))
+    socket.message(formatRealtimeCommand('timescale_update', [
+      session.sessionId,
+      { $prices: { s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 1] }] } },
+    ]))
+    socket.message(formatRealtimeCommand('symbol_error', [session.sessionId, 'ser_1', 'invalid symbol']))
+    socket.message(formatRealtimeCommand('series_error', [session.sessionId, '$prices', 's1', 'custom_resolution']))
+    socket.message(formatRealtimeCommand('critical_error', [session.sessionId, 'invalid timezone', 'method: switch_timezone']))
+
+    expect(infos).toEqual([{
+      seriesId: 'ser_1',
+      full_name: 'NASDAQ:AAPL',
+      currency_code: 'USD',
+      timezone: 'America/New_York',
+    }])
+    expect(updates).toEqual([expect.objectContaining({
+      marketInfo: {
+        seriesId: 'ser_1',
+        full_name: 'NASDAQ:AAPL',
+        currency_code: 'USD',
+        timezone: 'America/New_York',
+      },
+    })])
+    expect(errors).toEqual([
+      { kind: 'symbol_error', message: 'invalid symbol', details: [session.sessionId, 'ser_1', 'invalid symbol'] },
+      { kind: 'series_error', message: 'custom_resolution', details: [session.sessionId, '$prices', 's1', 'custom_resolution'] },
+      { kind: 'critical_error', message: 'invalid timezone', details: 'method: switch_timezone' },
+    ])
+
+    session.setTimezone('Asia/Shanghai')
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('switch_timezone', [session.sessionId, 'Asia/Shanghai']))
+    expect(session.currentCandles).toEqual([])
+  })
+
+  it('sends custom chart type payloads and replay controls', async () => {
+    const { client, socket } = createClient()
+    const session = new TradingViewChartSession(client)
+    const replayEvents: unknown[] = []
+    session.onReplay((event) => replayEvents.push(event))
+
+    session.subscribe('BINANCE:BTCUSDT', () => {}, {
+      timeframe: '15',
+      range: 10,
+      type: 'Renko',
+      inputs: { source: 'close', style: 'ATR', atrLength: 14 },
+      replay: 1717200000,
+    })
+
+    expect(socket.sent).toContain(formatRealtimeCommand('replay_create_session', [session.replaySessionId]))
+    expect(socket.sent).toContain(formatRealtimeCommand('replay_reset', [
+      session.replaySessionId,
+      'req_replay_reset',
+      1717200000,
+    ]))
+    expect(socket.sent.some((packet) => (
+      packet.includes('resolve_symbol') &&
+      packet.includes('BarSetRenko@tv-prostudies-40!') &&
+      packet.includes(session.replaySessionId)
+    ))).toBe(true)
+
+    const stepPromise = session.replayStep(2)
+    const stepFrame = [...socket.sent].reverse()
+      .map((packet) => parseRealtimeFrames(packet)[0])
+      .find((frame) => typeof frame === 'object' && frame.m === 'replay_step')
+    const stepRequest = typeof stepFrame === 'object' && Array.isArray(stepFrame.p)
+      ? String(stepFrame.p[1])
+      : ''
+    socket.message(formatRealtimeCommand('replay_ok', [session.replaySessionId, stepRequest]))
+    await expect(stepPromise).resolves.toBeUndefined()
+
+    socket.message(formatRealtimeCommand('replay_instance_id', [session.replaySessionId, 'instance-1']))
+    socket.message(formatRealtimeCommand('replay_point', [session.replaySessionId, 15]))
+    socket.message(formatRealtimeCommand('replay_resolutions', [session.replaySessionId, '15', 10]))
+    socket.message(formatRealtimeCommand('replay_data_end', [session.replaySessionId]))
+    expect(replayEvents).toEqual([
+      { type: 'loaded', value: 'instance-1' },
+      { type: 'point', value: 15 },
+      { type: 'resolution', value: '15', extra: 10 },
+      { type: 'end' },
+    ])
+
+    const stopPromise = session.replayStop()
+    const stopFrame = [...socket.sent].reverse()
+      .map((packet) => parseRealtimeFrames(packet)[0])
+      .find((frame) => typeof frame === 'object' && frame.m === 'replay_stop')
+    const stopRequest = typeof stopFrame === 'object' && Array.isArray(stopFrame.p)
+      ? String(stopFrame.p[1])
+      : ''
+    socket.message(formatRealtimeCommand('replay_ok', [session.replaySessionId, stopRequest]))
+    await expect(stopPromise).resolves.toBeUndefined()
+
+    session.close()
+    expect(socket.sent).toContain(formatRealtimeCommand('replay_delete_session', [session.replaySessionId]))
   })
 })
 

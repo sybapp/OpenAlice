@@ -18,6 +18,38 @@ export type TradingViewTimeframe =
   | '1M'
   | string
 
+export type TradingViewChartType =
+  | 'HeikinAshi'
+  | 'Renko'
+  | 'LineBreak'
+  | 'Kagi'
+  | 'PointAndFigure'
+  | 'Range'
+
+export interface TradingViewChartTypeInputs {
+  atrLength?: number
+  source?: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4'
+  style?: 'ATR' | string
+  boxSize?: number
+  reversalAmount?: number
+  sources?: 'Close'
+  wicks?: boolean
+  lb?: number
+  oneStepBackBuilding?: boolean
+  phantomBars?: boolean
+  range?: number
+  [key: string]: unknown
+}
+
+const chartTypes: Record<TradingViewChartType, string> = {
+  HeikinAshi: 'BarSetHeikenAshi@tv-basicstudies-60!',
+  Renko: 'BarSetRenko@tv-prostudies-40!',
+  LineBreak: 'BarSetPriceBreak@tv-prostudies-34!',
+  Kagi: 'BarSetKagi@tv-prostudies-34!',
+  PointAndFigure: 'BarSetPnF@tv-prostudies-34!',
+  Range: 'BarSetRange@tv-basicstudies-72!',
+}
+
 export interface TradingViewCandle {
   time: number
   open: number
@@ -32,18 +64,40 @@ export interface TradingViewChartMarketOptions {
   range?: number
   to?: number
   adjustment?: 'splits' | 'dividends' | string
+  backadjustment?: boolean
   session?: 'regular' | 'extended' | string
   currency?: string
+  type?: TradingViewChartType
+  inputs?: TradingViewChartTypeInputs
+  replay?: number
+}
+
+export interface TradingViewMarketInfo {
+  seriesId: string
+  [key: string]: unknown
 }
 
 export interface TradingViewChartUpdate {
   symbol: string
   candles: TradingViewCandle[]
   changes: string[]
+  marketInfo: TradingViewMarketInfo | null
 }
 
 export interface TradingViewChartSubscription {
   close(): void
+}
+
+export interface TradingViewChartError {
+  kind: 'symbol_error' | 'series_error' | 'critical_error'
+  message: string
+  details?: unknown
+}
+
+export interface TradingViewReplayEvent {
+  type: 'loaded' | 'point' | 'resolution' | 'end'
+  value?: unknown
+  extra?: unknown
 }
 
 function normalizeCandle(values: unknown[]): TradingViewCandle | null {
@@ -74,23 +128,53 @@ function sortedCandles(candles: Map<number, TradingViewCandle>): TradingViewCand
 
 export class TradingViewChartSession {
   readonly sessionId = createSessionId('cs')
+  readonly replaySessionId = createSessionId('rs')
 
   private readonly candles = new Map<number, TradingViewCandle>()
   private readonly listeners = new Set<TradingViewRealtimeListener<[TradingViewChartUpdate]>>()
+  private readonly symbolListeners = new Set<TradingViewRealtimeListener<[TradingViewMarketInfo]>>()
+  private readonly errorListeners = new Set<TradingViewRealtimeListener<[TradingViewChartError]>>()
+  private readonly replayListeners = new Set<TradingViewRealtimeListener<[TradingViewReplayEvent]>>()
+  private readonly replayRequests = new Map<string, () => void>()
   private symbol = ''
+  private marketInfo: TradingViewMarketInfo | null = null
   private currentSeries = 0
   private seriesCreated = false
+  private replayMode = false
 
   constructor(private readonly client: TradingViewRealtimeClient) {
     this.client.registerSession(this.sessionId, {
       type: 'chart',
       onPacket: (packet) => this.handlePacket(packet),
     })
+    this.client.registerSession(this.replaySessionId, {
+      type: 'replay',
+      onPacket: (packet) => this.handleReplayPacket(packet),
+    })
     this.client.send('chart_create_session', [this.sessionId])
   }
 
   get currentCandles(): TradingViewCandle[] {
     return sortedCandles(this.candles)
+  }
+
+  get currentMarketInfo(): TradingViewMarketInfo | null {
+    return this.marketInfo
+  }
+
+  onSymbolResolved(listener: TradingViewRealtimeListener<[TradingViewMarketInfo]>): () => void {
+    this.symbolListeners.add(listener)
+    return () => this.symbolListeners.delete(listener)
+  }
+
+  onError(listener: TradingViewRealtimeListener<[TradingViewChartError]>): () => void {
+    this.errorListeners.add(listener)
+    return () => this.errorListeners.delete(listener)
+  }
+
+  onReplay(listener: TradingViewRealtimeListener<[TradingViewReplayEvent]>): () => void {
+    this.replayListeners.add(listener)
+    return () => this.replayListeners.delete(listener)
   }
 
   subscribe(
@@ -111,10 +195,19 @@ export class TradingViewChartSession {
   setMarket(symbol: string, options: TradingViewChartMarketOptions = {}): void {
     this.symbol = symbol
     this.candles.clear()
+    this.marketInfo = null
+
+    if (this.replayMode && !options.replay) {
+      this.replayMode = false
+      this.client.send('replay_delete_session', [this.replaySessionId])
+    }
 
     const symbolInit: Record<string, unknown> = {
       symbol,
       adjustment: options.adjustment ?? 'splits',
+    }
+    if (options.backadjustment) {
+      symbolInit.backadjustment = 'default'
     }
     if (options.session) {
       symbolInit.session = options.session
@@ -123,13 +216,42 @@ export class TradingViewChartSession {
       symbolInit['currency-id'] = options.currency
     }
 
+    if (options.replay) {
+      this.replayMode = true
+      this.client.send('replay_create_session', [this.replaySessionId])
+      this.client.send('replay_add_series', [
+        this.replaySessionId,
+        'req_replay_addseries',
+        `=${JSON.stringify(symbolInit)}`,
+        options.timeframe,
+      ])
+      this.client.send('replay_reset', [
+        this.replaySessionId,
+        'req_replay_reset',
+        options.replay,
+      ])
+    }
+
+    const complex = options.type || options.replay
+    const chartInit: Record<string, unknown> = complex ? {} : symbolInit
+    if (complex) {
+      chartInit.symbol = symbolInit
+      if (options.replay) {
+        chartInit.replay = this.replaySessionId
+      }
+      if (options.type) {
+        chartInit.type = chartTypes[options.type]
+        chartInit.inputs = { ...options.inputs }
+      }
+    }
+
     this.currentSeries += 1
     this.seriesCreated = false
 
     this.client.send('resolve_symbol', [
       this.sessionId,
       `ser_${this.currentSeries}`,
-      `=${JSON.stringify(symbolInit)}`,
+      `=${JSON.stringify(chartInit)}`,
     ])
     this.setSeries(options.timeframe ?? '1D', options.range ?? 100, options.to)
   }
@@ -155,14 +277,79 @@ export class TradingViewChartSession {
     this.client.send('request_more_data', [this.sessionId, '$prices', count])
   }
 
+  setTimezone(timezone: string): void {
+    this.candles.clear()
+    this.client.send('switch_timezone', [this.sessionId, timezone])
+  }
+
+  replayStep(count = 1): Promise<void> {
+    return this.sendReplayRequest('replay_step', count)
+  }
+
+  replayStart(interval = 1000): Promise<void> {
+    return this.sendReplayRequest('replay_start', interval)
+  }
+
+  replayStop(): Promise<void> {
+    return this.sendReplayRequest('replay_stop')
+  }
+
   close(): void {
+    if (this.replayMode) {
+      this.client.send('replay_delete_session', [this.replaySessionId])
+    }
     this.client.send('chart_delete_session', [this.sessionId])
     this.client.unregisterSession(this.sessionId)
+    this.client.unregisterSession(this.replaySessionId)
     this.listeners.clear()
+    this.symbolListeners.clear()
+    this.errorListeners.clear()
+    this.replayListeners.clear()
+    this.replayRequests.clear()
     this.candles.clear()
+    this.marketInfo = null
   }
 
   private handlePacket(packet: { type: string; data: unknown[] }): void {
+    if (packet.type === 'symbol_resolved') {
+      const [_, seriesId, info] = packet.data
+      this.marketInfo = {
+        seriesId: String(seriesId ?? ''),
+        ...(info && typeof info === 'object' ? info as Record<string, unknown> : {}),
+      }
+      for (const listener of this.symbolListeners) {
+        listener(this.marketInfo)
+      }
+      return
+    }
+
+    if (packet.type === 'symbol_error') {
+      this.emitError({
+        kind: 'symbol_error',
+        message: String(packet.data[2] ?? 'TradingView symbol error'),
+        details: packet.data,
+      })
+      return
+    }
+
+    if (packet.type === 'series_error') {
+      this.emitError({
+        kind: 'series_error',
+        message: String(packet.data[3] ?? 'TradingView series error'),
+        details: packet.data,
+      })
+      return
+    }
+
+    if (packet.type === 'critical_error') {
+      this.emitError({
+        kind: 'critical_error',
+        message: String(packet.data[1] ?? 'TradingView critical error'),
+        details: packet.data[2],
+      })
+      return
+    }
+
     if (packet.type !== 'timescale_update' && packet.type !== 'du') {
       return
     }
@@ -194,10 +381,70 @@ export class TradingViewChartSession {
         symbol: this.symbol,
         candles: this.currentCandles,
         changes,
+        marketInfo: this.marketInfo,
       }
       for (const listener of this.listeners) {
         listener(payload)
       }
+    }
+  }
+
+  private handleReplayPacket(packet: { type: string; data: unknown[] }): void {
+    if (packet.type === 'replay_ok') {
+      const requestId = String(packet.data[1] ?? '')
+      this.replayRequests.get(requestId)?.()
+      this.replayRequests.delete(requestId)
+      return
+    }
+    if (packet.type === 'replay_instance_id') {
+      this.emitReplay({ type: 'loaded', value: packet.data[1] })
+      return
+    }
+    if (packet.type === 'replay_point') {
+      this.emitReplay({ type: 'point', value: packet.data[1] })
+      return
+    }
+    if (packet.type === 'replay_resolutions') {
+      this.emitReplay({ type: 'resolution', value: packet.data[1], extra: packet.data[2] })
+      return
+    }
+    if (packet.type === 'replay_data_end') {
+      this.emitReplay({ type: 'end' })
+      return
+    }
+    if (packet.type === 'critical_error') {
+      this.emitError({
+        kind: 'critical_error',
+        message: String(packet.data[1] ?? 'TradingView replay critical error'),
+        details: packet.data[2],
+      })
+    }
+  }
+
+  private sendReplayRequest(command: 'replay_step' | 'replay_start' | 'replay_stop', value?: number): Promise<void> {
+    if (!this.replayMode) {
+      return Promise.reject(new Error('No TradingView replay session is active.'))
+    }
+
+    const requestId = createSessionId(`rsq_${command.replace('replay_', '')}`)
+    const params = value === undefined
+      ? [this.replaySessionId, requestId]
+      : [this.replaySessionId, requestId, value]
+    this.client.send(command, params)
+    return new Promise((resolve) => {
+      this.replayRequests.set(requestId, resolve)
+    })
+  }
+
+  private emitError(error: TradingViewChartError): void {
+    for (const listener of this.errorListeners) {
+      listener(error)
+    }
+  }
+
+  private emitReplay(event: TradingViewReplayEvent): void {
+    for (const listener of this.replayListeners) {
+      listener(event)
     }
   }
 }
