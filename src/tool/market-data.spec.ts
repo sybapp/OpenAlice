@@ -358,6 +358,7 @@ describe('createMarketDataTools', () => {
     await exec(tools.tradingViewCandles, {
       symbol: 'NASDAQ:AAPL',
       options: '{"timeframe":"60","range":100}',
+      includeMarketInfo: true,
       credentials: '{"tradingview_sessionid":"session"}',
       timeoutMs: 5000,
     })
@@ -365,6 +366,7 @@ describe('createMarketDataTools', () => {
     expect(service.tradingViewCandles).toHaveBeenCalledWith({
       symbol: 'NASDAQ:AAPL',
       options: { timeframe: '60', range: 100 },
+      includeMarketInfo: true,
       credentials: { tradingview_sessionid: 'session' },
       timeoutMs: 5000,
     })
