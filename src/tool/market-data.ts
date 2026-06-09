@@ -8,6 +8,12 @@ import type {
 
 type MarketDataToolService = Pick<MarketDataService, 'catalog' | 'query' | 'scan' | 'search'>
   & Pick<MarketDataService, 'indicator'>
+  & Pick<MarketDataService,
+    | 'searchTradingViewSymbols'
+    | 'technicalAnalysis'
+    | 'searchTradingViewIndicators'
+    | 'getTradingViewIndicator'
+  >
 
 const jsonRecordInput = z.union([
   z.record(z.string(), z.unknown()),
@@ -172,6 +178,80 @@ Returns { value, dataRange } where dataRange shows the actual date span and bar 
         formula,
         precision,
         provider,
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    tradingViewSymbolSearch: tool({
+      description: `Search TradingView symbols through TradingView's symbol search.
+
+Use this when an agent needs the exact TradingView symbol string before scanner,
+technical-analysis, realtime candles, or indicator execution calls.`,
+      inputSchema: z.object({
+        query: z.string().describe('Symbol query, ticker, or exchange-qualified symbol fragment.'),
+        type: z.string().optional().describe('Optional TradingView market type filter, e.g. stock, futures, crypto, forex.'),
+        offset: z.number().int().nonnegative().optional().describe('Result offset.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Clamped by the service.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ query: 'nasdaq:aapl', type: 'stock', limit: 5 }] }),
+      execute: async ({ query, type, offset, limit, credentials }) => service.searchTradingViewSymbols({
+        query,
+        type,
+        offset,
+        limit,
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    tradingViewTechnicalAnalysis: tool({
+      description: `Fetch TradingView technical-analysis recommendation values.
+
+Returns TradingView recommendation fields by requested periods for a symbol such
+as "NASDAQ:AAPL" or "BINANCE:BTCUSDT".`,
+      inputSchema: z.object({
+        symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL.'),
+        periods: z.array(z.string()).optional().describe('TradingView TA periods, e.g. ["1D", "1W", "1M"]. Defaults to service/provider defaults.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', periods: ['1D', '1W'] }] }),
+      execute: async ({ symbol, periods, credentials }) => service.technicalAnalysis({
+        symbol,
+        periods,
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    tradingViewIndicatorSearch: tool({
+      description: `Search public and built-in TradingView Pine indicators.
+
+Use this before tradingViewIndicatorGet when an agent needs a Pine script id or
+wants to discover built-in study names.`,
+      inputSchema: z.object({
+        query: z.string().optional().describe('Indicator search query. Empty string lists popular/default results.'),
+        includeBuiltIn: z.boolean().optional().describe('Include TradingView built-in studies in the result set.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Clamped by the service.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ query: 'RSI', includeBuiltIn: true, limit: 10 }] }),
+      execute: async ({ query, includeBuiltIn, limit, credentials }) => service.searchTradingViewIndicators({
+        query,
+        includeBuiltIn,
+        limit,
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    tradingViewIndicatorGet: tool({
+      description: `Get TradingView Pine indicator metadata and script payload by id.
+
+Returns inputs, plot names, script type, and script text needed to run a
+TradingView chart study.`,
+      inputSchema: z.object({
+        id: z.string().describe('TradingView indicator id, e.g. PUB;XXXXXXXXXXXXXXXX.'),
+        version: z.string().optional().describe('Indicator version. Defaults to last.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ id: 'PUB;XXXXXXXXXXXXXXXX', version: 'last' }] }),
+      execute: async ({ id, version, credentials }) => service.getTradingViewIndicator({
+        id,
+        version,
         credentials: parseCredentials(credentials),
       }),
     }),
