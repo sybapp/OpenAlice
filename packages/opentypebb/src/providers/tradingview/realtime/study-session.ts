@@ -1,4 +1,12 @@
+import JSZip from 'jszip'
 import { TradingViewBuiltInIndicator, TradingViewPineIndicator } from '../scanner/indicator.js'
+import {
+  applyTradingViewGraphicCommands,
+  emptyTradingViewGraphics,
+  parseTradingViewGraphics,
+  type TradingViewGraphicData,
+  type TradingViewGraphicStore,
+} from './graphic-parser.js'
 import { createSessionId } from './session-id.js'
 import type { TradingViewChartSession } from './chart-session.js'
 import type { TradingViewRealtimeListener } from './types.js'
@@ -32,7 +40,7 @@ export interface TradingViewStudyUpdate {
   changes: string[]
   points: TradingViewStudyPlotPoint[]
   strategyReport: TradingViewStrategyReport
-  graphics: Record<string, unknown>
+  graphics: TradingViewGraphicData
 }
 
 export interface TradingViewStudyError {
@@ -135,11 +143,22 @@ function sortedPoints(points: Map<number, TradingViewStudyPlotPoint>): TradingVi
   return [...points.values()].sort((left, right) => left.$time - right.$time)
 }
 
+async function parseCompressedPayload(raw: unknown): Promise<Record<string, unknown> | null> {
+  if (typeof raw !== 'string') return null
+  const zip = new JSZip()
+  const archive = await zip.loadAsync(raw, { base64: true })
+  const file = archive.file('') ?? archive.filter((_, entry) => !entry.dir)[0]
+  if (!file) return null
+  return JSON.parse(await file.async('text')) as Record<string, unknown>
+}
+
 export class TradingViewChartStudy {
   readonly studyId = createSessionId('st')
 
   private points = new Map<number, TradingViewStudyPlotPoint>()
-  private graphics: Record<string, unknown> = {}
+  private graphicStore: TradingViewGraphicStore = {}
+  private graphicIndexes: unknown[] = []
+  private graphics: TradingViewGraphicData = emptyTradingViewGraphics()
   private strategyReport: TradingViewStrategyReport = { trades: [], history: {} }
   private readonly readyListeners = new Set<TradingViewRealtimeListener<[]>>()
   private readonly updateListeners = new Set<TradingViewRealtimeListener<[TradingViewStudyUpdate]>>()
@@ -149,7 +168,9 @@ export class TradingViewChartStudy {
     private readonly chart: TradingViewChartSession,
     private indicator: TradingViewStudyIndicator,
   ) {
-    this.chart.registerStudy(this.studyId, (packet) => this.handlePacket(packet))
+    this.chart.registerStudy(this.studyId, (packet) => {
+      void this.handlePacket(packet)
+    })
     this.chart.send('create_study', [
       this.chart.sessionId,
       this.studyId,
@@ -168,7 +189,7 @@ export class TradingViewChartStudy {
     return this.strategyReport
   }
 
-  get currentGraphics(): Record<string, unknown> {
+  get currentGraphics(): TradingViewGraphicData {
     return this.graphics
   }
 
@@ -205,7 +226,7 @@ export class TradingViewChartStudy {
     this.errorListeners.clear()
   }
 
-  private handlePacket(packet: { type: string; data: unknown[] }): void {
+  private async handlePacket(packet: { type: string; data: unknown[] }): Promise<void> {
     if (packet.type === 'study_completed') {
       for (const listener of this.readyListeners) listener()
       return
@@ -247,7 +268,11 @@ export class TradingViewChartStudy {
 
     const namespace = source['ns'] as Record<string, unknown> | undefined
     if (namespace?.['d'] && typeof namespace['d'] === 'string') {
-      this.parseNamespace(namespace['d'], changes)
+      await this.parseNamespace(namespace['d'], changes)
+    }
+    if (Array.isArray(namespace?.['indexes'])) {
+      this.graphicIndexes = namespace['indexes']
+      this.graphics = parseTradingViewGraphics(this.graphicStore, this.graphicIndexes)
     }
 
     if (changes.length > 0) {
@@ -261,7 +286,7 @@ export class TradingViewChartStudy {
     }
   }
 
-  private parseNamespace(raw: string, changes: string[]): void {
+  private async parseNamespace(raw: string, changes: string[]): Promise<void> {
     let parsed: Record<string, unknown>
     try {
       parsed = JSON.parse(raw) as Record<string, unknown>
@@ -270,8 +295,23 @@ export class TradingViewChartStudy {
     }
 
     if (parsed['graphicsCmds']) {
-      this.graphics = parsed['graphicsCmds'] as Record<string, unknown>
+      this.graphicStore = applyTradingViewGraphicCommands(
+        this.graphicStore,
+        parsed['graphicsCmds'] as Record<string, unknown>,
+      )
+      this.graphics = parseTradingViewGraphics(this.graphicStore, this.graphicIndexes)
       changes.push('graphic')
+    }
+    if (parsed['dataCompressed']) {
+      try {
+        const data = await parseCompressedPayload(parsed['dataCompressed'])
+        updateReport(this.strategyReport, data?.['report'], changes)
+      } catch (error) {
+        this.emitError({
+          message: 'Unable to parse TradingView compressed study data',
+          details: error instanceof Error ? error.message : error,
+        })
+      }
     }
     const data = parsed['data'] as { report?: unknown } | undefined
     if (data?.report) {

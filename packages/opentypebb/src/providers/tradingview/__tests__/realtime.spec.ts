@@ -1,3 +1,4 @@
+import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -13,6 +14,17 @@ import {
   parseRealtimeFrames,
 } from '../index.js'
 import type { TradingViewRealtimeSocket } from '../index.js'
+
+function waitForAsyncHandlers(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return
+    await waitForAsyncHandlers()
+  }
+}
 
 class FakeSocket implements TradingViewRealtimeSocket {
   readyState = 0
@@ -249,7 +261,7 @@ describe('TradingView chart session', () => {
 })
 
 describe('TradingView chart study', () => {
-  it('creates, updates, modifies, and removes Pine studies', () => {
+  it('creates, updates, modifies, and removes Pine studies', async () => {
     const { client, socket } = createClient()
     const chart = new TradingViewChartSession(client)
     chart.subscribe('NASDAQ:AAPL', () => {})
@@ -299,8 +311,25 @@ describe('TradingView chart study', () => {
             { v: [1717203600, 1.7, 1] },
           ],
           ns: {
+            indexes: [1717200000, 1717203600],
             d: JSON.stringify({
-              graphicsCmds: { create: { dwglines: [{ data: [{ id: 1, x: 10 }] }] } },
+              graphicsCmds: {
+                create: {
+                  dwglines: [{
+                    data: [{
+                      id: 1,
+                      x1: 0,
+                      y1: 100,
+                      x2: 1,
+                      y2: 110,
+                      ex: 'r',
+                      st: 'dsh',
+                      ci: 16711680,
+                      w: 2,
+                    }],
+                  }],
+                },
+              },
               data: {
                 report: {
                   currency: 'USD',
@@ -325,6 +354,7 @@ describe('TradingView chart study', () => {
         },
       },
     ]))
+    await waitForCondition(() => updates.length === 1)
 
     expect(updates).toEqual([{
       changes: ['plots', 'graphic', 'report.currency', 'report.perf', 'report.trades', 'report.history'],
@@ -353,7 +383,40 @@ describe('TradingView chart study', () => {
           equityPercent: undefined,
         },
       },
-      graphics: { create: { dwglines: [{ data: [{ id: 1, x: 10 }] }] } },
+      graphics: {
+        labels: [],
+        lines: [{
+          id: 1,
+          x1: 1717200000,
+          y1: 100,
+          x2: 1717203600,
+          y2: 110,
+          extend: 'right',
+          style: 'dashed',
+          color: 16711680,
+          width: 2,
+        }],
+        boxes: [],
+        tables: [],
+        horizLines: [],
+        polygons: [],
+        horizHists: [],
+        raw: {
+          dwglines: {
+            '1': {
+              id: 1,
+              x1: 0,
+              y1: 100,
+              x2: 1,
+              y2: 110,
+              ex: 'r',
+              st: 'dsh',
+              ci: 16711680,
+              w: 2,
+            },
+          },
+        },
+      },
     }])
 
     socket.message(formatRealtimeCommand('study_error', [chart.sessionId, study.studyId, 'st1', 'invalid value', 'Factor']))
@@ -371,6 +434,83 @@ describe('TradingView chart study', () => {
 
     study.remove()
     expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('remove_study', [chart.sessionId, study.studyId]))
+  })
+
+  it('maintains study graphics and reads compressed strategy reports', async () => {
+    const { client, socket } = createClient()
+    const chart = new TradingViewChartSession(client)
+    chart.subscribe('NASDAQ:AAPL', () => {})
+    const study = new TradingViewChartStudy(chart, new TradingViewBuiltInIndicator('Volume@tv-basicstudies-241'))
+    const updates: unknown[] = []
+    study.onUpdate((update) => updates.push(update))
+
+    const zip = new JSZip()
+    zip.file('report.json', JSON.stringify({
+      report: {
+        currency: 'EUR',
+        settings: { initialCapital: 1000 },
+        performance: { all: { totalTrades: 2 } },
+        equity: [1000, 1010],
+      },
+    }))
+    const dataCompressed = await zip.generateAsync({ type: 'base64' })
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chart.sessionId,
+      {
+        [study.studyId]: {
+          ns: {
+            indexes: [1717200000],
+            d: JSON.stringify({
+              graphicsCmds: {
+                create: {
+                  dwglabels: [{ data: [{ id: 7, x: 0, y: 120, yl: 'pr', t: 'Buy', st: 'lup', ci: 65280, tci: 0, sz: 'small' }] }],
+                  dwgtables: [{ data: [{ id: 8, pos: 'top_right', rows: 1, cols: 1, bgc: 0, frmc: 1, frmw: 1, brdc: 2, brdw: 1 }] }],
+                  dwgtablecells: [{ data: [{ id: 9, tid: 8, row: 0, col: 0, t: 'Win', w: 10, h: 5, tc: 1, tha: 'center', tva: 'center', ts: 'tiny', bgc: 2 }] }],
+                },
+              },
+              dataCompressed,
+            }),
+          },
+        },
+      },
+    ]))
+    await waitForCondition(() => updates.length === 1)
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0]).toMatchObject({
+      changes: ['graphic', 'report.currency', 'report.settings', 'report.perf', 'report.history'],
+      strategyReport: {
+        currency: 'EUR',
+        settings: { initialCapital: 1000 },
+        performance: { all: { totalTrades: 2 } },
+        history: { equity: [1000, 1010] },
+      },
+      graphics: {
+        labels: [{ id: 7, x: 1717200000, y: 120, yLoc: 'price', text: 'Buy', style: 'label_up' }],
+        tables: [{
+          id: 8,
+          cells: [[{ id: 9, text: 'Win' }]],
+        }],
+      },
+    })
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chart.sessionId,
+      {
+        [study.studyId]: {
+          ns: {
+            d: JSON.stringify({
+              graphicsCmds: { erase: [{ action: 'one', type: 'dwglabels', id: 7 }] },
+            }),
+          },
+        },
+      },
+    ]))
+    await waitForAsyncHandlers()
+
+    expect((updates.at(-1) as { graphics: { labels: unknown[] } }).graphics.labels).toEqual([])
+    expect((updates.at(-1) as { graphics: { tables: unknown[] } }).graphics.tables).toHaveLength(1)
   })
 })
 
