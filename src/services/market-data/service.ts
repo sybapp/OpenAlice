@@ -1026,6 +1026,8 @@ export class MarketDataService {
           candles: result.candles.map((candle) => tradingViewCandleRow(result.symbol, candle)),
           points: result.study.points.map(tradingViewStudyPointRow),
           graphics: result.study.graphics,
+          graphicTextItems: result.study.graphics.textItems,
+          graphicPlainText: result.study.graphics.plainText,
           strategyReport: result.study.strategyReport,
           changes: result.study.changes,
         }],
