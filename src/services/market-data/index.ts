@@ -14,6 +14,13 @@ export {
   type MarketDataScanPreset,
   type MarketDataSearchInput,
   type MarketDataServiceDeps,
+  type MarketDataTechnicalAnalysisInput,
+  type MarketDataTradingViewCandlesInput,
+  type MarketDataTradingViewIndicatorInput,
+  type MarketDataTradingViewIndicatorSearchInput,
+  type MarketDataTradingViewStudyInput,
+  type MarketDataTradingViewStudyResult,
+  type MarketDataTradingViewSymbolSearchInput,
 } from './types.js'
 export { MarketDataService, createMarketDataService } from './service.js'
 export {
