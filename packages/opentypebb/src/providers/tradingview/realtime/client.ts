@@ -1,3 +1,4 @@
+import WebSocket from 'ws'
 import {
   formatHeartbeat,
   formatRealtimeCommand,
@@ -12,6 +13,11 @@ import type {
   TradingViewRealtimeSocket,
 } from './types.js'
 
+type NodeWebSocketCtor = new (
+  url: string,
+  options?: { headers?: Record<string, string> },
+) => TradingViewRealtimeSocket
+
 const defaultHeaders: Record<string, string> = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -21,12 +27,14 @@ const defaultHeaders: Record<string, string> = {
   Pragma: 'no-cache',
 }
 
-function defaultSocketFactory(input: { url: string }): TradingViewRealtimeSocket {
-  const SocketCtor = globalThis.WebSocket
-  if (!SocketCtor) {
-    throw new Error('No WebSocket implementation available for TradingView realtime client')
-  }
-  return new SocketCtor(input.url) as unknown as TradingViewRealtimeSocket
+export function createDefaultTradingViewSocket(input: { url: string; headers: Record<string, string> }): TradingViewRealtimeSocket {
+  const SocketCtor = WebSocket as unknown as NodeWebSocketCtor
+  return new SocketCtor(input.url, {
+    headers: {
+      Origin: 'https://www.tradingview.com',
+      ...input.headers,
+    },
+  })
 }
 
 function packetSession(packet: TradingViewRealtimePacket): string | null {
@@ -57,7 +65,7 @@ export class TradingViewRealtimeClient {
     const url = `wss://${server}.tradingview.com/socket.io/websocket?from=chart&type=chart`
     const headers = { ...defaultHeaders, ...options.headers }
 
-    this.socket = (options.socketFactory ?? defaultSocketFactory)({ url, headers })
+    this.socket = (options.socketFactory ?? createDefaultTradingViewSocket)({ url, headers })
     this.bindSocket()
 
     const authToken = options.credentials?.authToken ?? 'unauthorized_user_token'
