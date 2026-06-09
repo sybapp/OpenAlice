@@ -447,6 +447,7 @@ describe('MarketDataService', () => {
       symbol: 'NASDAQ:AAPL',
       candles: [{ time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 }],
       changes: ['$prices'],
+      marketInfo: null,
     }])
     expect(subscription.getCandles()).toEqual([
       { time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 },
@@ -534,6 +535,102 @@ describe('MarketDataService', () => {
     expect(result.provider).toBe('yfinance')
     expect(result.rows).toEqual([])
     expect(result.error).toBe('Only the tradingview provider supports TradingView symbol search at the service layer.')
+  })
+
+  it('searches TradingView indicators through the service layer', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchMock = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      if (String(url).includes('pine-facade/list')) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        results: [{
+          scriptIdPart: 'PUB;abc',
+          version: '1',
+          scriptName: 'Community RSI',
+          author: { id: 10, username: 'alice' },
+          access: 1,
+          extra: { kind: 'study' },
+        }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+
+    const result = await service.searchTradingViewIndicators({
+      query: 'RSI',
+      includeBuiltIn: false,
+      fetch: fetchMock,
+    })
+
+    expect(result).toEqual({
+      provider: 'tradingview',
+      endpoint: '/tradingview/indicator-search',
+      totalCount: 1,
+      fields: ['id', 'version', 'name', 'author', 'image', 'access', 'source', 'type'],
+      rows: [{
+        id: 'PUB;abc',
+        version: '1',
+        name: 'Community RSI',
+        author: { id: 10, username: 'alice' },
+        image: '',
+        access: 'open_source',
+        source: '',
+        type: 'study',
+      }],
+      warnings: [],
+    })
+  })
+
+  it('gets TradingView indicator metadata through the service layer', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      result: {
+        ilTemplate: 'pine bytecode',
+        metaInfo: {
+          scriptIdPart: 'PUB;abc',
+          description: 'Super Trend',
+          shortDescription: 'ST',
+          pine: { version: '5' },
+          inputs: [{ id: 'in_Factor', name: 'Factor', type: 'float', defval: 3 }],
+          styles: { plot_0: { title: 'Trend' } },
+          plots: [],
+        },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch
+
+    const result = await service.getTradingViewIndicator({
+      id: 'PUB;abc',
+      fetch: fetchMock,
+    })
+
+    expect(result.provider).toBe('tradingview')
+    expect(result.endpoint).toBe('/tradingview/indicator')
+    expect(result.totalCount).toBe(1)
+    expect(result.rows[0]).toMatchObject({
+      id: 'PUB;abc',
+      version: '5',
+      description: 'Super Trend',
+      shortDescription: 'ST',
+      type: 'Script@tv-scripting-101!',
+      script: 'pine bytecode',
+      plots: { plot_0: 'Trend' },
+    })
+    expect(result.rows[0]?.['inputs']).toMatchObject({
+      in_Factor: {
+        name: 'Factor',
+        value: 3,
+      },
+    })
+  })
+
+  it('rejects TradingView indicator metadata for non-TradingView providers', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    const search = await service.searchTradingViewIndicators({ provider: 'yfinance' })
+    const metadata = await service.getTradingViewIndicator({ provider: 'yfinance', id: 'PUB;abc' })
+
+    expect(search.error).toBe('Only the tradingview provider supports TradingView indicator search at the service layer.')
+    expect(metadata.error).toBe('Only the tradingview provider supports TradingView indicator metadata at the service layer.')
   })
 
   it('gets TradingView technical analysis through the service layer', async () => {
