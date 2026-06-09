@@ -28,6 +28,15 @@ export {
   type TradingViewReplayEvent,
   type TradingViewTimeframe,
 } from './chart-session.js'
+export {
+  TradingViewChartStudy,
+  type TradingViewStrategyReport,
+  type TradingViewStrategyTrade,
+  type TradingViewStudyError,
+  type TradingViewStudyIndicator,
+  type TradingViewStudyPlotPoint,
+  type TradingViewStudyUpdate,
+} from './study-session.js'
 export type {
   TradingViewRealtimeClientOptions,
   TradingViewRealtimeCredentials,
