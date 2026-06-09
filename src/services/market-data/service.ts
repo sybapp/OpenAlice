@@ -404,6 +404,60 @@ function tradingViewStringArrayParam(params: Record<string, unknown>, key: strin
   throw new Error(`params.${key} must be a string array or comma-separated string.`)
 }
 
+function tradingViewTimeframeFromInterval(interval: unknown): tradingview.TradingViewTimeframe {
+  switch (interval) {
+    case '1m':
+    case '1':
+      return '1'
+    case '5m':
+    case '5':
+      return '5'
+    case '1h':
+    case '60':
+      return '60'
+    case '1d':
+    case '1D':
+    default:
+      return '1D'
+  }
+}
+
+function tradingViewRangeFromParams(params: Record<string, unknown>, fallback = 365): number {
+  const explicitRange = tradingViewNumberParam(params, 'range')
+  if (explicitRange !== undefined) {
+    return explicitRange
+  }
+  const start = tradingViewStringParam(params, 'start_date')
+  if (!start) {
+    const limit = tradingViewNumberParam(params, 'limit')
+    if (limit !== undefined) {
+      return limit
+    }
+    return fallback
+  }
+  const startTime = new Date(`${start}T00:00:00Z`).getTime()
+  if (!Number.isFinite(startTime)) {
+    return fallback
+  }
+  const days = Math.ceil((Date.now() - startTime) / 86_400_000)
+  return Math.max(1, Math.min(MARKET_DATA_MAX_LIMIT, days))
+}
+
+function tradingViewHistoricalRow(row: Record<string, unknown>): Record<string, unknown> {
+  const timeISO = typeof row.timeISO === 'string' ? row.timeISO : undefined
+  return {
+    date: timeISO?.slice(0, 10) ?? row.time,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+    volume: row.volume,
+    symbol: row.symbol,
+    time: row.time,
+    timeISO,
+  }
+}
+
 function assetClassFromEndpoint(endpoint: string): MarketDataAssetClass | undefined {
   const [first] = normalizeEndpoint(endpoint).split('/').filter(Boolean)
   if (!first) {
@@ -446,6 +500,9 @@ function endpointCatalog(commands: MarketDataCommandMap, modelsByProvider: Map<s
     const providers = [...modelsByProvider.entries()]
       .filter(([, models]) => models.includes(command.model))
       .map(([provider]) => provider)
+    if (isTradingViewAssetEndpoint(endpoint) && !providers.includes('tradingview')) {
+      providers.push('tradingview')
+    }
 
     endpoints.push({
       endpoint,
@@ -456,6 +513,21 @@ function endpointCatalog(commands: MarketDataCommandMap, modelsByProvider: Map<s
   }
   endpoints.push(...TRADINGVIEW_GENERIC_ENDPOINTS)
   return endpoints.sort((a, b) => a.endpoint.localeCompare(b.endpoint))
+}
+
+function isTradingViewAssetEndpoint(endpoint: string): boolean {
+  return [
+    '/equity/search',
+    '/crypto/search',
+    '/currency/search',
+    '/equity/price/quote',
+    '/equity/price/historical',
+    '/crypto/price/historical',
+    '/currency/price/historical',
+    '/commodity/price/spot',
+    '/etf/historical',
+    '/index/price/historical',
+  ].includes(endpoint)
 }
 
 function providerCatalog(registry: MarketDataServiceDeps['registry']): MarketDataCatalogProvider[] {
@@ -510,6 +582,13 @@ export class MarketDataService {
       if (tradingViewEndpoint) {
         return await this.queryTradingViewEndpoint(tradingViewEndpoint.endpoint, {
           provider,
+          params: input.params ?? {},
+          limit,
+          credentials: input.credentials,
+        })
+      }
+      if (provider === 'tradingview' && isTradingViewAssetEndpoint(endpoint)) {
+        return await this.queryTradingViewAssetEndpoint(endpoint, {
           params: input.params ?? {},
           limit,
           credentials: input.credentials,
@@ -1177,6 +1256,70 @@ export class MarketDataService {
         })
       default:
         return errorEnvelope(provider, endpoint, `Unsupported TradingView endpoint '${endpoint}'.`)
+    }
+  }
+
+  private async queryTradingViewAssetEndpoint(
+    endpoint: string,
+    input: {
+      params: Record<string, unknown>
+      limit: number
+      credentials?: Record<string, string>
+    },
+  ): Promise<MarketDataEnvelope> {
+    const { params, limit, credentials } = input
+    switch (endpoint) {
+      case '/equity/search':
+      case '/crypto/search':
+      case '/currency/search': {
+        const type = endpoint === '/equity/search'
+          ? 'stock'
+          : endpoint === '/crypto/search'
+            ? 'crypto'
+            : 'forex'
+        const result = await this.searchTradingViewSymbols({
+          query: tradingViewRequiredStringParam(params, 'query', endpoint),
+          type,
+          limit,
+          credentials,
+        })
+        return { ...result, endpoint }
+      }
+      case '/equity/price/quote': {
+        const result = await this.tradingViewQuote({
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+        return { ...result, endpoint }
+      }
+      case '/equity/price/historical':
+      case '/crypto/price/historical':
+      case '/currency/price/historical':
+      case '/commodity/price/spot':
+      case '/etf/historical':
+      case '/index/price/historical': {
+        const candles = await this.tradingViewCandles({
+          symbol: tradingViewRequiredStringParam(params, 'symbol', endpoint),
+          options: {
+            timeframe: tradingViewTimeframeFromInterval(params.interval),
+            range: tradingViewRangeFromParams(params, limit),
+            ...tradingViewRecordParam(params, 'options'),
+          },
+          credentials,
+          timeoutMs: tradingViewNumberParam(params, 'timeoutMs'),
+        })
+        if (candles.error) {
+          return { ...candles, endpoint }
+        }
+        return this.toEnvelope('tradingview', endpoint, {
+          totalCount: candles.totalCount,
+          rows: candles.rows.map(tradingViewHistoricalRow),
+          warnings: candles.warnings,
+        }, limit)
+      }
+      default:
+        return errorEnvelope('tradingview', endpoint, `TradingView does not support endpoint '${endpoint}'.`)
     }
   }
 
