@@ -441,17 +441,20 @@ Use this when an agent needs TradingView-normalized OHLCV data, custom chart
 types, replay initialization, or TradingView-specific symbol handling without
 holding an open subscription. For a latest-price snapshot, pass a small range
 such as {"timeframe":"1D","range":2} and read the last row's close. Candle rows
-include both TradingView's original second-level Unix timestamp in time and an
-ISO-8601 UTC string in timeISO.`,
+return compact OHLCV by default, with TradingView's original second-level Unix
+timestamp in time and an ISO-8601 UTC string in timeISO. Set includeMarketInfo
+only when the agent needs full TradingView symbol/session metadata.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL or BINANCE:BTCUSDT.'),
         options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
+        includeMarketInfo: z.boolean().optional().describe('Include full TradingView market/session metadata on every candle row. Defaults to false to keep Agent/MCP responses compact.'),
         credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
         timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
       }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', options: { timeframe: '60', range: 100 } }] }),
-      execute: async ({ symbol, options, credentials, timeoutMs }) => service.tradingViewCandles({
+      execute: async ({ symbol, options, includeMarketInfo, credentials, timeoutMs }) => service.tradingViewCandles({
         symbol,
         options: parseJsonRecord(options, 'options'),
+        includeMarketInfo,
         credentials: parseCredentials(credentials),
         timeoutMs,
       }),

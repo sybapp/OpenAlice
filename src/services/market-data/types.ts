@@ -238,6 +238,7 @@ export interface MarketDataTradingViewCandlesInput {
   provider?: 'tradingview' | string
   symbol: string
   options?: TradingViewChartMarketOptions
+  includeMarketInfo?: boolean
   credentials?: TradingViewRealtimeCredentials | null
   socketFactory?: TradingViewRealtimeSocketFactory
   timeoutMs?: number

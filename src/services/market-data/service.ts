@@ -150,13 +150,20 @@ function tradingViewTimestampToIso(timestamp: unknown): string | undefined {
   return new Date(timestamp * 1000).toISOString()
 }
 
-function tradingViewCandleRow(symbol: string, candle: tradingview.TradingViewCandle, marketInfo?: unknown): Record<string, unknown> {
-  return {
+function tradingViewCandleRow(
+  symbol: string,
+  candle: tradingview.TradingViewCandle,
+  options: { marketInfo?: unknown; includeMarketInfo?: boolean } = {},
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {
     symbol,
     ...candle,
     timeISO: tradingViewTimestampToIso(candle.time),
-    marketInfo,
   }
+  if (options.includeMarketInfo) {
+    row.marketInfo = options.marketInfo ?? null
+  }
+  return row
 }
 
 function tradingViewStudyPointRow(point: tradingview.TradingViewStudyPlotPoint): tradingview.TradingViewStudyPlotPoint {
@@ -620,7 +627,10 @@ export class MarketDataService {
 
       return this.toEnvelope(provider, endpoint, {
         totalCount: update.candles.length,
-        rows: update.candles.map((candle) => tradingViewCandleRow(update.symbol, candle, update.marketInfo)),
+        rows: update.candles.map((candle) => tradingViewCandleRow(update.symbol, candle, {
+          includeMarketInfo: input.includeMarketInfo,
+          marketInfo: update.marketInfo,
+        })),
         warnings: update.changes.map((change) => `TradingView chart update: ${change}`),
       }, update.candles.length)
     } catch (error) {
