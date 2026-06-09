@@ -435,7 +435,12 @@ indicator. Use tradingViewStudy to run a study on a symbol.`,
     }),
 
     tradingViewCandles: tool({
-      description: `Get a one-shot TradingView candle snapshot through the realtime chart adapter.
+      description: `Get a one-shot TradingView realtime chart candle snapshot.
+
+This tool, and the CLI shortcut alice marketdata candles, are TradingView-only.
+They do not query yfinance, fmp, or other generic providers. For provider-backed
+historical prices, use marketDataQuery with endpoints such as
+"/equity/price/historical" or "/etf/historical".
 
 Use this when an agent needs TradingView-normalized OHLCV data, custom chart
 types, replay initialization, or TradingView-specific symbol handling without
