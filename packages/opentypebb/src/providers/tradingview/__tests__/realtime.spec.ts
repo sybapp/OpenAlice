@@ -395,9 +395,13 @@ describe('TradingView chart study', () => {
           style: 'dashed',
           color: 16711680,
           width: 2,
+          text: undefined,
+          toolTip: undefined,
         }],
         boxes: [],
         tables: [],
+        textItems: [],
+        plainText: [],
         horizLines: [],
         polygons: [],
         horizHists: [],
@@ -492,6 +496,14 @@ describe('TradingView chart study', () => {
           id: 8,
           cells: [[{ id: 9, text: 'Win' }]],
         }],
+        textItems: [
+          { kind: 'label', id: 7, text: 'Buy', x: 1717200000, y: 120 },
+          { kind: 'table_cell', id: 9, tableId: 8, text: 'Win', row: 0, column: 0 },
+        ],
+        plainText: [
+          'label#7 "Buy" x=1717200000 y=120',
+          'table_cell#9 "Win" cell=0,0',
+        ],
       },
     })
 
@@ -511,6 +523,59 @@ describe('TradingView chart study', () => {
 
     expect((updates.at(-1) as { graphics: { labels: unknown[] } }).graphics.labels).toEqual([])
     expect((updates.at(-1) as { graphics: { tables: unknown[] } }).graphics.tables).toHaveLength(1)
+  })
+
+  it('extracts agent-readable text from SMC-style study graphics', async () => {
+    const { client, socket } = createClient()
+    const chart = new TradingViewChartSession(client)
+    chart.subscribe('NASDAQ:AAPL', () => {})
+    const study = new TradingViewChartStudy(chart, new TradingViewBuiltInIndicator('Volume@tv-basicstudies-241'))
+    const updates: unknown[] = []
+    study.onUpdate((update) => updates.push(update))
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chart.sessionId,
+      {
+        [study.studyId]: {
+          ns: {
+            indexes: [1717200000, 1717286400, 1717372800],
+            d: JSON.stringify({
+              graphicsCmds: {
+                create: {
+                  dwglabels: [{ data: [{ id: 11, x: 2, y: 195, yl: 'pr', t: 'BOS', tt: 'Bullish break of structure', st: 'lup', ci: 65280, tci: 0 }] }],
+                  dwglines: [{ data: [{ id: 12, x1: 0, y1: 190, x2: 2, y2: 190, t: 'CHoCH', tt: 'Change of character', st: 'dsh', ci: 16777215 }] }],
+                  dwgboxes: [{ data: [{ id: 13, x1: 0, y1: 188, x2: 2, y2: 182, t: 'Bullish OB', tt: 'Order block demand zone', c: 65280, bc: 32768, st: 'sol' }] }],
+                  dwgtables: [{ data: [{ id: 14, pos: 'top_right', rows: 1, cols: 1 }] }],
+                  dwgtablecells: [{ data: [{ id: 15, tid: 14, row: 0, col: 0, t: 'EQH active', tt: 'Equal highs liquidity' }] }],
+                },
+              },
+            }),
+          },
+        },
+      },
+    ]))
+    await waitForCondition(() => updates.length === 1)
+
+    expect(updates[0]).toMatchObject({
+      graphics: {
+        labels: [{ id: 11, text: 'BOS', toolTip: 'Bullish break of structure' }],
+        lines: [{ id: 12, text: 'CHoCH', toolTip: 'Change of character' }],
+        boxes: [{ id: 13, text: 'Bullish OB', toolTip: 'Order block demand zone' }],
+        tables: [{ id: 14, cells: [[{ id: 15, text: 'EQH active', toolTip: 'Equal highs liquidity' }]] }],
+        textItems: [
+          { kind: 'label', id: 11, text: 'BOS', toolTip: 'Bullish break of structure', x: 1717372800, y: 195 },
+          { kind: 'line', id: 12, text: 'CHoCH', toolTip: 'Change of character', x1: 1717200000, x2: 1717372800, y1: 190, y2: 190 },
+          { kind: 'box', id: 13, text: 'Bullish OB', toolTip: 'Order block demand zone', x1: 1717200000, x2: 1717372800, y1: 188, y2: 182 },
+          { kind: 'table_cell', id: 15, tableId: 14, text: 'EQH active', toolTip: 'Equal highs liquidity', row: 0, column: 0 },
+        ],
+        plainText: [
+          'label#11 "BOS" tip="Bullish break of structure" x=1717372800 y=195',
+          'line#12 "CHoCH" tip="Change of character" x=1717200000->1717372800 y=190->190',
+          'box#13 "Bullish OB" tip="Order block demand zone" x=1717200000->1717372800 y=188->182',
+          'table_cell#15 "EQH active" tip="Equal highs liquidity" cell=0,0',
+        ],
+      },
+    })
   })
 })
 
