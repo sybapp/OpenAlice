@@ -106,6 +106,8 @@ export interface TradingViewGraphicData {
   lines: Record<string, unknown>[]
   boxes: Record<string, unknown>[]
   tables: Array<Record<string, unknown> & { cells: Record<string, unknown>[][] }>
+  textItems: Record<string, unknown>[]
+  plainText: string[]
   horizLines: Record<string, unknown>[]
   polygons: Record<string, unknown>[]
   horizHists: Record<string, unknown>[]
@@ -118,6 +120,8 @@ export function emptyTradingViewGraphics(): TradingViewGraphicData {
     lines: [],
     boxes: [],
     tables: [],
+    textItems: [],
+    plainText: [],
     horizLines: [],
     polygons: [],
     horizHists: [],
@@ -157,20 +161,120 @@ function translate(group: keyof typeof translator, raw: unknown): unknown {
  *
  * Returns the original value if it's not a number.
  */
-/**
- * Resolve an integer index to its actual value from the indexes array.
- *
- * TradingView sends time-based x-coordinates as integer offsets into a
- * separate time array to reduce payload size. This function looks up the
- * actual timestamp or bar index.
- *
- * Example: If indexes = [1672531200, 1672617600, 1672704000],
- *          then indexAt(indexes, 1) → 1672617600
- *
- * Returns the original value if it's not a number.
- */
 function indexAt(indexes: unknown[], raw: unknown): unknown {
   return typeof raw === 'number' ? indexes[raw] : raw
+}
+
+function textValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
+function compactTextItem(item: Record<string, unknown>): string | null {
+  const text = textValue(item['text'])
+  const toolTip = textValue(item['toolTip'])
+  if (!text && !toolTip) {
+    return null
+  }
+  const kind = textValue(item['kind']) ?? 'graphic'
+  const id = item['id'] === undefined ? '' : `#${String(item['id'])}`
+  const location = [
+    item['x'] !== undefined ? `x=${String(item['x'])}` : null,
+    item['x1'] !== undefined || item['x2'] !== undefined ? `x=${String(item['x1'])}->${String(item['x2'])}` : null,
+    item['y'] !== undefined ? `y=${String(item['y'])}` : null,
+    item['y1'] !== undefined || item['y2'] !== undefined ? `y=${String(item['y1'])}->${String(item['y2'])}` : null,
+    item['row'] !== undefined && item['column'] !== undefined ? `cell=${String(item['row'])},${String(item['column'])}` : null,
+  ].filter(Boolean).join(' ')
+  const parts = [`${kind}${id}`, text ? `"${text}"` : null, toolTip && toolTip !== text ? `tip="${toolTip}"` : null, location || null]
+  return parts.filter(Boolean).join(' ')
+}
+
+function extractTextItems(graphics: {
+  labels: Record<string, unknown>[]
+  lines: Record<string, unknown>[]
+  boxes: Record<string, unknown>[]
+  tables: Array<Record<string, unknown> & { cells: Record<string, unknown>[][] }>
+}): Record<string, unknown>[] {
+  const items: Record<string, unknown>[] = []
+
+  for (const label of graphics.labels) {
+    if (!textValue(label['text']) && !textValue(label['toolTip'])) continue
+    items.push({
+      kind: 'label',
+      id: label['id'],
+      text: label['text'],
+      toolTip: label['toolTip'],
+      x: label['x'],
+      y: label['y'],
+      yLoc: label['yLoc'],
+      style: label['style'],
+      color: label['color'],
+      textColor: label['textColor'],
+    })
+  }
+
+  for (const line of graphics.lines) {
+    if (!textValue(line['text']) && !textValue(line['toolTip'])) continue
+    items.push({
+      kind: 'line',
+      id: line['id'],
+      text: line['text'],
+      toolTip: line['toolTip'],
+      x1: line['x1'],
+      y1: line['y1'],
+      x2: line['x2'],
+      y2: line['y2'],
+      extend: line['extend'],
+      style: line['style'],
+      color: line['color'],
+    })
+  }
+
+  for (const box of graphics.boxes) {
+    if (!textValue(box['text']) && !textValue(box['toolTip'])) continue
+    items.push({
+      kind: 'box',
+      id: box['id'],
+      text: box['text'],
+      toolTip: box['toolTip'],
+      x1: box['x1'],
+      y1: box['y1'],
+      x2: box['x2'],
+      y2: box['y2'],
+      extend: box['extend'],
+      style: box['style'],
+      color: box['color'],
+      bgColor: box['bgColor'],
+      textColor: box['textColor'],
+    })
+  }
+
+  for (const table of graphics.tables) {
+    for (let row = 0; row < table.cells.length; row += 1) {
+      const cells = table.cells[row] ?? []
+      for (let column = 0; column < cells.length; column += 1) {
+        const cell = cells[column]
+        if (!cell || (!textValue(cell['text']) && !textValue(cell['toolTip']))) continue
+        items.push({
+          kind: 'table_cell',
+          id: cell['id'],
+          tableId: table['id'],
+          text: cell['text'],
+          toolTip: cell['toolTip'],
+          row,
+          column,
+          position: table['position'],
+          textColor: cell['textColor'],
+          bgColor: cell['bgColor'],
+        })
+      }
+    }
+  }
+
+  return items
 }
 
 /**
@@ -222,7 +326,6 @@ export function applyTradingViewGraphicCommands(
   }
 
   // Process create commands (add or update drawings)
-  // Process create commands (add or update drawings)
   const create = commands['create']
   if (create && typeof create === 'object') {
     for (const [type, groups] of Object.entries(create as Record<string, unknown>)) {
@@ -265,7 +368,7 @@ export function parseTradingViewGraphics(
   store: TradingViewGraphicStore,
   indexes: unknown[] = [],
 ): TradingViewGraphicData {
-  return {
+  const graphics = {
     // Parse label markers (text annotations on the chart)
     labels: values(store, 'dwglabels').map((label) => ({
       id: label['id'],
@@ -291,6 +394,8 @@ export function parseTradingViewGraphics(
       style: translate('lineStyle', line['st']),
       color: line['ci'],
       width: line['w'],
+      text: line['t'],
+      toolTip: line['tt'],
     })),
     // Parse rectangular boxes with optional text content
     boxes: values(store, 'dwgboxes').map((box) => ({
@@ -310,6 +415,7 @@ export function parseTradingViewGraphics(
       textVAlign: box['tva'],
       textHAlign: box['tha'],
       textWrap: box['tw'],
+      toolTip: box['tt'],
     })),
     // Parse tables: multi-cell grids with formatting
     // Table cells are stored separately and need to be grouped by parent table id
@@ -325,6 +431,7 @@ export function parseTradingViewGraphics(
         cells[row][column] = {
           id: cell['id'],
           text: cell['t'],
+          toolTip: cell['tt'],
           width: cell['w'],
           height: cell['h'],
           textColor: cell['tc'],
@@ -372,5 +479,11 @@ export function parseTradingViewGraphics(
     })),
     // Keep raw store for debugging or advanced use cases
     raw: store,
+  }
+  const textItems = extractTextItems(graphics)
+  return {
+    ...graphics,
+    textItems,
+    plainText: textItems.map(compactTextItem).filter((item): item is string => typeof item === 'string'),
   }
 }
