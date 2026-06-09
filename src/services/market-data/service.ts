@@ -810,12 +810,34 @@ export class MarketDataService {
   }
 }
 
-export function createMarketDataService(): MarketDataService {
+/**
+ * Create a MarketDataService with default dependencies.
+ *
+ * For production use, this creates fresh instances of registry, executor,
+ * and router. For testing, pass a partial deps object to override specific
+ * dependencies while keeping the rest as defaults.
+ *
+ * @param deps - Optional dependency overrides for testing or customization
+ * @returns Configured MarketDataService instance
+ *
+ * @example
+ * // Production: use defaults
+ * const service = createMarketDataService()
+ *
+ * @example
+ * // Testing: inject mock registry
+ * const service = createMarketDataService({
+ *   registry: mockRegistry,
+ *   credentialsForConfig: () => ({ api_key: 'test' })
+ * })
+ */
+export function createMarketDataService(deps?: Partial<MarketDataServiceDeps>): MarketDataService {
   return new MarketDataService({
-    executor: createExecutor(),
-    registry: createRegistry(),
-    router: loadAllRouters(),
-    readConfig: readMarketDataConfig,
-    credentialsForConfig: buildSDKCredentials,
+    executor: deps?.executor ?? createExecutor(),
+    registry: deps?.registry ?? createRegistry(),
+    router: deps?.router ?? loadAllRouters(),
+    readConfig: deps?.readConfig ?? readMarketDataConfig,
+    credentialsForConfig: deps?.credentialsForConfig ?? buildSDKCredentials,
+    createTradingViewRealtimeClient: deps?.createTradingViewRealtimeClient,
   })
 }
