@@ -157,12 +157,19 @@ describe('CLI_EXPORTS — structure', () => {
   it('exposes the generic market-data explorer verbs', () => {
     expect(getExport('data')?.commands['marketdata']).toEqual({
       catalog: 'marketDataCatalog',
+      candles: 'tradingViewCandles',
+      earnings: 'marketDataEarnings',
+      endpoints: 'marketDataEndpointSearch',
+      filings: 'marketDataFilings',
+      fundamentals: 'marketDataFundamentals',
       indicator: 'marketDataIndicator',
       indicatorGet: 'tradingViewIndicatorGet',
       indicatorSearch: 'tradingViewIndicatorSearch',
+      quote: 'tradingViewQuote',
       query: 'marketDataQuery',
       scan: 'marketDataScan',
       search: 'marketDataSearch',
+      study: 'tradingViewStudy',
       symbolSearch: 'tradingViewSymbolSearch',
       ta: 'tradingViewTechnicalAnalysis',
     })

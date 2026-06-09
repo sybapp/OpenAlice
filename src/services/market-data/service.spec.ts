@@ -59,6 +59,27 @@ function deps(
         static transformData(_query: unknown, data: unknown) { return data }
         static async fetchData() { return [] }
       },
+      IncomeStatement: class {
+        static requireCredentials = false
+        static transformQuery(params: Record<string, unknown>) { return params }
+        static async extractData() { return [] }
+        static transformData(_query: unknown, data: unknown) { return data }
+        static async fetchData() { return [] }
+      },
+      CalendarEarnings: class {
+        static requireCredentials = false
+        static transformQuery(params: Record<string, unknown>) { return params }
+        static async extractData() { return [] }
+        static transformData(_query: unknown, data: unknown) { return data }
+        static async fetchData() { return [] }
+      },
+      CompanyFilings: class {
+        static requireCredentials = false
+        static transformQuery(params: Record<string, unknown>) { return params }
+        static async extractData() { return [] }
+        static transformData(_query: unknown, data: unknown) { return data }
+        static async fetchData() { return [] }
+      },
     },
   }))
   registry.includeProvider(new Provider({
@@ -84,6 +105,24 @@ function deps(
     model: 'CommoditySpotPrice',
     path: '/commodity/price/spot',
     description: 'Get commodity spot prices.',
+    handler,
+  })
+  router.command({
+    model: 'IncomeStatement',
+    path: '/equity/fundamental/income',
+    description: 'Get the income statement for a given company.',
+    handler,
+  })
+  router.command({
+    model: 'CalendarEarnings',
+    path: '/equity/calendar/earnings',
+    description: 'Get company earnings releases.',
+    handler,
+  })
+  router.command({
+    model: 'CompanyFilings',
+    path: '/equity/fundamental/filings',
+    description: 'Get company filings.',
     handler,
   })
 
@@ -223,10 +262,32 @@ describe('MarketDataService', () => {
     const maxLimited = await service.query({ endpoint: '/equity/search', limit: 600 })
     const small = await service.query({ endpoint: '/equity/search', limit: 2 })
 
-    expect(defaultLimited.rows).toHaveLength(500)
+    expect(defaultLimited.rows).toHaveLength(50)
     expect(maxLimited.rows).toHaveLength(500)
     expect(small.rows).toEqual([{ index: 0 }, { index: 1 }])
     expect(maxLimited.totalCount).toBe(700)
+  })
+
+  it('searches endpoint catalog without returning the full catalog', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    const result = await service.endpointSearch({
+      query: 'income',
+      assetClass: 'equity',
+      provider: 'yfinance',
+      limit: 5,
+    })
+
+    expect(result).toMatchObject({
+      provider: 'catalog',
+      endpoint: '/catalog/endpoints',
+      totalCount: 1,
+      rows: [{
+        endpoint: '/equity/fundamental/income',
+        model: 'IncomeStatement',
+        providers: ['yfinance'],
+      }],
+    })
   })
 
   it('wraps historical as the expected endpoint with symbol params', async () => {
@@ -241,6 +302,33 @@ describe('MarketDataService', () => {
 
     expect(handler.mock.calls[0]?.[2]).toEqual({ symbol: 'NVDA', start_date: '2024-01-01' })
     expect(result.endpoint).toBe('/equity/price/historical')
+  })
+
+  it('wraps common fundamentals, earnings calendar, and filings endpoints', async () => {
+    const handler = vi.fn(async (_executor, _provider, params) => [{ ...params }])
+    const service = new MarketDataService(deps(handler))
+
+    await service.fundamentals({
+      symbol: 'AAPL',
+      statement: 'income',
+      period: 'annual',
+      params: { fiscal_year: 2025 },
+      limit: 3,
+    })
+    await service.earnings({
+      symbol: 'AAPL',
+      params: { start_date: '2026-01-01' },
+    })
+    await service.filings({
+      symbol: 'AAPL',
+      provider: 'sec',
+      params: { form_type: '10-K' },
+    })
+
+    expect(handler.mock.calls[0]?.[2]).toEqual({ symbol: 'AAPL', period: 'annual', fiscal_year: 2025 })
+    expect(handler.mock.calls[1]?.[2]).toEqual({ symbol: 'AAPL', start_date: '2026-01-01' })
+    expect(handler.mock.calls[2]?.[1]).toBe('sec')
+    expect(handler.mock.calls[2]?.[2]).toEqual({ symbol: 'AAPL', form_type: '10-K' })
   })
 
   it('calculates indicators through the generic historical path with stable filtering and metadata', async () => {
@@ -312,7 +400,7 @@ describe('MarketDataService', () => {
 
   it('scans TradingView preset payloads through fetch and normalizes rows', async () => {
     const service = new MarketDataService(deps(async () => []))
-    const fetchMock = vi.fn(async () => ({
+    const fetchSpy = vi.fn(async () => ({
       ok: true,
       json: async () => ({
         totalCount: 2,
@@ -321,7 +409,8 @@ describe('MarketDataService', () => {
           { s: 'NASDAQ:MSFT', d: ['Microsoft', 420] },
         ],
       }),
-    })) as unknown as typeof fetch
+    }))
+    const fetchMock = fetchSpy as unknown as typeof fetch
 
     const result = await service.scan({
       preset: 'stocks',
@@ -330,9 +419,45 @@ describe('MarketDataService', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledOnce()
+    const firstCall = fetchSpy.mock.calls[0] as unknown as [unknown, RequestInit | undefined]
+    const request = JSON.parse(String(firstCall[1]?.body))
+    expect(request.columns).toEqual([
+      'name',
+      'close',
+      'change',
+      'volume',
+      'market_cap_basic',
+      'currency',
+      'type',
+      'sector',
+      'AnalystRating',
+    ])
     expect(result.provider).toBe('tradingview')
     expect(result.totalCount).toBe(2)
     expect(result.rows).toEqual([{ ticker: 'NASDAQ:AAPL', name: 'Apple', close: 190 }])
+  })
+
+  it('lets TradingView scans request explicit columns instead of compact defaults', async () => {
+    const service = new MarketDataService(deps(async () => []))
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        totalCount: 1,
+        data: [{ s: 'NASDAQ:AAPL', d: ['Apple', 190, 'USD'] }],
+      }),
+    }))
+    const fetchMock = fetchSpy as unknown as typeof fetch
+
+    const result = await service.scan({
+      preset: 'stocks',
+      columns: ['name', 'close', 'currency'],
+      fetch: fetchMock,
+    })
+
+    const firstCall = fetchSpy.mock.calls[0] as unknown as [unknown, RequestInit | undefined]
+    const request = JSON.parse(String(firstCall[1]?.body))
+    expect(request.columns).toEqual(['name', 'close', 'currency'])
+    expect(result.rows[0]).toEqual({ ticker: 'NASDAQ:AAPL', name: 'Apple', close: 190, currency: 'USD' })
   })
 
   it('uses configured scanner provider and credentials for TradingView scans', async () => {
@@ -554,6 +679,54 @@ describe('MarketDataService', () => {
       warnings: ['TradingView chart update: $prices'],
     })
     expect(socket.readyState).toBe(3)
+  })
+
+  it('gets a one-row TradingView quote snapshot from the latest candle', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.tradingViewQuote({ symbol: 'CBOE:DRAM' })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    const createSeries = await waitForSocketPacket(socket, 'create_series')
+    expect(createSeries).toContain('"1D"')
+    expect(createSeries).toContain(',2]')
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [
+            { i: 1, v: [1717200000, 70, 72, 69, 71, 1000] },
+            { i: 2, v: [1717286400, 71, 73, 70, 72.5, 1200] },
+          ],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'tradingview',
+      endpoint: '/tradingview/quote',
+      totalCount: 1,
+      rows: [{
+        symbol: 'CBOE:DRAM',
+        price: 72.5,
+        close: 72.5,
+        timeISO: '2024-06-02T00:00:00.000Z',
+        source: '/tradingview/candles',
+      }],
+    })
   })
 
   it('runs a one-shot TradingView study and returns parsed values', async () => {

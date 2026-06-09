@@ -7,12 +7,13 @@ import type {
 } from '@/services/market-data/index.js'
 
 type MarketDataToolService = Pick<MarketDataService, 'catalog' | 'query' | 'scan' | 'search'>
-  & Pick<MarketDataService, 'indicator'>
+  & Pick<MarketDataService, 'endpointSearch' | 'indicator' | 'fundamentals' | 'earnings' | 'filings'>
   & Pick<MarketDataService,
     | 'searchTradingViewSymbols'
     | 'technicalAnalysis'
     | 'searchTradingViewIndicators'
     | 'getTradingViewIndicator'
+    | 'tradingViewQuote'
     | 'tradingViewCandles'
     | 'runTradingViewStudy'
   >
@@ -24,6 +25,11 @@ const jsonRecordInput = z.union([
 
 const credentialsInput = z.union([
   z.record(z.string(), z.string()),
+  z.string(),
+])
+
+const stringArrayInput = z.union([
+  z.array(z.string()),
   z.string(),
 ])
 
@@ -41,6 +47,8 @@ const scanPresetSchema = z.enum([
   'cfd',
   'options',
 ])
+
+const fundamentalStatementSchema = z.enum(['income', 'balance', 'cash', 'ratios', 'metrics', 'reported'])
 
 function parseJsonRecord(value: unknown, field: string): Record<string, unknown> | undefined {
   if (value === undefined) {
@@ -93,6 +101,29 @@ function parsePrimitiveRecord(value: unknown, field: string): Record<string, str
   return result
 }
 
+function parseStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (Array.isArray(value)) {
+    const result = value.filter((item): item is string => typeof item === 'string')
+    if (result.length !== value.length) {
+      throw new Error(`${field} must contain only strings.`)
+    }
+    return result
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith('[')) {
+      const parsed = JSON.parse(trimmed) as unknown
+      return parseStringArray(parsed, field)
+    }
+    return trimmed.split(',').map((item) => item.trim()).filter(Boolean)
+  }
+  throw new Error(`${field} must be a string array, JSON array string, or comma-separated string.`)
+}
+
 function parseTradingViewIndicatorRef(value: unknown): { id: string; version?: string } | undefined {
   const parsed = parseJsonRecord(value, 'indicator')
   if (!parsed) {
@@ -125,7 +156,10 @@ provider coverage, output model names, or credential requirements.`,
       description: `Run a generic market-data endpoint by path.
 
 The endpoint may be passed with or without a leading slash, for example
-"/equity/price/historical" or "equity/price/historical". Pass params as an
+"/equity/price/historical" or "equity/price/historical". Use the endpoint
+field, not path. Endpoint values are OpenAlice/OpenTypeBB routes from
+marketDataCatalog, not provider-prefixed URLs such as "/yfinance/equity-quote".
+Pass provider separately when a provider override is needed. Pass params as an
 object, or as a JSON object string when using the alice CLI.`,
       inputSchema: z.object({
         endpoint: z.string().describe('Generic endpoint path, e.g. "/equity/price/historical"'),
@@ -143,27 +177,59 @@ object, or as a JSON object string when using the alice CLI.`,
       }),
     }),
 
+    marketDataEndpointSearch: tool({
+      description: `Search the generic market-data endpoint catalog without dumping the full catalog.
+
+Use this before marketDataQuery when an agent knows the kind of data it needs
+but not the exact endpoint. Query matches endpoint path, model, description,
+and provider names. This is the lightweight alternative to marketDataCatalog.`,
+      inputSchema: z.object({
+        query: z.string().optional().describe('Keyword to match, e.g. quote, income, earnings, filings, historical.'),
+        assetClass: z.enum(['equity', 'crypto', 'currency', 'commodity', 'etf', 'index', 'derivatives', 'economy', 'news']).optional().describe('Optional asset class filter.'),
+        provider: z.string().optional().describe('Optional provider filter, e.g. yfinance or fmp.'),
+        model: z.string().optional().describe('Optional OpenTypeBB model-name filter, e.g. IncomeStatement.'),
+        limit: z.number().int().nonnegative().optional().describe('Max endpoint rows to return. Defaults to 50 and is clamped by the service.'),
+      }).meta({ examples: [{ query: 'income', assetClass: 'equity', limit: 10 }] }),
+      execute: async ({ query, assetClass, provider, model, limit }) => service.endpointSearch({
+        query,
+        assetClass,
+        provider,
+        model,
+        limit,
+      }),
+    }),
+
     marketDataScan: tool({
       description: `Run a TradingView market scanner preset or custom scanner query.
 
 By default this scans the stocks preset. For custom scans, set mode to "query"
 or "raw" and pass query as an object, or as a JSON object string when using
-the alice CLI.`,
+the alice CLI.
+
+This is for market-wide screening, not single-symbol quotes. For a specific
+TradingView symbol such as "CBOE:DRAM", first use tradingViewSymbolSearch, then
+use tradingViewCandles for recent OHLCV bars or tradingViewTechnicalAnalysis
+for TradingView recommendations. Always pass a small limit unless you need a
+large universe.`,
       inputSchema: z.object({
         provider: z.string().optional().describe('Scanner provider. Currently only "tradingview" is supported.'),
         mode: z.enum(['preset', 'query', 'raw']).optional().describe('Scan mode. Defaults to preset.'),
         preset: scanPresetSchema.optional().describe('TradingView scanner preset. Defaults to stocks.'),
         market: z.string().optional().describe('Optional market/exchange/underlying, depending on preset.'),
         query: jsonRecordInput.optional().describe('Custom TradingView query object, or JSON object string for CLI flags.'),
-        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Clamped by the service.'),
+        columns: stringArrayInput.optional().describe('Optional TradingView scanner columns as an array, JSON array string, or comma-separated CLI string. Overrides the compact default column set.'),
+        compact: z.boolean().optional().describe('Use compact default scanner columns for preset scans. Defaults to true. Set false for preset default columns.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Defaults to 50 and is clamped by the service.'),
         credentials: z.union([z.record(z.string(), z.string()), z.string(), z.null()]).optional().describe('TradingView credentials object, JSON object string, or null.'),
       }).meta({ examples: [{ preset: 'stocks', market: 'america', limit: 25 }] }),
-      execute: async ({ provider, mode, preset, market, query, limit, credentials }) => service.scan({
+      execute: async ({ provider, mode, preset, market, query, columns, compact, limit, credentials }) => service.scan({
         provider,
         mode,
         preset: preset as MarketDataScanPreset | undefined,
         market,
         query: parseJsonRecord(query, 'query'),
+        columns: parseStringArray(columns, 'columns'),
+        compact,
         limit,
         credentials: credentials === null ? null : parseCredentials(credentials),
       }),
@@ -171,6 +237,11 @@ the alice CLI.`,
 
     marketDataSearch: tool({
       description: `Search symbols for a supported asset class through the generic market-data service.
+
+Use this for OpenAlice's generic symbol indexes such as SEC/yfinance-backed
+equity, ETF, crypto, currency, commodity, or index lookup. Use
+tradingViewSymbolSearch when the next call needs a TradingView-qualified symbol
+such as "CBOE:DRAM" or "NASDAQ:AAPL".
 
 Returns the normalized service envelope directly. Pass params as an object, or
 as a JSON object string when using the alice CLI.`,
@@ -216,11 +287,82 @@ Returns { value, dataRange } where dataRange shows the actual date span and bar 
       }),
     }),
 
+    marketDataFundamentals: tool({
+      description: `Fetch common equity fundamental data without requiring endpoint-path knowledge.
+
+Use this for financial statements and common fundamental tables. statement maps
+to existing generic endpoints: income, balance, cash, ratios, metrics, or
+reported financials. For SEC filing links use marketDataFilings; for earnings
+calendar dates use marketDataEarnings.`,
+      inputSchema: z.object({
+        symbol: z.string().describe('Company ticker or provider symbol, e.g. AAPL.'),
+        statement: fundamentalStatementSchema.describe('Fundamental dataset: income, balance, cash, ratios, metrics, or reported.'),
+        provider: z.string().optional().describe('Provider override, e.g. yfinance or fmp.'),
+        period: z.string().optional().describe('Optional provider period, e.g. annual or quarterly.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Defaults to 50 and is clamped by the service.'),
+        params: jsonRecordInput.optional().describe('Extra provider params object, or JSON object string for CLI flags.'),
+        credentials: credentialsInput.optional().describe('Provider credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ symbol: 'AAPL', statement: 'income', provider: 'yfinance', limit: 5 }] }),
+      execute: async ({ symbol, statement, provider, period, limit, params, credentials }) => service.fundamentals({
+        symbol,
+        statement,
+        provider,
+        period,
+        limit,
+        params: parseJsonRecord(params, 'params'),
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    marketDataEarnings: tool({
+      description: `Fetch historical or upcoming earnings calendar rows.
+
+Use this when an agent needs earnings release dates or calendar entries. For
+financial statement values after a report, use marketDataFundamentals.`,
+      inputSchema: z.object({
+        symbol: z.string().optional().describe('Optional company ticker. Omit for provider-supported broad earnings calendars.'),
+        provider: z.string().optional().describe('Provider override, e.g. yfinance or fmp.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Defaults to 50 and is clamped by the service.'),
+        params: jsonRecordInput.optional().describe('Extra provider params object, or JSON object string for CLI flags.'),
+        credentials: credentialsInput.optional().describe('Provider credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ symbol: 'AAPL', provider: 'yfinance', limit: 10 }] }),
+      execute: async ({ symbol, provider, limit, params, credentials }) => service.earnings({
+        symbol,
+        provider,
+        limit,
+        params: parseJsonRecord(params, 'params'),
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
+    marketDataFilings: tool({
+      description: `Fetch SEC/company filing metadata and filing URLs for an equity symbol.
+
+Use this when an agent needs 10-K, 10-Q, 8-K, or other filing links. For parsed
+statement tables use marketDataFundamentals.`,
+      inputSchema: z.object({
+        symbol: z.string().describe('Company ticker or provider symbol, e.g. AAPL.'),
+        provider: z.string().optional().describe('Provider override, e.g. sec or fmp.'),
+        limit: z.number().int().nonnegative().optional().describe('Max rows to return. Defaults to 50 and is clamped by the service.'),
+        params: jsonRecordInput.optional().describe('Extra provider params object, or JSON object string for CLI flags.'),
+        credentials: credentialsInput.optional().describe('Provider credentials object, or JSON object string for CLI flags.'),
+      }).meta({ examples: [{ symbol: 'AAPL', provider: 'sec', limit: 5 }] }),
+      execute: async ({ symbol, provider, limit, params, credentials }) => service.filings({
+        symbol,
+        provider,
+        limit,
+        params: parseJsonRecord(params, 'params'),
+        credentials: parseCredentials(credentials),
+      }),
+    }),
+
     tradingViewSymbolSearch: tool({
       description: `Search TradingView symbols through TradingView's symbol search.
 
 Use this when an agent needs the exact TradingView symbol string before scanner,
-technical-analysis, realtime candles, or indicator execution calls.`,
+technical-analysis, realtime candles, or indicator execution calls. The id
+field in each row is the value to pass as symbol to tradingViewCandles,
+tradingViewTechnicalAnalysis, and tradingViewStudy.`,
       inputSchema: z.object({
         query: z.string().describe('Symbol query, ticker, or exchange-qualified symbol fragment.'),
         type: z.string().optional().describe('Optional TradingView market type filter, e.g. stock, futures, crypto, forex.'),
@@ -241,15 +383,16 @@ technical-analysis, realtime candles, or indicator execution calls.`,
       description: `Fetch TradingView technical-analysis recommendation values.
 
 Returns TradingView recommendation fields by requested periods for a symbol such
-as "NASDAQ:AAPL" or "BINANCE:BTCUSDT".`,
+as "NASDAQ:AAPL" or "BINANCE:BTCUSDT". This does not return price candles or
+latest close; use tradingViewCandles for OHLCV data.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL.'),
-        periods: z.array(z.string()).optional().describe('TradingView TA periods, e.g. ["1D", "1W", "1M"]. Defaults to service/provider defaults.'),
+        periods: stringArrayInput.optional().describe('TradingView TA periods as an array, JSON array string, or comma-separated CLI string, e.g. ["1D","1W"] or 1D,1W. Defaults to service/provider defaults.'),
         credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
       }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', periods: ['1D', '1W'] }] }),
       execute: async ({ symbol, periods, credentials }) => service.technicalAnalysis({
         symbol,
-        periods,
+        periods: parseStringArray(periods, 'periods'),
         credentials: parseCredentials(credentials),
       }),
     }),
@@ -277,7 +420,8 @@ wants to discover built-in study names.`,
       description: `Get TradingView Pine indicator metadata and script payload by id.
 
 Returns inputs, plot names, script type, and script text needed to run a
-TradingView chart study.`,
+TradingView chart study. This is metadata only; it does not execute the
+indicator. Use tradingViewStudy to run a study on a symbol.`,
       inputSchema: z.object({
         id: z.string().describe('TradingView indicator id, e.g. PUB;XXXXXXXXXXXXXXXX.'),
         version: z.string().optional().describe('Indicator version. Defaults to last.'),
@@ -295,8 +439,10 @@ TradingView chart study.`,
 
 Use this when an agent needs TradingView-normalized OHLCV data, custom chart
 types, replay initialization, or TradingView-specific symbol handling without
-holding an open subscription. Candle rows include both TradingView's original
-second-level Unix timestamp in time and an ISO-8601 UTC string in timeISO.`,
+holding an open subscription. For a latest-price snapshot, pass a small range
+such as {"timeframe":"1D","range":2} and read the last row's close. Candle rows
+include both TradingView's original second-level Unix timestamp in time and an
+ISO-8601 UTC string in timeISO.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL or BINANCE:BTCUSDT.'),
         options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
@@ -304,6 +450,27 @@ second-level Unix timestamp in time and an ISO-8601 UTC string in timeISO.`,
         timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
       }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', options: { timeframe: '60', range: 100 } }] }),
       execute: async ({ symbol, options, credentials, timeoutMs }) => service.tradingViewCandles({
+        symbol,
+        options: parseJsonRecord(options, 'options'),
+        credentials: parseCredentials(credentials),
+        timeoutMs,
+      }),
+    }),
+
+    tradingViewQuote: tool({
+      description: `Get a one-row latest-price snapshot for a TradingView symbol.
+
+This is the simplest TradingView price tool for agents. It uses the realtime
+chart adapter internally and returns the latest candle's close as price, plus
+OHLCV and time/timeISO. Use tradingViewCandles when the agent needs multiple
+bars.`,
+      inputSchema: z.object({
+        symbol: z.string().describe('TradingView symbol, e.g. CBOE:DRAM, NASDAQ:AAPL, or BINANCE:BTCUSDT.'),
+        options: jsonRecordInput.optional().describe('Optional TradingView chart options object or JSON string. Defaults include {"timeframe":"1D","range":2}.'),
+        credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
+        timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
+      }).meta({ examples: [{ symbol: 'CBOE:DRAM' }] }),
+      execute: async ({ symbol, options, credentials, timeoutMs }) => service.tradingViewQuote({
         symbol,
         options: parseJsonRecord(options, 'options'),
         credentials: parseCredentials(credentials),

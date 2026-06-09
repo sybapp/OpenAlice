@@ -31,7 +31,7 @@ import { type WorkspaceToolCenter, makeWorkspaceResolver } from '../core/workspa
 import type { IInboxStore } from '../core/inbox-store.js'
 import type { IEntityStore } from '../core/entity-store.js'
 import type { WorkspaceService } from '../workspaces/service.js'
-import { extractMcpShape, wrapToolExecute } from '../core/mcp-export.js'
+import { formatZodError, wrapToolExecute, mcpInputSchema } from '../core/mcp-export.js'
 import { type CliExport, getExport, mappedToolNames } from './cli-commands.js'
 
 export interface CliGatewayDeps {
@@ -165,20 +165,14 @@ export function registerCliRoutes(app: Hono, deps: CliGatewayDeps): void {
       body.args && typeof body.args === 'object' ? (body.args as Record<string, unknown>) : {}
 
     // Same validate+coerce path as the MCP boundary (string -> number etc.),
-    // so the client may send every flag as a raw string. strictObject: an
-    // unknown flag must error, not silently vanish — a typo'd --quantity
-    // once staged a quantity-less order that validated clean.
-    const schema = z.strictObject(extractMcpShape(tool))
+    // so the client may send every flag as a raw string. mcpInputSchema is
+    // strict: unknown flags must error instead of silently vanishing.
     let validated: Record<string, unknown>
     try {
-      validated = await schema.parseAsync(rawArgs)
+      validated = await mcpInputSchema(tool).parseAsync(rawArgs)
     } catch (err) {
-      // Field-level issues, not String(ZodError) — an agent reading
-      // "Validation failed" alone is stranded guessing flag names/shapes.
-      const details = err instanceof z.ZodError
-        ? err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('\n')
-        : String(err)
-      return c.json({ error: 'Validation failed', details }, 400)
+      const details = formatZodError(err)
+      return c.json({ error: `Validation failed: ${details}`, details }, 400)
     }
 
     const result = await wrapToolExecute(tool)(validated)

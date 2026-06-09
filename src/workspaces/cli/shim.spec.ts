@@ -27,4 +27,10 @@ describe('CLI shim copies', () => {
     expect(src).toContain('process.argv[1]') // derives BIN from how it was invoked
     expect(src).toContain('exportKey') // routes to the per-export gateway path
   })
+
+  it('renders schema examples in verb help', () => {
+    const src = read('alice').toString('utf8')
+    expect(src).toContain("out('\\nExamples:')")
+    expect(src).toContain('formatExampleFlags')
+  })
 })

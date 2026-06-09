@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { ToolCenter } from '../../core/tool-center.js'
 import { readToolsConfig, writeConfigSection } from '../../core/config.js'
-import { extractMcpShape, wrapToolExecute } from '../../core/mcp-export.js'
+import { extractMcpShape, formatZodError, mcpInputSchema, wrapToolExecute } from '../../core/mcp-export.js'
 
 /** Tools routes: inventory, detail, execute, enable/disable */
 export function createToolsRoutes(toolCenter: ToolCenter) {
@@ -61,13 +61,12 @@ export function createToolsRoutes(toolCenter: ToolCenter) {
     const rawInput = await c.req.json().catch(() => ({}))
 
     // Validate + coerce through MCP shape (handles string→number etc.)
-    const shape = extractMcpShape(tool)
-    const schema = z.object(shape)
     let validated: Record<string, unknown>
     try {
-      validated = await schema.parseAsync(rawInput)
+      validated = await mcpInputSchema(tool).parseAsync(rawInput)
     } catch (err) {
-      return c.json({ error: 'Validation failed', details: String(err) }, 400)
+      const details = formatZodError(err)
+      return c.json({ error: `Validation failed: ${details}`, details }, 400)
     }
 
     const execute = wrapToolExecute(tool)

@@ -54,6 +54,11 @@ describe('CLI gateway — data export', () => {
     }
     expect(body.export).toBe('data')
     expect(body.groups['think']?.['calc']?.tool).toBe('calculate')
+    expect(body.groups['think']?.['calc']).toMatchObject({
+      schema: {
+        examples: [{ expression: '(1000 * 0.1) / 2' }],
+      },
+    })
   })
 
   it('manifest 404s on unknown workspace', async () => {
@@ -94,7 +99,7 @@ describe('CLI gateway — data export', () => {
     })
     expect(res.status).toBe(400)
     const body = (await res.json()) as { error: string; details?: string }
-    expect(body.details).toMatch(/expresion/)
+    expect(`${body.error}\n${body.details ?? ''}`).toMatch(/expresion/)
   })
 
   it('invoke 404s on unknown workspace', async () => {

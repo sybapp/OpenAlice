@@ -205,12 +205,36 @@ function printVerbHelp(group, verb, cmd) {
     const req = required.has(n) ? ' (required)' : ''
     out(`  --${n}${type ? ' <' + type + '>' : ''}${req}   ${firstLine(p.description || '')}`)
   }
+  const examples = Array.isArray(cmd.schema && cmd.schema.examples) ? cmd.schema.examples : []
+  if (examples.length) {
+    out('\nExamples:')
+    for (const example of examples.slice(0, 3)) {
+      out(`  ${BIN} ${group} ${verb}${formatExampleFlags(example)}`)
+    }
+  }
 }
 
 // ---- util -----------------------------------------------------------------
 
 function firstLine(s) {
   return (s || '').split('\n')[0]
+}
+function formatExampleFlags(example) {
+  if (!example || typeof example !== 'object' || Array.isArray(example)) return ''
+  const flags = []
+  for (const [key, value] of Object.entries(example)) {
+    flags.push(` --${key} ${formatFlagValue(value)}`)
+  }
+  return flags.join('')
+}
+function formatFlagValue(value) {
+  if (typeof value === 'string') return shellQuote(value)
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return shellQuote(JSON.stringify(value))
+}
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value
+  return "'" + value.replace(/'/g, "'\\''") + "'"
 }
 function out(s) {
   process.stdout.write(s + '\n')

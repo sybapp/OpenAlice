@@ -18,13 +18,18 @@ function makeService() {
       endpoints: [{ endpoint: '/equity/search', model: 'EquitySearch', description: 'Search', providers: ['provider-a'] }],
     })),
     query: vi.fn(async () => envelope),
+    endpointSearch: vi.fn(async () => ({ ...envelope, endpoint: '/catalog/endpoints', provider: 'catalog' })),
     indicator: vi.fn(async () => ({ value: 144.5, dataRange: { AAPL: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-31', bars: 20 } } })),
+    fundamentals: vi.fn(async () => ({ ...envelope, endpoint: '/equity/fundamental/income' })),
+    earnings: vi.fn(async () => ({ ...envelope, endpoint: '/equity/calendar/earnings' })),
+    filings: vi.fn(async () => ({ ...envelope, endpoint: '/equity/fundamental/filings' })),
     scan: vi.fn(async () => ({ ...envelope, endpoint: '/scan', provider: 'tradingview' })),
     search: vi.fn(async () => envelope),
     searchTradingViewSymbols: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/symbol-search', provider: 'tradingview' })),
     technicalAnalysis: vi.fn(async () => ({ ...envelope, endpoint: '/technical-analysis', provider: 'tradingview' })),
     searchTradingViewIndicators: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator-search', provider: 'tradingview' })),
     getTradingViewIndicator: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/indicator', provider: 'tradingview' })),
+    tradingViewQuote: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/quote', provider: 'tradingview' })),
     tradingViewCandles: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/candles', provider: 'tradingview' })),
     runTradingViewStudy: vi.fn(async () => ({ ...envelope, endpoint: '/tradingview/study', provider: 'tradingview' })),
   }
@@ -44,6 +49,10 @@ describe('createMarketDataTools', () => {
   it('exposes generic market-data tools plus indicator calculation', () => {
     expect(Object.keys(tools).sort()).toEqual([
       'marketDataCatalog',
+      'marketDataEarnings',
+      'marketDataEndpointSearch',
+      'marketDataFilings',
+      'marketDataFundamentals',
       'marketDataIndicator',
       'marketDataQuery',
       'marketDataScan',
@@ -51,6 +60,7 @@ describe('createMarketDataTools', () => {
       'tradingViewCandles',
       'tradingViewIndicatorGet',
       'tradingViewIndicatorSearch',
+      'tradingViewQuote',
       'tradingViewStudy',
       'tradingViewSymbolSearch',
       'tradingViewTechnicalAnalysis',
@@ -98,6 +108,24 @@ describe('createMarketDataTools', () => {
     })
   })
 
+  it('marketDataEndpointSearch forwards lightweight catalog filters', async () => {
+    await exec(tools.marketDataEndpointSearch, {
+      query: 'income',
+      assetClass: 'equity',
+      provider: 'yfinance',
+      model: 'IncomeStatement',
+      limit: 10,
+    })
+
+    expect(service.endpointSearch).toHaveBeenCalledWith({
+      query: 'income',
+      assetClass: 'equity',
+      provider: 'yfinance',
+      model: 'IncomeStatement',
+      limit: 10,
+    })
+  })
+
   it('marketDataScan forwards preset scan inputs', async () => {
     await exec(tools.marketDataScan, {
       preset: 'stocks',
@@ -132,8 +160,30 @@ describe('createMarketDataTools', () => {
         columns: ['name', 'close'],
         filter: [{ left: 'close', operation: 'greater', right: 100 }],
       },
+      columns: undefined,
+      compact: undefined,
       limit: undefined,
       credentials: null,
+    })
+  })
+
+  it('marketDataScan parses comma-separated CLI column lists and compact flags', async () => {
+    await exec(tools.marketDataScan, {
+      preset: 'stocks',
+      columns: 'name,close,currency',
+      compact: false,
+    })
+
+    expect(service.scan).toHaveBeenCalledWith({
+      provider: undefined,
+      mode: undefined,
+      preset: 'stocks',
+      market: undefined,
+      query: undefined,
+      columns: ['name', 'close', 'currency'],
+      compact: false,
+      limit: undefined,
+      credentials: undefined,
     })
   })
 
@@ -178,6 +228,57 @@ describe('createMarketDataTools', () => {
     })
   })
 
+  it('marketDataFundamentals forwards common statement wrapper input', async () => {
+    await exec(tools.marketDataFundamentals, {
+      symbol: 'AAPL',
+      statement: 'income',
+      provider: 'yfinance',
+      period: 'annual',
+      limit: 5,
+      params: '{"fiscal_year":2025}',
+      credentials: '{"fmp_api_key":"secret"}',
+    })
+
+    expect(service.fundamentals).toHaveBeenCalledWith({
+      symbol: 'AAPL',
+      statement: 'income',
+      provider: 'yfinance',
+      period: 'annual',
+      limit: 5,
+      params: { fiscal_year: 2025 },
+      credentials: { fmp_api_key: 'secret' },
+    })
+  })
+
+  it('marketDataEarnings and marketDataFilings forward convenience wrapper input', async () => {
+    await exec(tools.marketDataEarnings, {
+      symbol: 'AAPL',
+      provider: 'fmp',
+      params: '{"start_date":"2026-01-01"}',
+    })
+    await exec(tools.marketDataFilings, {
+      symbol: 'AAPL',
+      provider: 'sec',
+      limit: 5,
+      params: '{"form_type":"10-K"}',
+    })
+
+    expect(service.earnings).toHaveBeenCalledWith({
+      symbol: 'AAPL',
+      provider: 'fmp',
+      limit: undefined,
+      params: { start_date: '2026-01-01' },
+      credentials: undefined,
+    })
+    expect(service.filings).toHaveBeenCalledWith({
+      symbol: 'AAPL',
+      provider: 'sec',
+      limit: 5,
+      params: { form_type: '10-K' },
+      credentials: undefined,
+    })
+  })
+
   it('tradingViewSymbolSearch forwards symbol lookup input', async () => {
     await exec(tools.tradingViewSymbolSearch, {
       query: 'nasdaq:aapl',
@@ -207,6 +308,19 @@ describe('createMarketDataTools', () => {
       symbol: 'NASDAQ:AAPL',
       periods: ['1D', '1W'],
       credentials: { tradingview_sessionid: 'session', tradingview_sessionid_sign: 'sign' },
+    })
+  })
+
+  it('tradingViewTechnicalAnalysis parses CLI period strings', async () => {
+    await exec(tools.tradingViewTechnicalAnalysis, {
+      symbol: 'NASDAQ:AAPL',
+      periods: '1D,1W',
+    })
+
+    expect(service.technicalAnalysis).toHaveBeenCalledWith({
+      symbol: 'NASDAQ:AAPL',
+      periods: ['1D', '1W'],
+      credentials: undefined,
     })
   })
 
@@ -251,6 +365,22 @@ describe('createMarketDataTools', () => {
     expect(service.tradingViewCandles).toHaveBeenCalledWith({
       symbol: 'NASDAQ:AAPL',
       options: { timeframe: '60', range: 100 },
+      credentials: { tradingview_sessionid: 'session' },
+      timeoutMs: 5000,
+    })
+  })
+
+  it('tradingViewQuote forwards one-shot quote snapshot input', async () => {
+    await exec(tools.tradingViewQuote, {
+      symbol: 'CBOE:DRAM',
+      options: '{"timeframe":"1D","range":2}',
+      credentials: '{"tradingview_sessionid":"session"}',
+      timeoutMs: 5000,
+    })
+
+    expect(service.tradingViewQuote).toHaveBeenCalledWith({
+      symbol: 'CBOE:DRAM',
+      options: { timeframe: '1D', range: 2 },
       credentials: { tradingview_sessionid: 'session' },
       timeoutMs: 5000,
     })
@@ -301,6 +431,7 @@ describe('createMarketDataTools', () => {
   it('schemas reject unsupported search asset classes and scan presets', () => {
     expect((tools.marketDataSearch as any).inputSchema.safeParse({ assetClass: 'economy', query: 'GDP' }).success).toBe(false)
     expect((tools.marketDataScan as any).inputSchema.safeParse({ preset: 'unknown' }).success).toBe(false)
+    expect((tools.marketDataFundamentals as any).inputSchema.safeParse({ symbol: 'AAPL', statement: 'unknown' }).success).toBe(false)
     expect((tools.marketDataIndicator as any).inputSchema.safeParse({ asset: 'etf', formula: '1 + 1' }).success).toBe(false)
   })
 
