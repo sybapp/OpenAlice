@@ -486,6 +486,14 @@ function defaultProviderForAsset(config: MarketDataConfig, assetClass: MarketDat
   }
 }
 
+function defaultProviderForQuery(config: MarketDataConfig, endpoint: string): string {
+  const provider = defaultProviderForAsset(config, assetClassFromEndpoint(endpoint))
+  if (provider === 'tradingview' && !isTradingViewAssetEndpoint(endpoint)) {
+    return 'yfinance'
+  }
+  return provider
+}
+
 function providerModels(registry: MarketDataServiceDeps['registry']): Map<string, string[]> {
   const models = new Map<string, string[]>()
   for (const [name, provider] of registry.providers) {
@@ -570,7 +578,7 @@ export class MarketDataService {
     const endpoint = normalizeEndpoint(input.endpoint)
     const command = this.resolveCommand(endpoint)
     const config = await this.deps.readConfig()
-    const provider = input.provider ?? (this.resolveTradingViewEndpoint(endpoint) ? config.providers.scanner ?? 'tradingview' : defaultProviderForAsset(config, assetClassFromEndpoint(endpoint)))
+    const provider = input.provider ?? (this.resolveTradingViewEndpoint(endpoint) ? config.providers.scanner ?? 'tradingview' : defaultProviderForQuery(config, endpoint))
     const limit = clampLimit(input.limit)
 
     if (!provider) {

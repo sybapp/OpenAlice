@@ -266,6 +266,53 @@ describe('MarketDataService', () => {
     expect(result.error).toBe('Fetcher not found for model')
   })
 
+  it('falls back to yfinance when the configured TradingView asset provider does not support an endpoint', async () => {
+    const handler = vi.fn(async (_executor, provider, params) => [{ provider, symbol: params.symbol }])
+    const service = new MarketDataService(deps(handler, () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    })))
+
+    const result = await service.query({
+      endpoint: '/equity/fundamental/income',
+      params: { symbol: 'AAPL' },
+    })
+
+    expect(handler).toHaveBeenCalledOnce()
+    expect(handler.mock.calls[0]?.[1]).toBe('yfinance')
+    expect(result).toMatchObject({
+      provider: 'yfinance',
+      endpoint: '/equity/fundamental/income',
+      rows: [{ provider: 'yfinance', symbol: 'AAPL' }],
+    })
+  })
+
+  it('does not fallback when TradingView is passed explicitly for an unsupported endpoint', async () => {
+    const handler = vi.fn<CommandHandler>(async () => {
+      throw new Error('Fetcher not found for model')
+    })
+    const service = new MarketDataService(deps(handler, () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    })))
+
+    const result = await service.query({
+      endpoint: '/equity/fundamental/income',
+      provider: 'tradingview',
+      params: { symbol: 'AAPL' },
+    })
+
+    expect(handler.mock.calls[0]?.[1]).toBe('tradingview')
+    expect(result.provider).toBe('tradingview')
+    expect(result.error).toBe('Fetcher not found for model')
+  })
+
   it('enforces the default and maximum row limit', async () => {
     const rows = Array.from({ length: 700 }, (_, index) => ({ index }))
     const service = new MarketDataService(deps(async () => rows))
