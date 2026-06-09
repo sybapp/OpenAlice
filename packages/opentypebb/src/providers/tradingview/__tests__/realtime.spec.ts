@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  TradingViewBuiltInIndicator,
   TradingViewChartSession,
+  TradingViewChartStudy,
+  TradingViewPineIndicator,
   TradingViewQuoteSession,
   TradingViewRealtimeClient,
   formatHeartbeat,
@@ -242,6 +245,132 @@ describe('TradingView chart session', () => {
 
     session.close()
     expect(socket.sent).toContain(formatRealtimeCommand('replay_delete_session', [session.replaySessionId]))
+  })
+})
+
+describe('TradingView chart study', () => {
+  it('creates, updates, modifies, and removes Pine studies', () => {
+    const { client, socket } = createClient()
+    const chart = new TradingViewChartSession(client)
+    chart.subscribe('NASDAQ:AAPL', () => {})
+    const indicator = new TradingViewPineIndicator({
+      pineId: 'PUB;abc',
+      pineVersion: '5',
+      description: 'Super Trend',
+      shortDescription: 'ST',
+      inputs: {
+        in_Factor: {
+          name: 'Factor',
+          inline: 'Factor',
+          internalID: 'Factor',
+          type: 'float',
+          value: 3,
+          isHidden: false,
+          isFake: false,
+        },
+      },
+      plots: { plot_0: 'Trend', plot_1: 'Direction' },
+      script: 'pine bytecode',
+    })
+    const study = new TradingViewChartStudy(chart, indicator)
+    const ready: string[] = []
+    const updates: unknown[] = []
+    const errors: unknown[] = []
+    study.onReady(() => ready.push('ready'))
+    study.onUpdate((update) => updates.push(update))
+    study.onError((error) => errors.push(error))
+
+    expect(socket.sent.some((packet) => (
+      packet.includes('create_study') &&
+      packet.includes(study.studyId) &&
+      packet.includes('Script@tv-scripting-101!') &&
+      packet.includes('pine bytecode')
+    ))).toBe(true)
+
+    socket.message(formatRealtimeCommand('study_completed', [chart.sessionId, study.studyId]))
+    expect(ready).toEqual(['ready'])
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chart.sessionId,
+      {
+        [study.studyId]: {
+          st: [
+            { v: [1717200000, 1.5, -1] },
+            { v: [1717203600, 1.7, 1] },
+          ],
+          ns: {
+            d: JSON.stringify({
+              graphicsCmds: { create: { dwglines: [{ data: [{ id: 1, x: 10 }] }] } },
+              data: {
+                report: {
+                  currency: 'USD',
+                  performance: { all: { totalTrades: 1 } },
+                  trades: [
+                    {
+                      e: { c: 'Buy', tp: ['l'], p: 100, tm: 1 },
+                      x: { c: 'Sell', p: 110, tm: 2 },
+                      q: 1,
+                      tp: 10,
+                      cp: 10,
+                      rn: 12,
+                      dd: -1,
+                    },
+                  ],
+                  equity: [100, 110],
+                  drawDown: [0, -1],
+                },
+              },
+            }),
+          },
+        },
+      },
+    ]))
+
+    expect(updates).toEqual([{
+      changes: ['plots', 'graphic', 'report.currency', 'report.perf', 'report.trades', 'report.history'],
+      points: [
+        { $time: 1717200000, Trend: 1.5, Direction: -1 },
+        { $time: 1717203600, Trend: 1.7, Direction: 1 },
+      ],
+      strategyReport: {
+        currency: 'USD',
+        performance: { all: { totalTrades: 1 } },
+        trades: [{
+          entry: { name: 'Buy', type: 'long', value: 100, time: 1 },
+          exit: { name: 'Sell', value: 110, time: 2 },
+          quantity: 1,
+          profit: 10,
+          cumulative: 10,
+          runup: 12,
+          drawdown: -1,
+        }],
+        history: {
+          buyHold: undefined,
+          buyHoldPercent: undefined,
+          drawDown: [0, -1],
+          drawDownPercent: undefined,
+          equity: [100, 110],
+          equityPercent: undefined,
+        },
+      },
+      graphics: { create: { dwglines: [{ data: [{ id: 1, x: 10 }] }] } },
+    }])
+
+    socket.message(formatRealtimeCommand('study_error', [chart.sessionId, study.studyId, 'st1', 'invalid value', 'Factor']))
+    expect(errors).toEqual([{ message: 'invalid value', details: 'Factor' }])
+
+    const builtIn = new TradingViewBuiltInIndicator('Volume@tv-basicstudies-241')
+    builtIn.setOption('length', 10)
+    study.setIndicator(builtIn)
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('modify_study', [
+      chart.sessionId,
+      study.studyId,
+      'st1',
+      { length: 10, col_prev_close: false },
+    ]))
+
+    study.remove()
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('remove_study', [chart.sessionId, study.studyId]))
   })
 })
 

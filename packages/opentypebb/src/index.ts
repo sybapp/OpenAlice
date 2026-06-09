@@ -63,6 +63,7 @@ export * as tradingview from './providers/tradingview/index.js'
 export {
   TradingViewChartSession,
   TradingViewBuiltInIndicator,
+  TradingViewChartStudy,
   TradingViewQuoteSession,
   TradingViewPineIndicator,
   TradingViewRealtimeClient,
@@ -105,5 +106,11 @@ export {
   type TradingViewRealtimeSocketFactory,
   type TradingViewRealtimeSocketFactoryInput,
   type TradingViewReplayEvent,
+  type TradingViewStrategyReport,
+  type TradingViewStrategyTrade,
+  type TradingViewStudyError,
+  type TradingViewStudyIndicator,
+  type TradingViewStudyPlotPoint,
+  type TradingViewStudyUpdate,
   type TradingViewTimeframe,
 } from './providers/tradingview/index.js'
