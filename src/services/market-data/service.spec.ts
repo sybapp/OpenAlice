@@ -453,6 +453,38 @@ describe('MarketDataService', () => {
       { time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46 },
     ])
 
+    subscription.fetchMore(3)
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('request_more_data', [chartSessionId, '$prices', 3]))
+
+    subscription.setTimezone('Asia/Shanghai')
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('switch_timezone', [chartSessionId, 'Asia/Shanghai']))
+    expect(subscription.getCandles()).toEqual([])
+
+    subscription.setSeries('1D', 5, 1717200000)
+    expect(socket.sent.at(-1)).toBe(formatRealtimeCommand('modify_series', [
+      chartSessionId,
+      '$prices',
+      's1',
+      'ser_1',
+      '1D',
+      '',
+    ]))
+
+    subscription.setMarket('NASDAQ:MSFT', { timeframe: '15', range: 4, replay: 1717200000 })
+    const replayCreate = socket.sent.find((packet) => packet.includes('replay_create_session'))
+    const replayFrame = replayCreate ? parseRealtimeFrames(replayCreate)[0] : null
+    const replaySessionId = replayFrame && typeof replayFrame === 'object' && Array.isArray(replayFrame.p)
+      ? String(replayFrame.p[0])
+      : ''
+
+    const stepPromise = subscription.replayStep(2)
+    const stepFrame = parseRealtimeFrames(socket.sent.at(-1) ?? '')[0]
+    const stepRequest = stepFrame && typeof stepFrame === 'object' && Array.isArray(stepFrame.p)
+      ? String(stepFrame.p[1])
+      : ''
+    socket.message(formatRealtimeCommand('replay_ok', [replaySessionId, stepRequest]))
+    await expect(stepPromise).resolves.toBeUndefined()
+
     subscription.close()
     expect(socket.readyState).toBe(3)
   })
