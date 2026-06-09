@@ -8,7 +8,9 @@ import {
   OPTIONS_SCAN2_URL,
   Or,
   Query,
+  TradingViewBuiltInIndicator,
   getTechnicalAnalysis,
+  getIndicator,
   bond,
   cfd,
   coin,
@@ -18,6 +20,7 @@ import {
   forex,
   futures,
   options,
+  searchIndicators,
   searchSymbols,
   stocks,
 } from '../index.js'
@@ -327,5 +330,125 @@ describe('TradingView provider registry', () => {
     expect(provider?.name).toBe('tradingview')
     expect(provider?.credentials).toEqual([])
     expect(provider?.fetcherDict).toEqual({})
+  })
+})
+
+describe('TradingView Pine indicator metadata', () => {
+  it('searches built-in and public indicators', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init: init ?? {} })
+      if (String(url).includes('pine-facade/list')) {
+        return new Response(JSON.stringify([
+          {
+            scriptIdPart: 'STD;RSI',
+            version: '1',
+            scriptName: 'Relative Strength Index',
+            userId: 1,
+            extra: { kind: 'study', shortDescription: 'RSI' },
+          },
+        ]), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        results: [
+          {
+            scriptIdPart: 'PUB;abc',
+            version: '2',
+            scriptName: 'Community RSI',
+            author: { id: 10, username: 'alice' },
+            imageUrl: 'img',
+            access: 1,
+            scriptSource: 'source',
+            extra: { kind: 'strategy' },
+          },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+
+    const result = await searchIndicators('RSI', { fetch: fetchMock })
+
+    expect(calls.filter((call) => call.url.includes('pine-facade/list'))).toHaveLength(3)
+    expect(calls.at(-1)?.url).toBe('https://www.tradingview.com/pubscripts-suggest-json?search=RSI')
+    expect(result).toEqual([
+      {
+        id: 'STD;RSI',
+        version: '1',
+        name: 'Relative Strength Index',
+        author: { id: 1, username: '@TRADINGVIEW@' },
+        image: '',
+        access: 'closed_source',
+        source: '',
+        type: 'study',
+      },
+      {
+        id: 'PUB;abc',
+        version: '2',
+        name: 'Community RSI',
+        author: { id: 10, username: 'alice' },
+        image: 'img',
+        access: 'open_source',
+        source: 'source',
+        type: 'strategy',
+      },
+    ])
+  })
+
+  it('gets indicator metadata and validates input options', async () => {
+    const fetch = mockFetch({
+      success: true,
+      result: {
+        ilTemplate: 'pine bytecode',
+        metaInfo: {
+          scriptIdPart: 'PUB;abc',
+          description: 'Super Trend',
+          shortDescription: 'ST',
+          pine: { version: '5' },
+          inputs: [
+            { id: 'in_Factor', name: 'Factor', type: 'float', defval: 3 },
+            { id: 'in_Mode', name: 'Mode', type: 'text', defval: 'A', options: ['A', 'B'] },
+            { id: 'text', name: 'text', type: 'text', defval: '' },
+          ],
+          styles: {
+            plot_0: { title: 'Trend Line' },
+            plot_1: { title: 'Trend Line' },
+          },
+          plots: [
+            { id: 'plot_2', target: 'plot_0', type: 'colorer' },
+          ],
+        },
+      },
+    })
+
+    const indicator = await getIndicator('PUB;abc', 'last', {
+      fetch,
+      credentials: {
+        tradingview_sessionid: 'session-123',
+        tradingview_sessionid_sign: 'sign-456',
+      },
+    })
+
+    expect(indicator.pineId).toBe('PUB;abc')
+    expect(indicator.pineVersion).toBe('5')
+    expect(indicator.script).toBe('pine bytecode')
+    expect(indicator.inputs['in_Factor']?.value).toBe(3)
+    expect(indicator.plots).toEqual({
+      plot_0: 'Trend_Line',
+      plot_1: 'Trend_Line_2',
+      plot_2: 'Trend_Line_colorer',
+    })
+
+    indicator.setOption('Factor', 4)
+    expect(indicator.inputs['in_Factor']?.value).toBe(4)
+    expect(() => indicator.setOption('Mode', 'C')).toThrow('allowed values')
+    expect(() => indicator.setOption('Missing', 1)).toThrow("Input 'Missing' not found.")
+  })
+
+  it('creates built-in indicators with default option validation', () => {
+    const indicator = new TradingViewBuiltInIndicator('VbPFixed@tv-basicstudies-241!')
+    indicator.setOption('rows', 30)
+
+    expect(indicator.options.rows).toBe(30)
+    expect(() => indicator.setOption('rows', '30')).toThrow("Wrong 'rows' value type")
+    expect(() => indicator.setOption('unknown', 1)).toThrow("Option 'unknown' is denied")
   })
 })

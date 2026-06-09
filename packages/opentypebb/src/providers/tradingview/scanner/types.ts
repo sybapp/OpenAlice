@@ -115,6 +115,7 @@ export interface TradingViewScannerData {
 
 export interface TradingViewCredentials {
   tradingview_sessionid?: string
+  tradingview_sessionid_sign?: string
 }
 
 export interface TradingViewRequestOptions {
