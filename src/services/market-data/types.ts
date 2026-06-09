@@ -160,11 +160,30 @@ export interface MarketDataTradingViewSymbolSearchInput {
   timeoutMs?: number
 }
 
+export interface MarketDataTradingViewIndicatorSearchInput {
+  provider?: 'tradingview' | string
+  query?: string
+  includeBuiltIn?: boolean
+  limit?: number
+  credentials?: { tradingview_sessionid?: string; tradingview_sessionid_sign?: string } | null
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
+export interface MarketDataTradingViewIndicatorInput {
+  provider?: 'tradingview' | string
+  id: string
+  version?: string
+  credentials?: { tradingview_sessionid?: string; tradingview_sessionid_sign?: string } | null
+  fetch?: typeof fetch
+  timeoutMs?: number
+}
+
 export interface MarketDataTechnicalAnalysisInput {
   provider?: 'tradingview' | string
   symbol: string
   periods?: string[]
-  credentials?: { tradingview_sessionid?: string } | null
+  credentials?: { tradingview_sessionid?: string; tradingview_sessionid_sign?: string } | null
   fetch?: typeof fetch
   timeoutMs?: number
 }
