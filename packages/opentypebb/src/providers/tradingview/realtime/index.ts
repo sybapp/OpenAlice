@@ -18,9 +18,14 @@ export {
 export {
   TradingViewChartSession,
   type TradingViewCandle,
+  type TradingViewChartError,
   type TradingViewChartMarketOptions,
   type TradingViewChartSubscription,
+  type TradingViewChartType,
+  type TradingViewChartTypeInputs,
   type TradingViewChartUpdate,
+  type TradingViewMarketInfo,
+  type TradingViewReplayEvent,
   type TradingViewTimeframe,
 } from './chart-session.js'
 export type {
