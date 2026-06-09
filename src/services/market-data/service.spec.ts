@@ -214,8 +214,9 @@ describe('MarketDataService', () => {
       endpoint: '/equity/search',
       model: 'EquitySearch',
       description: 'Search equities.',
-      providers: ['yfinance'],
+      providers: ['yfinance', 'tradingview'],
     })
+    expect(catalog.endpoints.find((endpoint) => endpoint.endpoint === '/equity/price/historical')?.providers).toEqual(['yfinance', 'tradingview'])
     expect(catalog.providers.find((provider) => provider.name === 'tradingview')?.models).toContain('TradingViewCandles')
     expect(catalog.endpoints).toContainEqual({
       endpoint: '/tradingview/candles',
@@ -373,6 +374,64 @@ describe('MarketDataService', () => {
           seriesId: 'symbol_1',
           pro_name: 'NASDAQ:AAPL',
         },
+      }],
+    })
+  })
+
+  it('routes configured TradingView asset historical endpoints to realtime candles', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    }), {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.query({
+      endpoint: '/equity/price/historical',
+      params: {
+        symbol: 'NASDAQ:AAPL',
+        interval: '1d',
+        range: 1,
+      },
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123] }],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'tradingview',
+      endpoint: '/equity/price/historical',
+      totalCount: 1,
+      fields: ['date', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'time', 'timeISO'],
+      rows: [{
+        date: '2024-06-01',
+        symbol: 'NASDAQ:AAPL',
+        open: 190,
+        high: 195,
+        low: 189,
+        close: 194,
+        volume: 123,
+        timeISO: '2024-06-01T00:00:00.000Z',
       }],
     })
   })
