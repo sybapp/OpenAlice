@@ -202,6 +202,11 @@ and provider names. This is the lightweight alternative to marketDataCatalog.`,
     marketDataScan: tool({
       description: `Run a TradingView market scanner preset or custom scanner query.
 
+This tool, and the CLI shortcut alice marketdata scan, are TradingView-only.
+They do not query yfinance, fmp, or other generic screener providers. For
+provider-backed screeners, use marketDataQuery with endpoints such as
+"/equity/screener" when a provider supports them.
+
 By default this scans the stocks preset. For custom scans, set mode to "query"
 or "raw" and pass query as an object, or as a JSON object string when using
 the alice CLI.
@@ -359,6 +364,10 @@ statement tables use marketDataFundamentals.`,
     tradingViewSymbolSearch: tool({
       description: `Search TradingView symbols through TradingView's symbol search.
 
+This tool, and the CLI shortcut alice marketdata symbolSearch, are
+TradingView-only. They do not search SEC, yfinance, fmp, or other generic
+symbol indexes; use marketDataSearch for generic provider-backed symbol search.
+
 Use this when an agent needs the exact TradingView symbol string before scanner,
 technical-analysis, realtime candles, or indicator execution calls. The id
 field in each row is the value to pass as symbol to tradingViewCandles,
@@ -382,6 +391,10 @@ tradingViewTechnicalAnalysis, and tradingViewStudy.`,
     tradingViewTechnicalAnalysis: tool({
       description: `Fetch TradingView technical-analysis recommendation values.
 
+This tool, and the CLI shortcut alice marketdata ta, are TradingView-only. They
+do not calculate local indicators and do not query yfinance, fmp, or other
+generic providers; use marketDataIndicator for local formula-based indicators.
+
 Returns TradingView recommendation fields by requested periods for a symbol such
 as "NASDAQ:AAPL" or "BINANCE:BTCUSDT". This does not return price candles or
 latest close; use tradingViewCandles for OHLCV data.`,
@@ -399,6 +412,10 @@ latest close; use tradingViewCandles for OHLCV data.`,
 
     tradingViewIndicatorSearch: tool({
       description: `Search public and built-in TradingView Pine indicators.
+
+This tool, and the CLI shortcut alice marketdata indicatorSearch, are
+TradingView-only. They search TradingView Pine studies, not generic provider
+technical indicators.
 
 Use this before tradingViewIndicatorGet when an agent needs a Pine script id or
 wants to discover built-in study names.`,
@@ -419,6 +436,10 @@ wants to discover built-in study names.`,
     tradingViewIndicatorGet: tool({
       description: `Get TradingView Pine indicator metadata and script payload by id.
 
+This tool, and the CLI shortcut alice marketdata indicatorGet, are
+TradingView-only. They fetch TradingView Pine indicator metadata, not generic
+provider indicator definitions.
+
 Returns inputs, plot names, script type, and script text needed to run a
 TradingView chart study. This is metadata only; it does not execute the
 indicator. Use tradingViewStudy to run a study on a symbol.`,
@@ -435,7 +456,12 @@ indicator. Use tradingViewStudy to run a study on a symbol.`,
     }),
 
     tradingViewCandles: tool({
-      description: `Get a one-shot TradingView candle snapshot through the realtime chart adapter.
+      description: `Get a one-shot TradingView realtime chart candle snapshot.
+
+This tool, and the CLI shortcut alice marketdata candles, are TradingView-only.
+They do not query yfinance, fmp, or other generic providers. For provider-backed
+historical prices, use marketDataQuery with endpoints such as
+"/equity/price/historical" or "/etf/historical".
 
 Use this when an agent needs TradingView-normalized OHLCV data, custom chart
 types, replay initialization, or TradingView-specific symbol handling without
@@ -463,6 +489,11 @@ only when the agent needs full TradingView symbol/session metadata.`,
     tradingViewQuote: tool({
       description: `Get a one-row latest-price snapshot for a TradingView symbol.
 
+This tool, and the CLI shortcut alice marketdata quote, are TradingView-only.
+They do not query yfinance, fmp, or other generic quote providers. For
+provider-backed quotes, use marketDataQuery with endpoints such as
+"/equity/price/quote".
+
 This is the simplest TradingView price tool for agents. It uses the realtime
 chart adapter internally and returns the latest candle's close as price, plus
 OHLCV and time/timeISO. Use tradingViewCandles when the agent needs multiple
@@ -483,6 +514,10 @@ bars.`,
 
     tradingViewStudy: tool({
       description: `Run a TradingView chart study once and return parsed indicator values.
+
+This tool, and the CLI shortcut alice marketdata study, are TradingView-only.
+They execute TradingView chart studies/Pine indicators, not generic provider
+indicator APIs.
 
 Use builtInType for built-in studies like "Volume@tv-basicstudies-241", or
 indicatorId for public Pine indicators returned by tradingViewIndicatorSearch.

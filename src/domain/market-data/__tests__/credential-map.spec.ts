@@ -24,8 +24,12 @@ describe('buildSDKCredentials — in-process opentypebb path', () => {
   })
 
   it('passes TradingView sessionid through unchanged', () => {
-    expect(buildSDKCredentials({ tradingview_sessionid: 'session-123' })).toEqual({
+    expect(buildSDKCredentials({
       tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
+    })).toEqual({
+      tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
     })
   })
 
@@ -69,8 +73,14 @@ describe('buildCredentialsHeader — legacy Python sidecar HTTP path', () => {
   })
 
   it('passes TradingView sessionid through unchanged', () => {
-    const header = buildCredentialsHeader({ tradingview_sessionid: 'session-123' })
-    expect(JSON.parse(header!)).toEqual({ tradingview_sessionid: 'session-123' })
+    const header = buildCredentialsHeader({
+      tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
+    })
+    expect(JSON.parse(header!)).toEqual({
+      tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
+    })
   })
 })
 

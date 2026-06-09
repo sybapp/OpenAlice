@@ -206,11 +206,23 @@ describe('MarketDataService', () => {
     const catalog = service.catalog()
 
     expect(catalog.providers.map((provider) => provider.name)).toEqual(['tradingview', 'yfinance'])
+    expect(catalog.providers.find((provider) => provider.name === 'tradingview')?.credentials).toEqual([
+      'tradingview_sessionid',
+      'tradingview_sessionid_sign',
+    ])
     expect(catalog.endpoints).toContainEqual({
       endpoint: '/equity/search',
       model: 'EquitySearch',
       description: 'Search equities.',
-      providers: ['yfinance'],
+      providers: ['yfinance', 'tradingview'],
+    })
+    expect(catalog.endpoints.find((endpoint) => endpoint.endpoint === '/equity/price/historical')?.providers).toEqual(['yfinance', 'tradingview'])
+    expect(catalog.providers.find((provider) => provider.name === 'tradingview')?.models).toContain('TradingViewCandles')
+    expect(catalog.endpoints).toContainEqual({
+      endpoint: '/tradingview/candles',
+      model: 'TradingViewCandles',
+      description: 'Get a one-shot TradingView realtime chart candle snapshot.',
+      providers: ['tradingview'],
     })
   })
 
@@ -254,6 +266,53 @@ describe('MarketDataService', () => {
     expect(result.error).toBe('Fetcher not found for model')
   })
 
+  it('falls back to yfinance when the configured TradingView asset provider does not support an endpoint', async () => {
+    const handler = vi.fn(async (_executor, provider, params) => [{ provider, symbol: params.symbol }])
+    const service = new MarketDataService(deps(handler, () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    })))
+
+    const result = await service.query({
+      endpoint: '/equity/fundamental/income',
+      params: { symbol: 'AAPL' },
+    })
+
+    expect(handler).toHaveBeenCalledOnce()
+    expect(handler.mock.calls[0]?.[1]).toBe('yfinance')
+    expect(result).toMatchObject({
+      provider: 'yfinance',
+      endpoint: '/equity/fundamental/income',
+      rows: [{ provider: 'yfinance', symbol: 'AAPL' }],
+    })
+  })
+
+  it('does not fallback when TradingView is passed explicitly for an unsupported endpoint', async () => {
+    const handler = vi.fn<CommandHandler>(async () => {
+      throw new Error('Fetcher not found for model')
+    })
+    const service = new MarketDataService(deps(handler, () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    })))
+
+    const result = await service.query({
+      endpoint: '/equity/fundamental/income',
+      provider: 'tradingview',
+      params: { symbol: 'AAPL' },
+    })
+
+    expect(handler.mock.calls[0]?.[1]).toBe('tradingview')
+    expect(result.provider).toBe('tradingview')
+    expect(result.error).toBe('Fetcher not found for model')
+  })
+
   it('enforces the default and maximum row limit', async () => {
     const rows = Array.from({ length: 700 }, (_, index) => ({ index }))
     const service = new MarketDataService(deps(async () => rows))
@@ -286,6 +345,140 @@ describe('MarketDataService', () => {
         endpoint: '/equity/fundamental/income',
         model: 'IncomeStatement',
         providers: ['yfinance'],
+      }],
+    })
+  })
+
+  it('searches TradingView generic endpoints in the endpoint catalog', async () => {
+    const service = new MarketDataService(deps(async () => []))
+
+    const result = await service.endpointSearch({
+      query: 'candles',
+      provider: 'tradingview',
+      limit: 5,
+    })
+
+    expect(result).toMatchObject({
+      provider: 'catalog',
+      endpoint: '/catalog/endpoints',
+      totalCount: 1,
+      rows: [{
+        endpoint: '/tradingview/candles',
+        model: 'TradingViewCandles',
+        providers: ['tradingview'],
+      }],
+    })
+  })
+
+  it('routes TradingView generic query endpoints to the TradingView service adapters', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.query({
+      endpoint: '/tradingview/candles',
+      params: {
+        symbol: 'NASDAQ:AAPL',
+        options: { timeframe: '60', range: 1 },
+        includeMarketInfo: true,
+      },
+      limit: 500,
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    socket.message(formatRealtimeCommand('symbol_resolved', [
+      chartSessionId,
+      'symbol_1',
+      { pro_name: 'NASDAQ:AAPL' },
+    ]))
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123] }],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'tradingview',
+      endpoint: '/tradingview/candles',
+      totalCount: 1,
+      rows: [{
+        symbol: 'NASDAQ:AAPL',
+        close: 194,
+        marketInfo: {
+          seriesId: 'symbol_1',
+          pro_name: 'NASDAQ:AAPL',
+        },
+      }],
+    })
+  })
+
+  it('routes configured TradingView asset historical endpoints to realtime candles', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], () => ({
+      ...config,
+      providers: {
+        ...config.providers,
+        equity: 'tradingview',
+      },
+    }), {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.query({
+      endpoint: '/equity/price/historical',
+      params: {
+        symbol: 'NASDAQ:AAPL',
+        interval: '1d',
+        range: 1,
+      },
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123] }],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'tradingview',
+      endpoint: '/equity/price/historical',
+      totalCount: 1,
+      fields: ['date', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'time', 'timeISO'],
+      rows: [{
+        date: '2024-06-01',
+        symbol: 'NASDAQ:AAPL',
+        open: 190,
+        high: 195,
+        low: 189,
+        close: 194,
+        volume: 123,
+        timeISO: '2024-06-01T00:00:00.000Z',
       }],
     })
   })
@@ -1106,7 +1299,7 @@ describe('MarketDataService', () => {
     )
     expect(result).toEqual({
       provider: 'tradingview',
-      endpoint: '/technical-analysis',
+      endpoint: '/tradingview/technical-analysis',
       totalCount: 1,
       fields: ['symbol', 'period', 'Other', 'All', 'MA'],
       rows: [{ symbol: 'NASDAQ:AAPL', period: '1D', Other: 0.2, All: 0.4, MA: 0.6 }],
