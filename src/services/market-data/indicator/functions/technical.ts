@@ -1,17 +1,8 @@
-/**
- * Technical indicator functions — 纯数学计算
- *
- * Trend / momentum:  RSI, BBANDS, MACD, ATR
- * Volume (right-side): RVOL, OBV, MFI, VWAP
- * 接受 number[] 或 TrackedValues（自动提取 values）
- */
-
-import { toValues, type TrackedValues } from '../types'
-import { EMA } from './statistics'
+import { toValues, type TrackedValues } from '../types.js'
+import { EMA } from './statistics.js'
 
 type NumericInput = number[] | TrackedValues
 
-/** Relative Strength Index (RSI) */
 export function RSI(data: NumericInput, period: number = 14): number {
   const v = toValues(data)
   if (v.length < period + 1) {
@@ -42,7 +33,6 @@ export function RSI(data: NumericInput, period: number = 14): number {
   return 100 - 100 / (1 + rs)
 }
 
-/** Bollinger Bands (BBANDS) */
 export function BBANDS(
   data: NumericInput,
   period: number = 20,
@@ -65,7 +55,6 @@ export function BBANDS(
   }
 }
 
-/** MACD (Moving Average Convergence Divergence) */
 export function MACD(
   data: NumericInput,
   fastPeriod: number = 12,
@@ -101,7 +90,6 @@ export function MACD(
   }
 }
 
-/** Average True Range (ATR) */
 export function ATR(
   highs: NumericInput,
   lows: NumericInput,
@@ -133,14 +121,6 @@ export function ATR(
   return atr
 }
 
-/**
- * Relative Volume (RVOL) — latest bar's volume divided by the average of the
- * preceding `period` bars. The single most useful right-side read: absolute
- * volume is meaningless across tickers (10M shares is huge for one, noise for
- * another); RVOL normalizes it against the symbol's own baseline. >1 means
- * the bar is trading heavier than usual; a 2–3+ print on a move is the
- * volume-confirmation signal momentum traders look for.
- */
 export function RVOL(volumes: NumericInput, period: number = 20): number {
   const v = toValues(volumes)
   if (v.length < period + 1) {
@@ -148,7 +128,7 @@ export function RVOL(volumes: NumericInput, period: number = 20): number {
   }
 
   const latest = v[v.length - 1]
-  const prior = v.slice(-period - 1, -1) // the `period` bars before the latest
+  const prior = v.slice(-period - 1, -1)
   const avg = prior.reduce((acc, val) => acc + val, 0) / period
 
   if (avg === 0) {
@@ -158,12 +138,6 @@ export function RVOL(volumes: NumericInput, period: number = 20): number {
   return latest / avg
 }
 
-/**
- * On-Balance Volume (OBV) — running total that adds the bar's volume on an
- * up-close and subtracts it on a down-close. Returns the latest cumulative
- * value; its slope (vs price) is what carries the accumulation/distribution
- * signal. Pair with CLOSE and VOLUME of the same length.
- */
 export function OBV(closes: NumericInput, volumes: NumericInput): number {
   const c = toValues(closes)
   const vol = toValues(volumes)
@@ -177,17 +151,11 @@ export function OBV(closes: NumericInput, volumes: NumericInput): number {
   for (let i = 1; i < c.length; i++) {
     if (c[i] > c[i - 1]) obv += vol[i]
     else if (c[i] < c[i - 1]) obv -= vol[i]
-    // unchanged close: OBV unchanged
   }
 
   return obv
 }
 
-/**
- * Money Flow Index (MFI) — a volume-weighted RSI on the typical price
- * ((H+L+C)/3), bounded 0–100. Above ~80 = overbought on heavy money inflow,
- * below ~20 = oversold. Needs highs/lows/closes/volumes of equal length.
- */
 export function MFI(
   highs: NumericInput,
   lows: NumericInput,
@@ -223,12 +191,6 @@ export function MFI(
   return 100 - 100 / (1 + moneyRatio)
 }
 
-/**
- * Volume-Weighted Average Price (VWAP) over the supplied series — the average
- * price weighted by volume at each bar, using the typical price ((H+L+C)/3).
- * Price above VWAP = buyers in control over the window. Needs
- * highs/lows/closes/volumes of equal length.
- */
 export function VWAP(
   highs: NumericInput,
   lows: NumericInput,

@@ -23,6 +23,12 @@ describe('buildSDKCredentials — in-process opentypebb path', () => {
     expect(buildSDKCredentials({ fmp: 'k2' })).toEqual({ fmp_api_key: 'k2' })
   })
 
+  it('passes TradingView sessionid through unchanged', () => {
+    expect(buildSDKCredentials({ tradingview_sessionid: 'session-123' })).toEqual({
+      tradingview_sessionid: 'session-123',
+    })
+  })
+
   it('maps multiple providers in one call', () => {
     expect(buildSDKCredentials({ fred: 'k1', fmp: 'k2', bls: 'k3' })).toEqual({
       federal_reserve_api_key: 'k1',
@@ -60,6 +66,11 @@ describe('buildCredentialsHeader — legacy Python sidecar HTTP path', () => {
   it('maps multiple providers into one JSON object', () => {
     const header = buildCredentialsHeader({ fred: 'k1', fmp: 'k2' })
     expect(JSON.parse(header!)).toEqual({ fred_api_key: 'k1', fmp_api_key: 'k2' })
+  })
+
+  it('passes TradingView sessionid through unchanged', () => {
+    const header = buildCredentialsHeader({ tradingview_sessionid: 'session-123' })
+    expect(JSON.parse(header!)).toEqual({ tradingview_sessionid: 'session-123' })
   })
 })
 

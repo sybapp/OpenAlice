@@ -109,7 +109,7 @@ export function FinancialStatementsPanel({ symbol }: Props) {
   }
   const info = [
     entry?.provider ? `Source: ${entry.provider}` : 'Source: (unknown)',
-    `Endpoint: /api/market-data-v1${endpointFor[tab]}`,
+    `Endpoint: /api/market-data/query?endpoint=${endpointFor[tab]}`,
     'Annual periods, most recent first. Values scaled (K / M / B / T).',
     'Blank cells are line items this provider doesn\u2019t report for the current period.',
   ].join('\n')

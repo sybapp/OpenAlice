@@ -9,13 +9,11 @@ import {
 } from './cli-commands.js'
 import { createNewsArchiveTools } from '../tool/news.js'
 import { createMarketSearchTools } from '../tool/market.js'
-import { createEquityTools } from '../tool/equity.js'
-import { createEconomyTools } from '../tool/economy.js'
-import { createAnalysisTools } from '../tool/analysis.js'
 import { createThinkingTools } from '../tool/thinking.js'
 import { inboxPushFactory } from '../tool/inbox-push.js'
 import { entityUpsertFactory } from '../tool/entity-upsert.js'
 import { entitySearchFactory } from '../tool/entity-search.js'
+import { createMarketDataTools } from '../tool/market-data.js'
 
 /**
  * Anti-rot: each export's alias map is hand-authored, so guard it against drift —
@@ -28,11 +26,9 @@ const any = {} as never
 describe('CLI_EXPORTS — data export (global tools)', () => {
   const tc = new ToolCenter()
   tc.register(createThinkingTools(), 'thinking')
+  tc.register(createMarketDataTools(any), 'market-data')
   tc.register(createMarketSearchTools(any), 'market-search')
-  tc.register(createEquityTools(any), 'equity')
   tc.register(createNewsArchiveTools(any), 'news')
-  tc.register(createAnalysisTools(any, any, any, any), 'analysis')
-  tc.register(createEconomyTools(any, any), 'economy')
 
   it('every mapped verb resolves to a registered global tool', () => {
     for (const name of mappedToolNames('data')) {
@@ -97,5 +93,25 @@ describe('CLI_EXPORTS — structure', () => {
       expect(exp.commands['trading']).toBeUndefined()
       expect(exp.commands['cron']).toBeUndefined()
     }
+  })
+
+  it('keeps retired domain-specific market-data groups off the CLI surface', () => {
+    expect(getExport('data')?.commands['equity']).toBeUndefined()
+    expect(getExport('data')?.commands['economy']).toBeUndefined()
+    expect(getExport('data')?.commands['analysis']).toBeUndefined()
+  })
+
+  it('exposes the generic market-data explorer verbs', () => {
+    expect(getExport('data')?.commands['marketdata']).toEqual({
+      catalog: 'marketDataCatalog',
+      indicator: 'marketDataIndicator',
+      indicatorGet: 'tradingViewIndicatorGet',
+      indicatorSearch: 'tradingViewIndicatorSearch',
+      query: 'marketDataQuery',
+      scan: 'marketDataScan',
+      search: 'marketDataSearch',
+      symbolSearch: 'tradingViewSymbolSearch',
+      ta: 'tradingViewTechnicalAnalysis',
+    })
   })
 })

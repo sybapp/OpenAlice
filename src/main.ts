@@ -15,20 +15,16 @@ import { waitForUTAReady } from './services/uta-supervisor/health.js'
 import { createTradingTools } from './tool/trading.js'
 import { SymbolIndex } from './domain/market-data/equity/index.js'
 import { CommodityCatalog } from './domain/market-data/commodity/index.js'
-import { createEquityTools } from './tool/equity.js'
 import { createEtfTools } from './tool/etf.js'
-import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKEtfClient, SDKIndexClient, SDKDerivativesClient, SDKCommodityClient, SDKEconomyClient } from './domain/market-data/client/typebb/index.js'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, EtfClientLike, IndexClientLike, DerivativesClientLike, CommodityClientLike, EconomyClientLike } from './domain/market-data/client/types.js'
+import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKEtfClient } from './domain/market-data/client/typebb/index.js'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, EtfClientLike } from './domain/market-data/client/types.js'
 import { buildSDKCredentials } from './domain/market-data/credential-map.js'
 import { OpenBBEquityClient } from './domain/market-data/client/openbb-api/equity-client.js'
 import { OpenBBCryptoClient } from './domain/market-data/client/openbb-api/crypto-client.js'
 import { OpenBBCurrencyClient } from './domain/market-data/client/openbb-api/currency-client.js'
-import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/commodity-client.js'
-import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/economy-client.js'
 import { createMarketSearchTools } from './tool/market.js'
-import { createAnalysisTools } from './tool/analysis.js'
 import { createSectorRotationTools } from './tool/sector-rotation.js'
-import { createEconomyTools } from './tool/economy.js'
+import { createMarketDataTools } from './tool/market-data.js'
 import { SessionStore } from './core/session.js'
 import { createInboxStore } from './core/inbox-store.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -52,6 +48,7 @@ import { createMetricsListener } from './task/metrics/index.js'
 import { createAgentWorkListener } from './core/agent-work-listener.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
+import { createMarketDataService } from './services/market-data/index.js'
 
 // ==================== Persistence paths ====================
 
@@ -150,11 +147,7 @@ async function main() {
   let equityClient: EquityClientLike
   let cryptoClient: CryptoClientLike
   let currencyClient: CurrencyClientLike
-  let commodityClient: CommodityClientLike
   let etfClient: EtfClientLike | undefined
-  let indexClient: IndexClientLike | undefined
-  let derivativesClient: DerivativesClientLike | undefined
-  let economyClient: EconomyClientLike
 
   if (config.marketData.backend === 'openbb-api') {
     const url = config.marketData.apiUrl
@@ -162,8 +155,6 @@ async function main() {
     equityClient = new OpenBBEquityClient(url, providers.equity, keys)
     cryptoClient = new OpenBBCryptoClient(url, providers.crypto, keys)
     currencyClient = new OpenBBCurrencyClient(url, providers.currency, keys)
-    commodityClient = new OpenBBCommodityClient(url, providers.commodity, keys) as unknown as CommodityClientLike
-    economyClient = new OpenBBEconomyClient(url, 'federal_reserve', keys) as unknown as EconomyClientLike
   } else {
     const executor = getSDKExecutor()
     const routeMap = buildRouteMap()
@@ -171,11 +162,7 @@ async function main() {
     equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
     cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
     currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
-    commodityClient = new SDKCommodityClient(executor, 'commodity', providers.commodity, credentials, routeMap)
     etfClient = new SDKEtfClient(executor, 'etf', providers.equity, credentials, routeMap)
-    indexClient = new SDKIndexClient(executor, 'index', providers.equity, credentials, routeMap)
-    derivativesClient = new SDKDerivativesClient(executor, 'derivatives', providers.equity, credentials, routeMap)
-    economyClient = new SDKEconomyClient(executor, 'economy', 'federal_reserve', credentials, routeMap)
   }
 
   // ==================== Equity Symbol Index ====================
@@ -187,6 +174,7 @@ async function main() {
   commodityCatalog.load()
 
   const marketSearch = { symbolIndex, cryptoClient, currencyClient, commodityCatalog }
+  const marketDataService = createMarketDataService()
 
   // ==================== Tool Registration ====================
 
@@ -199,17 +187,15 @@ async function main() {
   )
 
   toolCenter.register(createCronTools(cronEngine), 'cron')
+  toolCenter.register(createMarketDataTools(marketDataService), 'market-data')
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
-  toolCenter.register(createEquityTools(equityClient), 'equity')
   if (etfClient) {
     toolCenter.register(createEtfTools(etfClient), 'etf')
   }
   if (config.news.enabled) {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
   }
-  toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClient), 'analysis')
   toolCenter.register(createSectorRotationTools(equityClient), 'sector-rotation')
-  toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
 
@@ -367,6 +353,7 @@ async function main() {
     listenerRegistry,
     fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
+    marketDataService,
     marketSearch,
     equityClient,
     utaManager,

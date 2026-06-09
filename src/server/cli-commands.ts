@@ -22,7 +22,6 @@
  * the `alice*` client is manifest-driven, and the gateway only lets an export
  * invoke tools listed in ITS map.
  */
-
 export interface CliExport {
   /** PATH binary name. The shim is one file; siblings are byte-identical copies. */
   readonly binary: string
@@ -47,25 +46,16 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       market: {
         search: 'marketSearchForResearch',
       },
-      equity: {
-        profile: 'equityGetProfile',
-        financials: 'equityGetFinancials',
-        ratios: 'equityGetRatios',
-        earnings: 'equityGetEarningsCalendar',
-        insiders: 'equityGetInsiderTrading',
-        discover: 'equityDiscover',
-      },
-      economy: {
-        'fred-search': 'economyFredSearch',
-        'fred-series': 'economyFredSeries',
-        'fred-regional': 'economyFredRegional',
-        'bls-search': 'economyBlsSearch',
-        'bls-series': 'economyBlsSeries',
-        energy: 'economyEnergyOutlook',
-        petroleum: 'economyPetroleumStatus',
-      },
-      analysis: {
-        indicator: 'calculateIndicator',
+      marketdata: {
+        catalog: 'marketDataCatalog',
+        indicator: 'marketDataIndicator',
+        indicatorGet: 'tradingViewIndicatorGet',
+        indicatorSearch: 'tradingViewIndicatorSearch',
+        query: 'marketDataQuery',
+        scan: 'marketDataScan',
+        search: 'marketDataSearch',
+        symbolSearch: 'tradingViewSymbolSearch',
+        ta: 'tradingViewTechnicalAnalysis',
       },
       think: {
         calc: 'calculate',
