@@ -12,3 +12,9 @@ export {
   getTechnicalAnalysis,
   searchSymbols,
 } from './scanner/query.js'
+export {
+  TradingViewBuiltInIndicator,
+  TradingViewPineIndicator,
+  getIndicator,
+  searchIndicators,
+} from './scanner/indicator.js'

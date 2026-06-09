@@ -22,3 +22,13 @@ export type {
   TradingViewTechnicalAnalysisInput,
   TradingViewTechnicalSignal,
 } from './scanner/types.js'
+export type {
+  TradingViewBuiltInIndicatorType,
+  TradingViewIndicatorAccess,
+  TradingViewIndicatorSearchOptions,
+  TradingViewIndicatorSearchResult,
+  TradingViewPineIndicatorOptions,
+  TradingViewPineIndicatorType,
+  TradingViewPineInput,
+  TradingViewPineInputType,
+} from './scanner/indicator.js'
