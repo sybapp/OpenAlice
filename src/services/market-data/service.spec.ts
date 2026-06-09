@@ -741,17 +741,22 @@ describe('MarketDataService', () => {
 
   it('subscribes to TradingView realtime candles through the unified provider path', async () => {
     const socket = new FakeRealtimeSocket()
+    const clientOptions: TradingViewRealtimeClientOptions[] = []
     const updates: unknown[] = []
     const service = new MarketDataService(deps(async () => [], undefined, {
-      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
-        ...options,
-        socketFactory: () => socket,
-      }),
+      createTradingViewRealtimeClient: (options) => {
+        clientOptions.push(options)
+        return new TradingViewRealtimeClient({
+          ...options,
+          socketFactory: () => socket,
+        })
+      },
     }))
 
     const subscription = await service.subscribeCandles({
       symbol: 'NASDAQ:AAPL',
       options: { timeframe: '60', range: 2 },
+      realtimeServer: 'widgetdata',
       onData: (data) => updates.push(data),
     })
     socket.open()
@@ -763,6 +768,7 @@ describe('MarketDataService', () => {
       : ''
 
     expect(subscription.provider).toBe('tradingview')
+    expect(clientOptions[0]?.server).toBe('widgetdata')
     expect(socket.sent).toContain(formatRealtimeCommand('create_series', [
       chartSessionId,
       '$prices',
@@ -829,16 +835,21 @@ describe('MarketDataService', () => {
 
   it('gets a one-shot TradingView candle snapshot through the service layer', async () => {
     const socket = new FakeRealtimeSocket()
+    const clientOptions: TradingViewRealtimeClientOptions[] = []
     const service = new MarketDataService(deps(async () => [], undefined, {
-      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
-        ...options,
-        socketFactory: () => socket,
-      }),
+      createTradingViewRealtimeClient: (options) => {
+        clientOptions.push(options)
+        return new TradingViewRealtimeClient({
+          ...options,
+          socketFactory: () => socket,
+        })
+      },
     }))
 
     const resultPromise = service.tradingViewCandles({
       symbol: 'NASDAQ:AAPL',
       options: { timeframe: '60', range: 2 },
+      realtimeServer: 'widgetdata',
     })
     socket.open()
 
@@ -860,6 +871,7 @@ describe('MarketDataService', () => {
       },
     ]))
 
+    expect(clientOptions[0]?.server).toBe('widgetdata')
     await expect(resultPromise).resolves.toEqual({
       provider: 'tradingview',
       endpoint: '/tradingview/candles',
@@ -974,11 +986,15 @@ describe('MarketDataService', () => {
 
   it('runs a one-shot TradingView study and returns parsed values', async () => {
     const socket = new FakeRealtimeSocket()
+    const clientOptions: TradingViewRealtimeClientOptions[] = []
     const service = new MarketDataService(deps(async () => [], undefined, {
-      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
-        ...options,
-        socketFactory: () => socket,
-      }),
+      createTradingViewRealtimeClient: (options) => {
+        clientOptions.push(options)
+        return new TradingViewRealtimeClient({
+          ...options,
+          socketFactory: () => socket,
+        })
+      },
     }))
 
     const resultPromise = service.runTradingViewStudy({
@@ -986,6 +1002,7 @@ describe('MarketDataService', () => {
       options: { timeframe: '60', range: 2 },
       builtInType: 'Volume@tv-basicstudies-241',
       inputs: { length: 10 },
+      realtimeServer: 'widgetdata',
     })
     socket.open()
 
@@ -1000,6 +1017,7 @@ describe('MarketDataService', () => {
       ? String(studyFrame.p[1])
       : ''
 
+    expect(clientOptions[0]?.server).toBe('widgetdata')
     expect(createStudy).toContain('Volume@tv-basicstudies-241')
     expect(createStudy).toContain('"length":10')
 

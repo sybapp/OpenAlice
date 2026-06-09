@@ -359,6 +359,7 @@ describe('createMarketDataTools', () => {
       symbol: 'NASDAQ:AAPL',
       options: '{"timeframe":"60","range":100}',
       includeMarketInfo: true,
+      realtimeServer: 'widgetdata',
       credentials: '{"tradingview_sessionid":"session"}',
       timeoutMs: 5000,
     })
@@ -367,6 +368,7 @@ describe('createMarketDataTools', () => {
       symbol: 'NASDAQ:AAPL',
       options: { timeframe: '60', range: 100 },
       includeMarketInfo: true,
+      realtimeServer: 'widgetdata',
       credentials: { tradingview_sessionid: 'session' },
       timeoutMs: 5000,
     })
@@ -376,6 +378,7 @@ describe('createMarketDataTools', () => {
     await exec(tools.tradingViewQuote, {
       symbol: 'CBOE:DRAM',
       options: '{"timeframe":"1D","range":2}',
+      realtimeServer: 'widgetdata',
       credentials: '{"tradingview_sessionid":"session"}',
       timeoutMs: 5000,
     })
@@ -383,6 +386,7 @@ describe('createMarketDataTools', () => {
     expect(service.tradingViewQuote).toHaveBeenCalledWith({
       symbol: 'CBOE:DRAM',
       options: { timeframe: '1D', range: 2 },
+      realtimeServer: 'widgetdata',
       credentials: { tradingview_sessionid: 'session' },
       timeoutMs: 5000,
     })
@@ -394,6 +398,7 @@ describe('createMarketDataTools', () => {
       options: { timeframe: '15', range: 50 },
       builtInType: 'Volume@tv-basicstudies-241',
       inputs: '{"length":10,"col_prev_close":false}',
+      realtimeServer: 'widgetdata',
       credentials: '{"tradingview_sessionid":"session"}',
       timeoutMs: 7000,
     })
@@ -406,6 +411,7 @@ describe('createMarketDataTools', () => {
       indicatorVersion: undefined,
       builtInType: 'Volume@tv-basicstudies-241',
       inputs: { length: 10, col_prev_close: false },
+      realtimeServer: 'widgetdata',
       credentials: { tradingview_sessionid: 'session' },
       timeoutMs: 7000,
     })
@@ -425,6 +431,7 @@ describe('createMarketDataTools', () => {
       indicatorVersion: undefined,
       builtInType: undefined,
       inputs: undefined,
+      realtimeServer: undefined,
       credentials: undefined,
       timeoutMs: undefined,
     })

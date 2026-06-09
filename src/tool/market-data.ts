@@ -49,6 +49,7 @@ const scanPresetSchema = z.enum([
 ])
 
 const fundamentalStatementSchema = z.enum(['income', 'balance', 'cash', 'ratios', 'metrics', 'reported'])
+const tradingViewRealtimeServerSchema = z.enum(['data', 'prodata', 'widgetdata'])
 
 function parseJsonRecord(value: unknown, field: string): Record<string, unknown> | undefined {
   if (value === undefined) {
@@ -469,18 +470,22 @@ holding an open subscription. For a latest-price snapshot, pass a small range
 such as {"timeframe":"1D","range":2} and read the last row's close. Candle rows
 return compact OHLCV by default, with TradingView's original second-level Unix
 timestamp in time and an ISO-8601 UTC string in timeISO. Set includeMarketInfo
-only when the agent needs full TradingView symbol/session metadata.`,
+only when the agent needs full TradingView symbol/session metadata. Keep
+realtimeServer unset for the default data endpoint; use widgetdata when a public
+study or chart request is limited on data.tradingview.com.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL or BINANCE:BTCUSDT.'),
         options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
         includeMarketInfo: z.boolean().optional().describe('Include full TradingView market/session metadata on every candle row. Defaults to false to keep Agent/MCP responses compact.'),
+        realtimeServer: tradingViewRealtimeServerSchema.optional().describe('TradingView realtime WebSocket backend. Defaults to data; widgetdata can execute some public chart studies that data rejects.'),
         credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
         timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
       }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', options: { timeframe: '60', range: 100 } }] }),
-      execute: async ({ symbol, options, includeMarketInfo, credentials, timeoutMs }) => service.tradingViewCandles({
+      execute: async ({ symbol, options, includeMarketInfo, realtimeServer, credentials, timeoutMs }) => service.tradingViewCandles({
         symbol,
         options: parseJsonRecord(options, 'options'),
         includeMarketInfo,
+        realtimeServer,
         credentials: parseCredentials(credentials),
         timeoutMs,
       }),
@@ -497,16 +502,19 @@ provider-backed quotes, use marketDataQuery with endpoints such as
 This is the simplest TradingView price tool for agents. It uses the realtime
 chart adapter internally and returns the latest candle's close as price, plus
 OHLCV and time/timeISO. Use tradingViewCandles when the agent needs multiple
-bars.`,
+bars. Keep realtimeServer unset for the default data endpoint; use widgetdata
+only when the default TradingView realtime backend rejects a request.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. CBOE:DRAM, NASDAQ:AAPL, or BINANCE:BTCUSDT.'),
         options: jsonRecordInput.optional().describe('Optional TradingView chart options object or JSON string. Defaults include {"timeframe":"1D","range":2}.'),
+        realtimeServer: tradingViewRealtimeServerSchema.optional().describe('TradingView realtime WebSocket backend. Defaults to data; widgetdata can be used when data rejects a chart request.'),
         credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
         timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first realtime candle update.'),
       }).meta({ examples: [{ symbol: 'CBOE:DRAM' }] }),
-      execute: async ({ symbol, options, credentials, timeoutMs }) => service.tradingViewQuote({
+      execute: async ({ symbol, options, realtimeServer, credentials, timeoutMs }) => service.tradingViewQuote({
         symbol,
         options: parseJsonRecord(options, 'options'),
+        realtimeServer,
         credentials: parseCredentials(credentials),
         timeoutMs,
       }),
@@ -527,7 +535,9 @@ graphics-heavy public indicators such as Smart Money Concepts (SMC) [LuxAlgo],
 use graphicTextItems/graphicPlainText to read labels, lines, boxes, and table
 cells as text. Study points keep TradingView's original second-level Unix
 timestamp in $time and add $timeISO for agent-friendly UTC time; returned
-candles include time and timeISO.`,
+candles include time and timeISO. Keep realtimeServer unset for the default data
+endpoint; use realtimeServer="widgetdata" for public indicators such as SMC
+when data.tradingview.com returns a study-limit error.`,
       inputSchema: z.object({
         symbol: z.string().describe('TradingView symbol, e.g. NASDAQ:AAPL.'),
         options: jsonRecordInput.optional().describe('TradingView chart options object or JSON string, e.g. {"timeframe":"60","range":100}.'),
@@ -536,10 +546,11 @@ candles include time and timeISO.`,
         indicatorVersion: z.string().optional().describe('Pine indicator version. Defaults to last.'),
         builtInType: z.string().optional().describe('Built-in TradingView study type, e.g. Volume@tv-basicstudies-241.'),
         inputs: jsonRecordInput.optional().describe('Study input overrides object or JSON string. Values must be string, number, or boolean.'),
+        realtimeServer: tradingViewRealtimeServerSchema.optional().describe('TradingView realtime WebSocket backend. Defaults to data; use widgetdata for public studies such as SMC when data returns a study-limit error.'),
         credentials: credentialsInput.optional().describe('TradingView credentials object, or JSON object string for CLI flags.'),
         timeoutMs: z.number().int().positive().optional().describe('Timeout waiting for the first study update.'),
       }).meta({ examples: [{ symbol: 'NASDAQ:AAPL', builtInType: 'Volume@tv-basicstudies-241', options: { timeframe: '60', range: 100 } }] }),
-      execute: async ({ symbol, options, indicator, indicatorId, indicatorVersion, builtInType, inputs, credentials, timeoutMs }) => service.runTradingViewStudy({
+      execute: async ({ symbol, options, indicator, indicatorId, indicatorVersion, builtInType, inputs, realtimeServer, credentials, timeoutMs }) => service.runTradingViewStudy({
         symbol,
         options: parseJsonRecord(options, 'options'),
         indicator: parseTradingViewIndicatorRef(indicator),
@@ -547,6 +558,7 @@ candles include time and timeISO.`,
         indicatorVersion,
         builtInType,
         inputs: parsePrimitiveRecord(inputs, 'inputs'),
+        realtimeServer,
         credentials: parseCredentials(credentials),
         timeoutMs,
       }),
