@@ -23,6 +23,16 @@ describe('buildSDKCredentials — in-process opentypebb path', () => {
     expect(buildSDKCredentials({ fmp: 'k2' })).toEqual({ fmp_api_key: 'k2' })
   })
 
+  it('passes TradingView session cookies through unchanged', () => {
+    expect(buildSDKCredentials({
+      tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
+    })).toEqual({
+      tradingview_sessionid: 'session-123',
+      tradingview_sessionid_sign: 'sign-123',
+    })
+  })
+
   it('maps multiple providers in one call', () => {
     expect(buildSDKCredentials({ fred: 'k1', fmp: 'k2', bls: 'k3' })).toEqual({
       federal_reserve_api_key: 'k1',

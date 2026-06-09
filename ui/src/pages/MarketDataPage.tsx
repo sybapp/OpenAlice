@@ -23,7 +23,7 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: 'Crypto',
   currency: 'Currency',
   commodity: 'Commodity',
-  scanner: 'Scanner',
+  scanner: 'TradingView',
 }
 
 interface ProviderEntry {
@@ -31,6 +31,7 @@ interface ProviderEntry {
   name: string
   desc: string
   hint: string
+  testable?: boolean
 }
 
 /** Key groups tell the real story: FMP unlocks things the hub doesn't
@@ -56,7 +57,8 @@ const KEY_GROUPS: { label: string | null; providers: ProviderEntry[] }[] = [
     providers: [
       { key: 'econdb', name: 'EconDB', desc: 'Global macro indicators, country profiles, shipping data.', hint: 'econdb.com' },
       { key: 'intrinio', name: 'Intrinio', desc: 'Equities, ETFs, fundamentals, news, options snapshots.', hint: 'intrinio.com' },
-      { key: 'tradingview_sessionid', name: 'TradingView', desc: 'Market scanner data across stocks, crypto, forex, futures, bonds, CFDs, and options.', hint: 'Optional sessionid cookie value from tradingview.com' },
+      { key: 'tradingview_sessionid', name: 'TradingView Session ID', desc: 'TradingView scanner, symbol search, realtime candles, quotes, TA, and chart studies.', hint: 'Optional sessionid cookie value from tradingview.com' },
+      { key: 'tradingview_sessionid_sign', name: 'TradingView Session Signature', desc: 'Optional signed-session companion value for TradingView Pine indicator metadata.', hint: 'Optional sessionid_sign cookie value from tradingview.com', testable: false },
     ],
   },
 ]
@@ -511,7 +513,7 @@ function ApiKeysSection({
               </p>
             )}
             <div className="space-y-4">
-              {group.providers.map(({ key, name, desc, hint }) => {
+              {group.providers.map(({ key, name, desc, hint, testable = true }) => {
                 const status = testStatus[key] || 'idle'
                 const isFmp = key === 'fmp'
                 return (
@@ -532,7 +534,7 @@ function ApiKeysSection({
                         />
                         <TestButton
                           status={status}
-                          disabled={!localKeys[key] || status === 'testing'}
+                          disabled={!testable || !localKeys[key] || status === 'testing'}
                           onClick={() => testProvider(key)}
                         />
                       </div>

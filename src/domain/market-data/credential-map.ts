@@ -21,6 +21,8 @@ const sdkKeyMapping: Record<string, string> = {
   tradingeconomics: 'tradingeconomics_api_key',
   econdb: 'econdb_api_key',
   intrinio: 'intrinio_api_key',
+  tradingview_sessionid: 'tradingview_sessionid',
+  tradingview_sessionid_sign: 'tradingview_sessionid_sign',
   benzinga: 'benzinga_api_key',
   tiingo: 'tiingo_token',
   biztoc: 'biztoc_api_key',
