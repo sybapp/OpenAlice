@@ -671,14 +671,64 @@ describe('MarketDataService', () => {
       provider: 'tradingview',
       endpoint: '/tradingview/candles',
       totalCount: 2,
-      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'timeISO', 'marketInfo'],
+      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'timeISO'],
       rows: [
-        { symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46, timeISO: '2024-06-01T00:00:00.000Z', marketInfo: null },
-        { symbol: 'NASDAQ:AAPL', time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 456, timeISO: '2024-06-01T01:00:00.000Z', marketInfo: null },
+        { symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46, timeISO: '2024-06-01T00:00:00.000Z' },
+        { symbol: 'NASDAQ:AAPL', time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 456, timeISO: '2024-06-01T01:00:00.000Z' },
       ],
       warnings: ['TradingView chart update: $prices'],
     })
     expect(socket.readyState).toBe(3)
+  })
+
+  it('can include TradingView market metadata in candle snapshots when requested', async () => {
+    const socket = new FakeRealtimeSocket()
+    const service = new MarketDataService(deps(async () => [], undefined, {
+      createTradingViewRealtimeClient: (options) => new TradingViewRealtimeClient({
+        ...options,
+        socketFactory: () => socket,
+      }),
+    }))
+
+    const resultPromise = service.tradingViewCandles({
+      symbol: 'NASDAQ:AAPL',
+      options: { timeframe: '60', range: 1 },
+      includeMarketInfo: true,
+    })
+    socket.open()
+
+    const chartCreate = await waitForSocketPacket(socket, 'chart_create_session')
+    const chartFrame = chartCreate ? parseRealtimeFrames(chartCreate)[0] : null
+    const chartSessionId = chartFrame && typeof chartFrame === 'object' && Array.isArray(chartFrame.p)
+      ? String(chartFrame.p[0])
+      : ''
+
+    socket.message(formatRealtimeCommand('symbol_resolved', [
+      chartSessionId,
+      'symbol_1',
+      { pro_name: 'NASDAQ:AAPL', timezone: 'America/New_York' },
+    ]))
+    socket.message(formatRealtimeCommand('timescale_update', [
+      chartSessionId,
+      {
+        $prices: {
+          s: [{ i: 1, v: [1717200000, 190, 195, 189, 194, 123] }],
+        },
+      },
+    ]))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'timeISO', 'marketInfo'],
+      rows: [{
+        symbol: 'NASDAQ:AAPL',
+        time: 1717200000,
+        marketInfo: {
+          seriesId: 'symbol_1',
+          pro_name: 'NASDAQ:AAPL',
+          timezone: 'America/New_York',
+        },
+      }],
+    })
   })
 
   it('gets a one-row TradingView quote snapshot from the latest candle', async () => {
@@ -786,7 +836,7 @@ describe('MarketDataService', () => {
     expect(result.totalCount).toBe(2)
     expect(result.rows).toEqual([{
       symbol: 'NASDAQ:AAPL',
-      candles: [{ symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123, timeISO: '2024-06-01T00:00:00.000Z', marketInfo: undefined }],
+      candles: [{ symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123, timeISO: '2024-06-01T00:00:00.000Z' }],
       points: [
         { $time: 1717200000, plot_0: 123, $timeISO: '2024-06-01T00:00:00.000Z' },
         { $time: 1717203600, plot_0: 456, $timeISO: '2024-06-01T01:00:00.000Z' },
