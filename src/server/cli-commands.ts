@@ -62,9 +62,13 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       marketdata: {
         catalog: 'marketDataCatalog',
         indicator: 'marketDataIndicator',
+        indicatorGet: 'tradingViewIndicatorGet',
+        indicatorSearch: 'tradingViewIndicatorSearch',
         query: 'marketDataQuery',
         scan: 'marketDataScan',
         search: 'marketDataSearch',
+        symbolSearch: 'tradingViewSymbolSearch',
+        ta: 'tradingViewTechnicalAnalysis',
       },
       think: {
         calc: 'calculate',

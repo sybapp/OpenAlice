@@ -158,9 +158,13 @@ describe('CLI_EXPORTS — structure', () => {
     expect(getExport('data')?.commands['marketdata']).toEqual({
       catalog: 'marketDataCatalog',
       indicator: 'marketDataIndicator',
+      indicatorGet: 'tradingViewIndicatorGet',
+      indicatorSearch: 'tradingViewIndicatorSearch',
       query: 'marketDataQuery',
       scan: 'marketDataScan',
       search: 'marketDataSearch',
+      symbolSearch: 'tradingViewSymbolSearch',
+      ta: 'tradingViewTechnicalAnalysis',
     })
   })
 })
