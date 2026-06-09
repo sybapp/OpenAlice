@@ -491,6 +491,9 @@ export class MarketDataService {
 
       const update = await new Promise<tradingview.TradingViewChartUpdate>((resolve, reject) => {
         let subscription: tradingview.TradingViewChartSubscription | null = null
+        let lastUpdate: tradingview.TradingViewChartUpdate | null = null
+        let errorReceived: tradingview.TradingViewChartError | null = null
+
         const cleanup = () => {
           clearTimeout(timer)
           subscription?.close()
@@ -499,13 +502,25 @@ export class MarketDataService {
         }
         const timer = setTimeout(() => {
           cleanup()
-          reject(createTimeoutError('Timed out waiting for TradingView candle data', timeoutMs))
+          const diagnostics = [
+            `Symbol: ${input.symbol}`,
+            `Timeframe: ${input.options?.timeframe ?? '1D'}`,
+            `Range: ${input.options?.range ?? 100}`,
+            `Last update: ${lastUpdate ? `${lastUpdate.candles.length} candles, changes: ${lastUpdate.changes.join(',')}` : 'none'}`,
+            errorReceived ? `Last error: ${errorReceived.kind} - ${errorReceived.message}` : null,
+          ].filter(Boolean).join('; ')
+          reject(createTimeoutError(
+            `Timed out waiting for TradingView candle data. ${diagnostics}`,
+            timeoutMs,
+          ))
         }, timeoutMs)
         session.onError((error) => {
+          errorReceived = error
           cleanup()
-          reject(new Error(error.message))
+          reject(new Error(`TradingView chart error (${error.kind}): ${error.message}. Symbol: ${input.symbol}`))
         })
         subscription = session.subscribe(input.symbol, (data) => {
+          lastUpdate = data
           cleanup()
           resolve(data)
         }, input.options)
@@ -559,6 +574,10 @@ export class MarketDataService {
         let chartSubscription: tradingview.TradingViewChartSubscription | null = null
         let study: tradingview.TradingViewChartStudy | null = null
         let latestCandles: tradingview.TradingViewCandle[] = []
+        let lastStudyUpdate: tradingview.TradingViewStudyUpdate | null = null
+        let chartError: tradingview.TradingViewChartError | null = null
+        let studyError: tradingview.TradingViewStudyError | null = null
+
         const cleanup = () => {
           clearTimeout(timer)
           study?.remove()
@@ -568,21 +587,36 @@ export class MarketDataService {
         }
         const timer = setTimeout(() => {
           cleanup()
-          reject(createTimeoutError('Timed out waiting for TradingView study data', timeoutMs))
+          const diagnostics = [
+            `Symbol: ${input.symbol}`,
+            `Indicator: ${indicatorId}`,
+            `Timeframe: ${input.options?.timeframe ?? '1D'}`,
+            `Candles: ${latestCandles.length}`,
+            `Last study update: ${lastStudyUpdate ? `${lastStudyUpdate.points.length} points, changes: ${lastStudyUpdate.changes.join(',')}` : 'none'}`,
+            chartError ? `Chart error: ${chartError.kind} - ${chartError.message}` : null,
+            studyError ? `Study error: ${studyError.message}` : null,
+          ].filter(Boolean).join('; ')
+          reject(createTimeoutError(
+            `Timed out waiting for TradingView study data. ${diagnostics}`,
+            timeoutMs,
+          ))
         }, timeoutMs)
         chart.onError((error) => {
+          chartError = error
           cleanup()
-          reject(new Error(error.message))
+          reject(new Error(`TradingView chart error (${error.kind}): ${error.message}. Symbol: ${input.symbol}, Indicator: ${indicatorId}`))
         })
         chartSubscription = chart.subscribe(input.symbol, (data) => {
           latestCandles = data.candles
         }, input.options)
         study = new tradingview.TradingViewChartStudy(chart, indicator)
         study.onError((error) => {
+          studyError = error
           cleanup()
-          reject(new Error(error.message))
+          reject(new Error(`TradingView study error: ${error.message}. Symbol: ${input.symbol}, Indicator: ${indicatorId}`))
         })
         study.onUpdate((update) => {
+          lastStudyUpdate = update
           cleanup()
           resolve({
             symbol: input.symbol,
