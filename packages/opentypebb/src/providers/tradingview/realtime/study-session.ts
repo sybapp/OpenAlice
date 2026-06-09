@@ -194,18 +194,39 @@ export class TradingViewChartStudy {
   }
 
   onReady(listener: TradingViewRealtimeListener<[]>): () => void {
-    this.readyListeners.add(listener)
-    return () => this.readyListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[]> = () => {
+      try {
+        listener()
+      } catch (error) {
+        console.error('TradingView study ready listener error:', error)
+      }
+    }
+    this.readyListeners.add(safeListener)
+    return () => this.readyListeners.delete(safeListener)
   }
 
   onUpdate(listener: TradingViewRealtimeListener<[TradingViewStudyUpdate]>): () => void {
-    this.updateListeners.add(listener)
-    return () => this.updateListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[TradingViewStudyUpdate]> = (update) => {
+      try {
+        listener(update)
+      } catch (error) {
+        console.error('TradingView study update listener error:', error)
+      }
+    }
+    this.updateListeners.add(safeListener)
+    return () => this.updateListeners.delete(safeListener)
   }
 
   onError(listener: TradingViewRealtimeListener<[TradingViewStudyError]>): () => void {
-    this.errorListeners.add(listener)
-    return () => this.errorListeners.delete(listener)
+    const safeListener: TradingViewRealtimeListener<[TradingViewStudyError]> = (error) => {
+      try {
+        listener(error)
+      } catch (listenerError) {
+        console.error('TradingView study error listener failed:', listenerError)
+      }
+    }
+    this.errorListeners.add(safeListener)
+    return () => this.errorListeners.delete(safeListener)
   }
 
   setIndicator(indicator: TradingViewStudyIndicator): void {
