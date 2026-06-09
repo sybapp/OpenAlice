@@ -13,6 +13,7 @@ import type {
   TradingViewRealtimeClientOptions,
   TradingViewRealtimeCredentials,
   TradingViewRealtimeSocketFactory,
+  TradingViewTimeframe,
 } from '@traderalice/opentypebb'
 
 export const MARKET_DATA_DEFAULT_LIMIT = 500
@@ -196,6 +197,13 @@ export interface MarketDataQuoteSubscription {
 export interface MarketDataCandleSubscription {
   provider: string
   getCandles: () => TradingViewCandle[]
+  setMarket: (symbol: string, options?: TradingViewChartMarketOptions) => void
+  setSeries: (timeframe: TradingViewTimeframe, range?: number, reference?: number) => void
+  fetchMore: (count?: number) => void
+  setTimezone: (timezone: string) => void
+  replayStep: (count?: number) => Promise<void>
+  replayStart: (interval?: number) => Promise<void>
+  replayStop: () => Promise<void>
   close: () => void
 }
 

@@ -395,6 +395,13 @@ export class MarketDataService {
     return {
       provider,
       getCandles: () => session.currentCandles,
+      setMarket: (symbol, options) => session.setMarket(symbol, options),
+      setSeries: (timeframe, range, reference) => session.setSeries(timeframe, range, reference),
+      fetchMore: (count) => session.fetchMore(count),
+      setTimezone: (timezone) => session.setTimezone(timezone),
+      replayStep: (count) => session.replayStep(count),
+      replayStart: (interval) => session.replayStart(interval),
+      replayStop: () => session.replayStop(),
       close: () => {
         subscription.close()
         session.close()
