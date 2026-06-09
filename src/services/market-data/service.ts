@@ -118,6 +118,29 @@ function tradingViewStudyIndicatorVersion(input: MarketDataTradingViewStudyInput
   return input.indicatorVersion ?? input.indicator?.version ?? 'last'
 }
 
+function tradingViewTimestampToIso(timestamp: unknown): string | undefined {
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+    return undefined
+  }
+  return new Date(timestamp * 1000).toISOString()
+}
+
+function tradingViewCandleRow(symbol: string, candle: tradingview.TradingViewCandle, marketInfo?: unknown): Record<string, unknown> {
+  return {
+    symbol,
+    ...candle,
+    timeISO: tradingViewTimestampToIso(candle.time),
+    marketInfo,
+  }
+}
+
+function tradingViewStudyPointRow(point: tradingview.TradingViewStudyPlotPoint): tradingview.TradingViewStudyPlotPoint {
+  return {
+    ...point,
+    $timeISO: tradingViewTimestampToIso(point.$time),
+  }
+}
+
 function clampLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) {
     return MARKET_DATA_DEFAULT_LIMIT
@@ -490,11 +513,7 @@ export class MarketDataService {
 
       return this.toEnvelope(provider, endpoint, {
         totalCount: update.candles.length,
-        rows: update.candles.map((candle) => ({
-          symbol: update.symbol,
-          ...candle,
-          marketInfo: update.marketInfo,
-        })),
+        rows: update.candles.map((candle) => tradingViewCandleRow(update.symbol, candle, update.marketInfo)),
         warnings: update.changes.map((change) => `TradingView chart update: ${change}`),
       }, update.candles.length)
     } catch (error) {
@@ -577,8 +596,8 @@ export class MarketDataService {
         totalCount: result.study.points.length,
         rows: [{
           symbol: result.symbol,
-          candles: result.candles,
-          points: result.study.points,
+          candles: result.candles.map((candle) => tradingViewCandleRow(result.symbol, candle)),
+          points: result.study.points.map(tradingViewStudyPointRow),
           graphics: result.study.graphics,
           strategyReport: result.study.strategyReport,
           changes: result.study.changes,

@@ -546,10 +546,10 @@ describe('MarketDataService', () => {
       provider: 'tradingview',
       endpoint: '/tradingview/candles',
       totalCount: 2,
-      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'marketInfo'],
+      fields: ['symbol', 'time', 'open', 'high', 'low', 'close', 'volume', 'timeISO', 'marketInfo'],
       rows: [
-        { symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46, marketInfo: null },
-        { symbol: 'NASDAQ:AAPL', time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 456, marketInfo: null },
+        { symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123.46, timeISO: '2024-06-01T00:00:00.000Z', marketInfo: null },
+        { symbol: 'NASDAQ:AAPL', time: 1717203600, open: 194, high: 196, low: 193, close: 195, volume: 456, timeISO: '2024-06-01T01:00:00.000Z', marketInfo: null },
       ],
       warnings: ['TradingView chart update: $prices'],
     })
@@ -613,10 +613,10 @@ describe('MarketDataService', () => {
     expect(result.totalCount).toBe(2)
     expect(result.rows).toEqual([{
       symbol: 'NASDAQ:AAPL',
-      candles: [{ time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123 }],
+      candles: [{ symbol: 'NASDAQ:AAPL', time: 1717200000, open: 190, high: 195, low: 189, close: 194, volume: 123, timeISO: '2024-06-01T00:00:00.000Z', marketInfo: undefined }],
       points: [
-        { $time: 1717200000, plot_0: 123 },
-        { $time: 1717203600, plot_0: 456 },
+        { $time: 1717200000, plot_0: 123, $timeISO: '2024-06-01T00:00:00.000Z' },
+        { $time: 1717203600, plot_0: 456, $timeISO: '2024-06-01T01:00:00.000Z' },
       ],
       graphics: {
         labels: [],
@@ -675,7 +675,7 @@ describe('MarketDataService', () => {
       endpoint: '/tradingview/study',
       rows: [{
         symbol: 'NASDAQ:AAPL',
-        points: [{ $time: 1717200000, plot_0: 100 }],
+        points: [{ $time: 1717200000, plot_0: 100, $timeISO: '2024-06-01T00:00:00.000Z' }],
       }],
     })
   })
