@@ -181,6 +181,7 @@ export interface MarketDataQuoteSubscriptionInput {
   session?: string
   fields?: TradingViewQuoteFieldPreset
   customFields?: TradingViewQuoteField[]
+  realtimeServer?: TradingViewRealtimeClientOptions['server']
   credentials?: TradingViewRealtimeCredentials | null
   socketFactory?: TradingViewRealtimeSocketFactory
   onData: (data: TradingViewQuoteData) => void
@@ -190,6 +191,7 @@ export interface MarketDataCandleSubscriptionInput {
   provider?: 'tradingview' | string
   symbol: string
   options?: TradingViewChartMarketOptions
+  realtimeServer?: TradingViewRealtimeClientOptions['server']
   credentials?: TradingViewRealtimeCredentials | null
   socketFactory?: TradingViewRealtimeSocketFactory
   onData: (data: TradingViewChartUpdate) => void
@@ -239,6 +241,7 @@ export interface MarketDataTradingViewCandlesInput {
   symbol: string
   options?: TradingViewChartMarketOptions
   includeMarketInfo?: boolean
+  realtimeServer?: TradingViewRealtimeClientOptions['server']
   credentials?: TradingViewRealtimeCredentials | null
   socketFactory?: TradingViewRealtimeSocketFactory
   timeoutMs?: number
@@ -255,6 +258,7 @@ export interface MarketDataTradingViewStudyInput {
   indicator?: { id: string; version?: string }
   builtInType?: string
   inputs?: Record<string, string | number | boolean>
+  realtimeServer?: TradingViewRealtimeClientOptions['server']
   credentials?: TradingViewRealtimeCredentials | null
   socketFactory?: TradingViewRealtimeSocketFactory
   fetch?: typeof fetch

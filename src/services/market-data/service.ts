@@ -763,6 +763,7 @@ export class MarketDataService {
       this.deps.createTradingViewRealtimeClient ??
       ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
     const client = clientFactory({
+      server: input.realtimeServer,
       credentials,
       socketFactory: input.socketFactory,
     })
@@ -798,6 +799,7 @@ export class MarketDataService {
       this.deps.createTradingViewRealtimeClient ??
       ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
     const client = clientFactory({
+      server: input.realtimeServer,
       credentials,
       socketFactory: input.socketFactory,
     })
@@ -837,6 +839,7 @@ export class MarketDataService {
         this.deps.createTradingViewRealtimeClient ??
         ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
       const client = clientFactory({
+        server: input.realtimeServer,
         credentials,
         socketFactory: input.socketFactory,
       })
@@ -957,6 +960,7 @@ export class MarketDataService {
         this.deps.createTradingViewRealtimeClient ??
         ((options: tradingview.TradingViewRealtimeClientOptions) => new tradingview.TradingViewRealtimeClient(options))
       const client = clientFactory({
+        server: input.realtimeServer,
         credentials,
         socketFactory: input.socketFactory,
       })
