@@ -14,6 +14,20 @@ export {
   searchSymbols,
 } from './query.js'
 export {
+  TradingViewBuiltInIndicator,
+  TradingViewPineIndicator,
+  getIndicator,
+  searchIndicators,
+  type TradingViewBuiltInIndicatorType,
+  type TradingViewIndicatorAccess,
+  type TradingViewIndicatorSearchOptions,
+  type TradingViewIndicatorSearchResult,
+  type TradingViewPineIndicatorOptions,
+  type TradingViewPineIndicatorType,
+  type TradingViewPineInput,
+  type TradingViewPineInputType,
+} from './indicator.js'
+export {
   bond,
   cfd,
   coin,
