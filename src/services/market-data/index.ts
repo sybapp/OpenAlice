@@ -7,6 +7,7 @@ export {
   type MonitoringHooks,
   type MonitoringMetrics,
 } from './monitoring.js'
+export { MarketDataCache, globalCache, type CacheEntry, type CacheOptions } from './cache.js'
 export {
   MARKET_DATA_ASSET_CLASSES,
   MARKET_DATA_DEFAULT_LIMIT,
