@@ -1,5 +1,6 @@
 export { MARKET_DATA_CONFIG, TRADINGVIEW_CONFIG } from './config.js'
 export { MarketDataError, MarketDataErrorCode, type MarketDataErrorContext } from './errors.js'
+export { withRetry, type RetryOptions } from './retry.js'
 export {
   MARKET_DATA_ASSET_CLASSES,
   MARKET_DATA_DEFAULT_LIMIT,

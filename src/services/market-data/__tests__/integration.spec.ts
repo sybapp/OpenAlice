@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createMarketDataService } from '../service.js'
-import type { MarketDataService } from '../types.js'
+import type { MarketDataService } from '../service.js'
 
 describe('MarketDataService Integration', () => {
   let service: MarketDataService
@@ -23,10 +23,10 @@ describe('MarketDataService Integration', () => {
       expect(catalog.providers).toBeDefined()
 
       // 验证 TradingView 端点存在
-      const tvEndpoints = catalog.endpoints.filter(e => e.providers.includes('tradingview'))
+      const tvEndpoints = catalog.endpoints.filter((e: any) => e.providers.includes('tradingview'))
       expect(tvEndpoints.length).toBeGreaterThan(0)
-      expect(tvEndpoints.some(e => e.endpoint === '/tradingview/scan')).toBe(true)
-      expect(tvEndpoints.some(e => e.endpoint === '/tradingview/candles')).toBe(true)
+      expect(tvEndpoints.some((e: any) => e.endpoint === '/tradingview/scan')).toBe(true)
+      expect(tvEndpoints.some((e: any) => e.endpoint === '/tradingview/candles')).toBe(true)
     })
   })
 
