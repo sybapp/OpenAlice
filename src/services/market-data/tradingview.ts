@@ -6,10 +6,11 @@ import type {
   MarketDataTradingViewStudyInput,
 } from './types.js'
 import { MARKET_DATA_MAX_LIMIT } from './types.js'
+import { TRADINGVIEW_CONFIG } from './config.js'
 
 type TradingViewQuery = InstanceType<typeof tradingview.Query>
 
-export const DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS = 10000
+export const DEFAULT_TRADINGVIEW_REALTIME_TIMEOUT_MS = TRADINGVIEW_CONFIG.REALTIME_TIMEOUT_MS
 
 export const TRADINGVIEW_GENERIC_ENDPOINTS = [
   {
@@ -62,17 +63,7 @@ export const TRADINGVIEW_GENERIC_ENDPOINTS = [
   },
 ] satisfies MarketDataCatalogEndpoint[]
 
-const TRADINGVIEW_SCAN_COMPACT_COLUMNS = [
-  'name',
-  'close',
-  'change',
-  'volume',
-  'market_cap_basic',
-  'currency',
-  'type',
-  'sector',
-  'AnalystRating',
-]
+const TRADINGVIEW_SCAN_COMPACT_COLUMNS = [...TRADINGVIEW_CONFIG.SCAN_COMPACT_COLUMNS]
 
 const SCAN_PRESETS: Record<MarketDataScanPreset, (market?: string) => TradingViewQuery> = {
   stocks: tradingview.stocks,
