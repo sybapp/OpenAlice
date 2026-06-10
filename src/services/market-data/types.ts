@@ -17,8 +17,10 @@ import type {
   TradingViewTimeframe,
 } from '@traderalice/opentypebb'
 
-export const MARKET_DATA_DEFAULT_LIMIT = 50
-export const MARKET_DATA_MAX_LIMIT = 500
+import { MARKET_DATA_CONFIG } from './config.js'
+
+export const MARKET_DATA_DEFAULT_LIMIT = MARKET_DATA_CONFIG.DEFAULT_LIMIT
+export const MARKET_DATA_MAX_LIMIT = MARKET_DATA_CONFIG.MAX_LIMIT
 
 export const MARKET_DATA_ASSET_CLASSES = [
   'equity',
