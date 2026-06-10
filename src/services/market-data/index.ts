@@ -1,3 +1,4 @@
+export { MarketDataError, MarketDataErrorCode, type MarketDataErrorContext } from './errors.js'
 export {
   MARKET_DATA_DEFAULT_LIMIT,
   MARKET_DATA_MAX_LIMIT,
