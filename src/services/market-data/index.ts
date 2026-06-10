@@ -18,6 +18,14 @@ export {
   type ProviderQuery,
 } from './provider-plugin.js'
 export {
+  DataStream,
+  StreamManager,
+  globalStreamManager,
+  type StreamEvent,
+  type StreamEventType,
+  type StreamOptions,
+} from './streaming.js'
+export {
   MARKET_DATA_ASSET_CLASSES,
   MARKET_DATA_DEFAULT_LIMIT,
   MARKET_DATA_MAX_LIMIT,
