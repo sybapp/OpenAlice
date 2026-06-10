@@ -3,17 +3,17 @@
  *
  * Walks the AST over a bound environment. `bars(...)` resolves through the
  * federated bar service (barId-keyed); indicator math is reused verbatim from
- * `../indicator/functions`. Total + side-effect-free: bindings are let* (each
+ * `services/market-data/indicator/functions`. Total + side-effect-free: bindings are let* (each
  * may reference earlier ones); there is no mutation, control flow, or I/O.
  */
 
 import type { Program, Expr } from './ast.js'
 import { CalcError, didYouMean } from './errors.js'
-import type { DataSourceMeta } from '../indicator/types.js'
+import type { DataSourceMeta } from '@/services/market-data/indicator/types.js'
 import type { BarService, BarsResult, GetBarsOpts } from '../../market-data/bars/index.js'
 import type { AssetClass } from '../../market-data/aggregate-search.js'
-import * as Stat from '../indicator/functions/statistics.js'
-import * as Tech from '../indicator/functions/technical.js'
+import * as Stat from '@/services/market-data/indicator/functions/statistics.js'
+import * as Tech from '@/services/market-data/indicator/functions/technical.js'
 
 export interface CalcDeps {
   barService: BarService

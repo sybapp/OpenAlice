@@ -10,7 +10,7 @@
 import { parse } from './parser.js'
 import { evaluate, type CalcDeps, type CalcValue } from './evaluator.js'
 import { CalcError, type CalcDiagnostic } from './errors.js'
-import type { DataSourceMeta } from '../indicator/types.js'
+import type { DataSourceMeta } from '@/services/market-data/indicator/types.js'
 
 export interface RunResult {
   value?: CalcValue
