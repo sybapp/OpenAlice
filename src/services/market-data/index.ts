@@ -10,6 +10,14 @@ export {
 export { MarketDataCache, globalCache, type CacheEntry, type CacheOptions } from './cache.js'
 export { MetricsCollector, globalMetrics, type MetricsSnapshot } from './metrics.js'
 export {
+  ProviderRegistry,
+  globalRegistry,
+  type MarketDataProvider,
+  type ProviderCapabilities,
+  type ProviderMetadata,
+  type ProviderQuery,
+} from './provider-plugin.js'
+export {
   MARKET_DATA_ASSET_CLASSES,
   MARKET_DATA_DEFAULT_LIMIT,
   MARKET_DATA_MAX_LIMIT,
