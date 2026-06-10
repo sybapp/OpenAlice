@@ -1,4 +1,5 @@
 export {
+  MARKET_DATA_ASSET_CLASSES,
   MARKET_DATA_DEFAULT_LIMIT,
   MARKET_DATA_MAX_LIMIT,
   type MarketDataAssetClass,

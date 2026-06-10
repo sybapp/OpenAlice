@@ -20,16 +20,19 @@ import type {
 export const MARKET_DATA_DEFAULT_LIMIT = 50
 export const MARKET_DATA_MAX_LIMIT = 500
 
-export type MarketDataAssetClass =
-  | 'equity'
-  | 'crypto'
-  | 'currency'
-  | 'commodity'
-  | 'etf'
-  | 'index'
-  | 'derivatives'
-  | 'economy'
-  | 'news'
+export const MARKET_DATA_ASSET_CLASSES = [
+  'equity',
+  'crypto',
+  'currency',
+  'commodity',
+  'etf',
+  'index',
+  'derivatives',
+  'economy',
+  'news',
+] as const
+
+export type MarketDataAssetClass = typeof MARKET_DATA_ASSET_CLASSES[number]
 
 export interface MarketDataConfig {
   providers: {

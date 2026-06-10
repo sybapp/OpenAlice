@@ -1,9 +1,10 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import type {
-  MarketDataAssetClass,
-  MarketDataScanPreset,
-  MarketDataService,
+import {
+  MARKET_DATA_ASSET_CLASSES,
+  type MarketDataAssetClass,
+  type MarketDataScanPreset,
+  type MarketDataService,
 } from '@/services/market-data/index.js'
 import {
   credentialsInput,
@@ -28,7 +29,11 @@ type MarketDataToolService = Pick<MarketDataService, 'catalog' | 'query' | 'scan
     | 'runTradingViewStudy'
   >
 
-const searchAssetClassSchema = z.enum(['equity', 'crypto', 'currency', 'commodity', 'etf', 'index'])
+const SEARCH_ASSET_CLASSES = ['equity', 'crypto', 'currency', 'commodity', 'etf', 'index'] as const
+const searchAssetClassSchema = z.enum(SEARCH_ASSET_CLASSES)
+
+const INDICATOR_ASSET_CLASSES = ['equity', 'crypto', 'currency', 'commodity'] as const
+const indicatorAssetClassSchema = z.enum(INDICATOR_ASSET_CLASSES)
 
 const scanPresetSchema = z.enum([
   'stocks',
@@ -90,7 +95,7 @@ but not the exact endpoint. Query matches endpoint path, model, description,
 and provider names. This is the lightweight alternative to marketDataCatalog.`,
       inputSchema: z.object({
         query: z.string().optional().describe('Keyword to match, e.g. quote, income, earnings, filings, historical.'),
-        assetClass: z.enum(['equity', 'crypto', 'currency', 'commodity', 'etf', 'index', 'derivatives', 'economy', 'news']).optional().describe('Optional asset class filter.'),
+        assetClass: z.enum(MARKET_DATA_ASSET_CLASSES).optional().describe('Optional asset class filter.'),
         provider: z.string().optional().describe('Optional provider filter, e.g. yfinance or fmp.'),
         model: z.string().optional().describe('Optional OpenTypeBB model-name filter, e.g. IncomeStatement.'),
         limit: z.number().int().nonnegative().optional().describe('Max endpoint rows to return. Defaults to 50 and is clamped by the service.'),
@@ -182,7 +187,7 @@ RSI/BBANDS/MACD/ATR; and arithmetic with +, -, *, /.
 
 Returns { value, dataRange } where dataRange shows the actual date span and bar count used.`,
       inputSchema: z.object({
-        asset: z.enum(['equity', 'crypto', 'currency', 'commodity']).describe('Asset class.'),
+        asset: indicatorAssetClassSchema.describe('Asset class.'),
         formula: z.string().describe("Formula expression, e.g. SMA(CLOSE('AAPL', '1d'), 50)."),
         precision: z.number().int().min(0).max(10).optional().describe('Decimal places. Defaults to 4.'),
         provider: z.string().optional().describe('Provider override. Defaults to configured provider for the asset class.'),
