@@ -83,6 +83,13 @@ describe('DataStream', () => {
 
       expect(listener).not.toHaveBeenCalled()
     })
+
+    it('does not throw when no error listener is attached', () => {
+      const error = new MarketDataError(MarketDataErrorCode.NETWORK_ERROR, 'boom', 'test')
+      // A bare emit('error') with no listener crashes the process; the guard
+      // must drop it instead.
+      expect(() => stream.error(error)).not.toThrow()
+    })
   })
 
   describe('complete', () => {
@@ -246,6 +253,28 @@ describe('StreamManager', () => {
       expect(cancel1).toHaveBeenCalled()
       expect(cancel2).toHaveBeenCalled()
       expect(manager.list()).toEqual([])
+    })
+  })
+
+  describe('auto-prune on terminal events', () => {
+    it('removes a stream from the map when it completes', () => {
+      const stream = manager.create('s')
+      stream.complete()
+      expect(manager.get('s')).toBeUndefined()
+      expect(manager.list()).toEqual([])
+    })
+
+    it('removes a stream from the map when it is cancelled', () => {
+      manager.create('s')
+      manager.get<number>('s')!.cancel()
+      expect(manager.get('s')).toBeUndefined()
+    })
+
+    it('removes a stream from the map when it errors, without crashing', () => {
+      const stream = manager.create('s')
+      const error = new MarketDataError(MarketDataErrorCode.NETWORK_ERROR, 'boom', 'test')
+      expect(() => stream.error(error)).not.toThrow()
+      expect(manager.get('s')).toBeUndefined()
     })
   })
 })

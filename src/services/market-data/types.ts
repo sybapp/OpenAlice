@@ -18,6 +18,11 @@ import type {
 } from '@traderalice/opentypebb'
 
 import { MARKET_DATA_CONFIG } from './config.js'
+import type { MarketDataCache } from './cache.js'
+import type { MarketDataMonitor } from './monitoring.js'
+import type { MetricsCollector } from './metrics.js'
+import type { ProviderRegistry } from './provider-plugin.js'
+import type { RetryOptions } from './retry.js'
 
 export const MARKET_DATA_DEFAULT_LIMIT = MARKET_DATA_CONFIG.DEFAULT_LIMIT
 export const MARKET_DATA_MAX_LIMIT = MARKET_DATA_CONFIG.MAX_LIMIT
@@ -303,6 +308,20 @@ export interface MarketDataServiceDeps {
   createTradingViewRealtimeClient?: (
     options: TradingViewRealtimeClientOptions,
   ) => TradingViewRealtimeClient
+  /**
+   * Response cache for symbol search + historical reads. Defaults to a fresh
+   * per-instance cache; `createMarketDataService` wires the process-global
+   * `globalCache`.
+   */
+  cache?: MarketDataCache
+  /** Request/latency monitor hooks. Defaults per-instance; the factory wires `globalMonitor`. */
+  monitor?: MarketDataMonitor
+  /** Success-rate / latency metrics. Defaults per-instance; the factory wires `globalMetrics`. */
+  metrics?: MetricsCollector
+  /** Dynamically-registered data-source providers; routed by provider name. Defaults per-instance; the factory wires `globalRegistry`. */
+  plugins?: ProviderRegistry
+  /** Retry policy for transient upstream errors. `onRetry` is supplied by the service (wired to the monitor). */
+  retryOptions?: Omit<RetryOptions, 'onRetry'>
 }
 
 export type MarketDataCommandMap = Map<string, CommandDef>

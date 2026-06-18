@@ -45,7 +45,13 @@ export class DataStream<T = any> extends EventEmitter {
       return
     }
 
-    this.emit('error', error)
+    // EventEmitter THROWS (crashing the process) if 'error' is emitted with no
+    // registered listener. Only emit when someone is listening; otherwise drop
+    // it. StreamManager attaches its own 'error' listener, so manager-owned
+    // streams always have one.
+    if (this.listenerCount('error') > 0) {
+      this.emit('error', error)
+    }
   }
 
   complete(): void {
@@ -93,6 +99,13 @@ export class StreamManager {
 
     const stream = new DataStream<T>(options)
     this.streams.set(id, stream)
+    // Auto-prune so completed / cancelled / errored streams don't accumulate
+    // in the map. dispose() is idempotent, so the explicit delete()/clear()
+    // paths below stay correct even though cancel() also fires this listener.
+    const prune = () => this.dispose(id, stream)
+    stream.once('complete', prune)
+    stream.once('cancel', prune)
+    stream.once('error', prune)
     return stream
   }
 
@@ -102,12 +115,12 @@ export class StreamManager {
 
   delete(id: string): boolean {
     const stream = this.streams.get(id)
-    if (stream) {
-      stream.cancel()
-      stream.removeAllListeners()
-      return this.streams.delete(id)
+    if (!stream) {
+      return false
     }
-    return false
+    stream.cancel()           // fires 'cancel' → prune() disposes
+    this.dispose(id, stream)  // idempotent safety net
+    return true
   }
 
   list(): string[] {
@@ -115,11 +128,16 @@ export class StreamManager {
   }
 
   clear(): void {
-    for (const stream of this.streams.values()) {
-      stream.cancel()
-      stream.removeAllListeners()
+    for (const id of [...this.streams.keys()]) {
+      this.delete(id)
     }
-    this.streams.clear()
+  }
+
+  private dispose(id: string, stream: DataStream): void {
+    if (this.streams.get(id) === stream) {
+      this.streams.delete(id)
+    }
+    stream.removeAllListeners()
   }
 }
 
