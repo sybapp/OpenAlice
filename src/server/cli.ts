@@ -31,7 +31,7 @@ import { type WorkspaceToolCenter, makeWorkspaceResolver } from '../core/workspa
 import type { IInboxStore } from '../core/inbox-store.js'
 import type { IEntityStore } from '../core/entity-store.js'
 import type { WorkspaceService } from '../workspaces/service.js'
-import { formatZodError, wrapToolExecute, mcpInputSchema } from '../core/mcp-export.js'
+import { formatZodError, mcpInputSchema, toMcpContent } from '../core/mcp-export.js'
 import { type CliExport, getExport, mappedToolNames } from './cli-commands.js'
 
 export interface CliGatewayDeps {
@@ -175,13 +175,14 @@ export function registerCliRoutes(app: Hono, deps: CliGatewayDeps): void {
       return c.json({ error: `Validation failed: ${details}`, details }, 400)
     }
 
-    const result = await wrapToolExecute(tool)(validated)
-    if (result.isError) {
-      const text = result.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
-      return c.json({ error: text || 'tool error' }, 500)
+    try {
+      const result = await tool.execute!(validated, {
+        toolCallId: crypto.randomUUID(),
+        messages: [],
+      })
+      return c.json({ content: toMcpContent(result) })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500)
     }
-    // Hand back the MCP content blocks; the client prints text blocks verbatim
-    // (data tools return one text block that already holds the JSON payload).
-    return c.json({ content: result.content })
   })
 }

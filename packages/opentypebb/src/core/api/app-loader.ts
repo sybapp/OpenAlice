@@ -26,7 +26,6 @@ import { intrinioProvider } from '../../providers/intrinio/index.js'
 import { blsProvider } from '../../providers/bls/index.js'
 import { eiaProvider } from '../../providers/eia/index.js'
 import { secProvider } from '../../providers/sec/index.js'
-import { stubProvider } from '../../providers/stub/index.js'
 import { tradingviewProvider } from '../../providers/tradingview/index.js'
 
 // --- Extension routers ---
@@ -60,7 +59,6 @@ export function createRegistry(): Registry {
   registry.includeProvider(blsProvider)
   registry.includeProvider(eiaProvider)
   registry.includeProvider(secProvider)
-  registry.includeProvider(stubProvider)
   registry.includeProvider(tradingviewProvider)
   return registry
 }
