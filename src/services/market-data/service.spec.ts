@@ -13,6 +13,10 @@ import {
 } from '@traderalice/opentypebb'
 import { MarketDataService } from './service.js'
 import type { MarketDataConfig, MarketDataServiceDeps } from './types.js'
+import { MarketDataError, MarketDataErrorCode } from './errors.js'
+import { ProviderRegistry, type MarketDataProvider } from './provider-plugin.js'
+import { MarketDataCache } from './cache.js'
+import { MetricsCollector } from './metrics.js'
 
 const config: MarketDataConfig = {
   providers: {
@@ -1340,5 +1344,92 @@ describe('MarketDataService', () => {
     expect(result.provider).toBe('yfinance')
     expect(result.rows).toEqual([])
     expect(result.error).toBe('Only the tradingview provider supports technical analysis at the service layer.')
+  })
+})
+
+describe('MarketDataService — wired infrastructure', () => {
+  function fakeProvider(name: string, query: MarketDataProvider['query']): MarketDataProvider {
+    return {
+      metadata: { name, description: name, capabilities: { search: true, historical: true } },
+      query,
+    }
+  }
+
+  it('routes to a registered plugin provider, retries transient errors, and records metrics', async () => {
+    const plugins = new ProviderRegistry()
+    const metrics = new MetricsCollector()
+    let calls = 0
+    plugins.register(fakeProvider('flaky', async ({ endpoint }) => {
+      calls += 1
+      if (calls === 1) {
+        throw new MarketDataError(MarketDataErrorCode.NETWORK_ERROR, 'connection reset', 'flaky')
+      }
+      return { provider: 'flaky', endpoint, totalCount: 1, fields: ['symbol'], rows: [{ symbol: 'AAPL' }], warnings: [] }
+    }))
+
+    const service = new MarketDataService(deps(async () => [], () => config, {
+      plugins,
+      metrics,
+      retryOptions: { initialDelayMs: 0, maxAttempts: 3 },
+    }))
+
+    const result = await service.query({ endpoint: '/equity/search', provider: 'flaky', params: { query: 'AAPL' } })
+
+    expect(calls).toBe(2) // retried once after the transient NETWORK_ERROR
+    expect(result.rows).toEqual([{ symbol: 'AAPL' }])
+    expect(result.error).toBeUndefined()
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.totalRequests).toBe(1) // one logical request despite the retry
+    expect(snapshot.successCount).toBe(1)
+  })
+
+  it('does not retry non-retryable errors and maps them to an error envelope', async () => {
+    const plugins = new ProviderRegistry()
+    let calls = 0
+    plugins.register(fakeProvider('broken', async () => {
+      calls += 1
+      throw new Error('bad request')
+    }))
+    const service = new MarketDataService(deps(async () => [], () => config, {
+      plugins,
+      retryOptions: { initialDelayMs: 0, maxAttempts: 3 },
+    }))
+
+    const result = await service.query({ endpoint: '/equity/search', provider: 'broken', params: {} })
+
+    expect(calls).toBe(1) // UNKNOWN_ERROR is not retryable
+    expect(result.error).toBe('bad request') // original message preserved
+  })
+
+  it('caches symbol search and historical results; does not cache errors', async () => {
+    const cache = new MarketDataCache()
+    const plugins = new ProviderRegistry()
+    let searchCalls = 0
+    let historicalCalls = 0
+    let errorCalls = 0
+    plugins.register(fakeProvider('counted', async ({ endpoint }) => {
+      if (endpoint === '/equity/search') searchCalls += 1
+      if (endpoint === '/equity/price/historical') historicalCalls += 1
+      return { provider: 'counted', endpoint, totalCount: 1, fields: ['symbol'], rows: [{ symbol: 'AAPL' }], warnings: [] }
+    }))
+    plugins.register(fakeProvider('erroring', async ({ endpoint }) => {
+      errorCalls += 1
+      return { provider: 'erroring', endpoint, totalCount: 0, fields: [], rows: [], warnings: [], error: 'boom' }
+    }))
+    const service = new MarketDataService(deps(async () => [], () => config, { cache, plugins }))
+
+    const a = await service.search({ assetClass: 'equity', provider: 'counted', query: 'AAPL' })
+    const b = await service.search({ assetClass: 'equity', provider: 'counted', query: 'AAPL' })
+    expect(searchCalls).toBe(1) // second served from cache
+    expect(b).toEqual(a)
+
+    await service.historical({ assetClass: 'equity', provider: 'counted', symbol: 'AAPL' })
+    await service.historical({ assetClass: 'equity', provider: 'counted', symbol: 'AAPL' })
+    expect(historicalCalls).toBe(1)
+
+    await service.search({ assetClass: 'equity', provider: 'erroring', query: 'TSLA' })
+    await service.search({ assetClass: 'equity', provider: 'erroring', query: 'TSLA' })
+    expect(errorCalls).toBe(2) // error envelopes are not cached
   })
 })

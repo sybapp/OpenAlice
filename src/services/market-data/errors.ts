@@ -201,4 +201,38 @@ export class MarketDataError extends Error {
       context,
     )
   }
+
+  /**
+   * Classify an unknown thrown error into a MarketDataError, mapping common
+   * transient network / timeout / rate-limit failures onto RETRYABLE codes so
+   * `withRetry` can act on them. Anything unrecognized falls back to
+   * UNKNOWN_ERROR (non-retryable). The original message is always preserved.
+   */
+  static classify(error: unknown, provider: string = 'unknown', context: MarketDataErrorContext = {}): MarketDataError {
+    if (error instanceof MarketDataError) {
+      return error
+    }
+
+    const message = error instanceof Error ? error.message : String(error)
+    const haystack = message.toLowerCase()
+    const rawCode = (error as { code?: unknown } | null)?.code
+    const code = typeof rawCode === 'string' ? rawCode : undefined
+    const has = (...needles: string[]) => needles.some((needle) => haystack.includes(needle))
+
+    if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || has('timed out', 'timeout', 'etimedout')) {
+      return new MarketDataError(MarketDataErrorCode.PROVIDER_TIMEOUT, message, provider, { ...context, originalCode: code })
+    }
+    if (has('rate limit', 'too many requests', '429')) {
+      return new MarketDataError(MarketDataErrorCode.RATE_LIMIT_EXCEEDED, message, provider, { ...context, originalCode: code })
+    }
+    if (
+      code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN' ||
+      has('econnreset', 'econnrefused', 'enotfound', 'socket hang up', 'network', 'fetch failed',
+        'service unavailable', 'bad gateway', 'gateway timeout', '502', '503', '504')
+    ) {
+      return new MarketDataError(MarketDataErrorCode.NETWORK_ERROR, message, provider, { ...context, originalCode: code })
+    }
+
+    return MarketDataError.fromUnknown(error, provider, context)
+  }
 }

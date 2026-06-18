@@ -28,7 +28,7 @@ export class MarketDataMonitor {
     this.hooks = { ...this.hooks, ...hooks }
   }
 
-  trackRequest(endpoint: string, provider: string): () => void {
+  trackRequest(endpoint: string, provider: string): () => number {
     const key = `${provider}:${endpoint}`
     const metrics = this.getOrCreateMetrics(key)
     metrics.requestCount++

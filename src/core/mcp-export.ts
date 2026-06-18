@@ -126,6 +126,23 @@ export function extractMcpShape(tool: Tool): Record<string, z.ZodType> {
   return coerced
 }
 
+/**
+ * Build the strict Zod object used to validate tool input at the MCP / CLI /
+ * webui boundary.
+ *
+ * ⚠️ BEHAVIOR CHANGE (breaking-ish): `.strict()` REJECTS unknown keys, and as
+ * of the market-data service work this schema gates EVERY tool's execute path
+ * (see `wrapToolExecute`) — not just market-data tools. Callers that used to
+ * pass extra/undeclared fields and have them silently ignored now get a
+ * validation error. This is intentional hardening (tool input shapes stay
+ * authoritative), but any MCP/CLI client relying on extra-key tolerance must
+ * be updated.
+ *
+ * Caveat: only the field-level `.shape` is carried over here; object-level
+ * refinements (`.refine` / `.superRefine`) on a tool's inputSchema are NOT
+ * reconstructed. No current tool uses them — new tools must not depend on
+ * object-level refinements for boundary validation.
+ */
 export function mcpInputSchema(tool: Tool): z.ZodObject<Record<string, z.ZodType>> {
   return z.object(extractMcpShape(tool)).strict()
 }
@@ -143,6 +160,9 @@ export function formatZodError(err: unknown): string {
 export function wrapToolExecute(tool: Tool): (args: any) => Promise<McpToolResult> {
   return async (args: any) => {
     try {
+      // Validate + coerce at the boundary. NOTE: strict — unknown keys are
+      // rejected for ALL tools (see mcpInputSchema). This is a behavior change
+      // vs the pre-market-data path, which passed raw args straight to execute.
       const validated = await mcpInputSchema(tool).parseAsync(args ?? {})
       const result = await tool.execute!(validated, {
         toolCallId: crypto.randomUUID(),

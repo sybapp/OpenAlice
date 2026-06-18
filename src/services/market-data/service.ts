@@ -64,6 +64,12 @@ import {
   tradingViewStudyPointRow,
   tradingViewTimeframeFromInterval,
 } from './tradingview.js'
+import { withRetry } from './retry.js'
+import { MarketDataCache, globalCache } from './cache.js'
+import { MarketDataMonitor, globalMonitor } from './monitoring.js'
+import { MetricsCollector, globalMetrics } from './metrics.js'
+import { ProviderRegistry, globalRegistry } from './provider-plugin.js'
+import { MarketDataError } from './errors.js'
 
 const FUNDAMENTAL_ENDPOINTS = {
   income: '/equity/fundamental/income',
@@ -282,8 +288,56 @@ function providerCatalog(registry: MarketDataServiceDeps['registry']): MarketDat
 
 export class MarketDataService {
   private commandMap: MarketDataCommandMap | null = null
+  private readonly cache: MarketDataCache
+  private readonly monitor: MarketDataMonitor
+  private readonly metrics: MetricsCollector
+  private readonly plugins: ProviderRegistry
+  private readonly retryOptions?: MarketDataServiceDeps['retryOptions']
 
-  constructor(private readonly deps: MarketDataServiceDeps) {}
+  constructor(private readonly deps: MarketDataServiceDeps) {
+    // Default to fresh per-instance infra so direct `new MarketDataService(...)`
+    // (tests) stays isolated; `createMarketDataService` wires the process
+    // globals for production.
+    this.cache = deps.cache ?? new MarketDataCache()
+    this.monitor = deps.monitor ?? new MarketDataMonitor()
+    this.metrics = deps.metrics ?? new MetricsCollector()
+    this.plugins = deps.plugins ?? new ProviderRegistry()
+    this.retryOptions = deps.retryOptions
+  }
+
+  /**
+   * Run an upstream fetch with retry (on classified transient errors), latency
+   * tracking, and monitor/metrics hooks. Re-throws a classified
+   * MarketDataError on failure so callers can map it to an error envelope.
+   */
+  private async runTracked<T>(provider: string, endpoint: string, fetchFn: () => Promise<T>): Promise<T> {
+    const elapsed = this.monitor.trackRequest(endpoint, provider)
+    try {
+      const result = await withRetry(
+        async () => {
+          try {
+            return await fetchFn()
+          } catch (raw) {
+            throw MarketDataError.classify(raw, provider, { endpoint })
+          }
+        },
+        {
+          ...this.retryOptions,
+          onRetry: (error, attempt) => this.monitor.trackRetry(endpoint, provider, error, attempt),
+        },
+      )
+      const latencyMs = elapsed()
+      this.monitor.trackSuccess(endpoint, provider, latencyMs)
+      this.metrics.recordSuccess(provider, latencyMs)
+      return result
+    } catch (error) {
+      const mdError = MarketDataError.classify(error, provider, { endpoint })
+      const latencyMs = elapsed()
+      this.monitor.trackError(endpoint, provider, mdError, latencyMs)
+      this.metrics.recordError(provider, mdError, latencyMs)
+      throw mdError
+    }
+  }
 
   catalog(): MarketDataCatalog {
     const modelsByProvider = providerModels(this.deps.registry)
@@ -323,9 +377,20 @@ export class MarketDataService {
       }
       const credentials = input.credentials ?? this.deps.credentialsForConfig?.(config.providerKeys) ?? {}
       const params = { ...input.params }
-      const result = command
-        ? await command.handler(this.deps.executor, provider, params, credentials)
-        : await this.deps.executor.execute(provider, endpoint.replace(/^\//, ''), params, credentials)
+
+      // A dynamically-registered provider (provider-plugin) takes precedence
+      // over the built-in OpenTypeBB executor for its registered name. It
+      // returns a full envelope, so it skips toEnvelope().
+      const plugin = this.plugins.get(provider)
+      if (plugin) {
+        return await this.runTracked(provider, endpoint, () => plugin.query({ endpoint, params, credentials }))
+      }
+
+      const result = await this.runTracked(provider, endpoint, () =>
+        command
+          ? command.handler(this.deps.executor, provider, params, credentials)
+          : this.deps.executor.execute(provider, endpoint.replace(/^\//, ''), params, credentials),
+      )
       return this.toEnvelope(provider, endpoint, result, limit)
     } catch (error) {
       return errorEnvelope(provider, endpoint, error)
@@ -365,7 +430,13 @@ export class MarketDataService {
       return errorEnvelope(input.provider ?? '', `/search/${input.assetClass}`, `Search is not supported for asset class '${input.assetClass}'.`)
     }
 
-    return this.query({
+    const cacheKey = `${input.assetClass}|${input.provider ?? ''}|${input.limit ?? ''}|${input.query}|${JSON.stringify(input.params ?? {})}`
+    const cached = this.cache.getSymbolSearch(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const envelope = await this.query({
       endpoint,
       provider: input.provider,
       limit: input.limit,
@@ -375,6 +446,10 @@ export class MarketDataService {
         ...input.params,
       },
     })
+    if (!envelope.error) {
+      this.cache.setSymbolSearch(cacheKey, envelope)
+    }
+    return envelope
   }
 
   async historical(input: MarketDataHistoricalInput): Promise<MarketDataEnvelope> {
@@ -383,7 +458,13 @@ export class MarketDataService {
       return errorEnvelope(input.provider ?? '', `/historical/${input.assetClass}`, `Historical data is not supported for asset class '${input.assetClass}'.`)
     }
 
-    return this.query({
+    const cacheKey = `${input.assetClass}|${input.symbol}|${input.provider ?? ''}|${input.limit ?? ''}|${JSON.stringify(input.params ?? {})}`
+    const cached = this.cache.getHistorical(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const envelope = await this.query({
       endpoint,
       provider: input.provider,
       limit: input.limit,
@@ -393,6 +474,10 @@ export class MarketDataService {
         ...input.params,
       },
     })
+    if (!envelope.error) {
+      this.cache.setHistorical(cacheKey, envelope)
+    }
+    return envelope
   }
 
   async indicator(input: MarketDataIndicatorInput) {
@@ -1099,5 +1184,13 @@ export function createMarketDataService(deps?: Partial<MarketDataServiceDeps>): 
     readConfig: deps?.readConfig ?? readMarketDataConfig,
     credentialsForConfig: deps?.credentialsForConfig ?? buildSDKCredentials,
     createTradingViewRealtimeClient: deps?.createTradingViewRealtimeClient,
+    // Production wiring: share one cache / monitor / metrics / plugin registry
+    // across the process (one service instance anyway). Tests pass their own
+    // or fall back to per-instance defaults in the constructor.
+    cache: deps?.cache ?? globalCache,
+    monitor: deps?.monitor ?? globalMonitor,
+    metrics: deps?.metrics ?? globalMetrics,
+    plugins: deps?.plugins ?? globalRegistry,
+    retryOptions: deps?.retryOptions,
   })
 }
