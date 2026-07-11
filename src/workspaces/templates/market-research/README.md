@@ -26,4 +26,4 @@ reports.
 
 Set `MARKET_RESEARCH_LAB_DIR` to a local clone of the satellite repository before
 creating the workspace. Without the override, OpenAlice maintains a mirror of
-`TraderAlice/Market-Research-Lab` under the launcher root.
+`sybapp/Market-Research-Lab` under the launcher root.

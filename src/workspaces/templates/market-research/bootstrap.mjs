@@ -19,7 +19,7 @@ if (existsSync(outDir)) {
   process.exit(2)
 }
 
-const UPSTREAM = 'https://github.com/TraderAlice/Market-Research-Lab.git'
+const UPSTREAM = 'https://github.com/sybapp/Market-Research-Lab.git'
 const launcherRoot = process.env.AQ_LAUNCHER_ROOT || join(homedir(), '.openalice', 'workspaces')
 const mirror = join(launcherRoot, 'market-research-lab-mirror')
 const override = process.env.MARKET_RESEARCH_LAB_DIR
