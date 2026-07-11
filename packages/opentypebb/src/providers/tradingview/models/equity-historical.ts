@@ -18,15 +18,19 @@
 
 import { z } from 'zod'
 import { Fetcher } from '../../../core/provider/abstract/fetcher.js'
-import { EmptyDataError } from '../../../core/provider/utils/errors.js'
 import { EquityHistoricalDataSchema, EquityHistoricalQueryParamsSchema } from '../../../standard-models/equity-historical.js'
-import { endTimestamp, estimateRange, formatUTCTime, inDateWindow, INTERVALS, isValidDateOnly } from '../utils/historical.js'
-import { fetchTradingViewBars, type TradingViewBar } from '../utils/websocket.js'
+import {
+  fetchTradingViewHistoricalBars,
+  isValidTradingViewDateOnly,
+  mapTradingViewHistoricalBars,
+  TRADINGVIEW_HISTORICAL_INTERVALS,
+} from '../domain.js'
+import type { TradingViewBar } from '../utils/websocket.js'
 
 export const TradingViewEquityHistoricalQueryParamsSchema = EquityHistoricalQueryParamsSchema.extend({
-  start_date: z.string().refine(isValidDateOnly, 'Expected YYYY-MM-DD date.').nullable().default(null),
-  end_date: z.string().refine(isValidDateOnly, 'Expected YYYY-MM-DD date.').nullable().default(null),
-  interval: z.enum(['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']).default('1d').describe('Bar interval.'),
+  start_date: z.string().refine(isValidTradingViewDateOnly, 'Expected YYYY-MM-DD date.').nullable().default(null),
+  end_date: z.string().refine(isValidTradingViewDateOnly, 'Expected YYYY-MM-DD date.').nullable().default(null),
+  interval: z.enum(TRADINGVIEW_HISTORICAL_INTERVALS).default('1d').describe('Bar interval.'),
   extended_hours: z.boolean().default(false).describe('Include premarket and postmarket data.'),
   count: z.number().int().positive().optional().describe('Requested number of most-recent bars.'),
 })
@@ -44,11 +48,7 @@ export class TradingViewEquityHistoricalFetcher extends Fetcher {
     query: TradingViewEquityHistoricalQueryParams,
     _credentials: Record<string, string> | null,
   ): Promise<TradingViewBar[]> {
-    return fetchTradingViewBars({
-      symbol: query.symbol,
-      interval: INTERVALS[query.interval],
-      range: estimateRange(query),
-      to: endTimestamp(query),
+    return fetchTradingViewHistoricalBars(query, {
       session: query.extended_hours ? 'extended' : undefined,
     })
   }
@@ -57,10 +57,11 @@ export class TradingViewEquityHistoricalFetcher extends Fetcher {
     query: TradingViewEquityHistoricalQueryParams,
     bars: TradingViewBar[],
   ) {
-    const out = [...bars]
-      .sort((a, b) => a.time - b.time)
-      .map((bar) => ({
-        date: formatUTCTime(bar.time),
+    return mapTradingViewHistoricalBars(query, bars, {
+      assetKind: 'equity',
+      emptyDataMessage: 'No TradingView bars returned for the requested window.',
+      mapBar: ({ bar, date, semantics }) => ({
+        date,
         open: bar.open,
         high: bar.high,
         low: bar.low,
@@ -68,16 +69,11 @@ export class TradingViewEquityHistoricalFetcher extends Fetcher {
         volume: bar.volume,
         vwap: null,
         symbol: query.symbol,
-        provider: 'tradingview',
-        coverage: 'cboe_one',
-        volume_quality: 'partial_market',
-      }))
-      .filter((row) => inDateWindow(row.date, query))
-
-    if (out.length === 0) {
-      throw new EmptyDataError('No TradingView bars returned for the requested window.')
-    }
-
-    return out.map((row) => EquityHistoricalDataSchema.parse(row))
+        provider: semantics.provider,
+        coverage: semantics.coverage,
+        volume_quality: semantics.volumeQuality,
+      }),
+      parse: (row) => EquityHistoricalDataSchema.parse(row),
+    })
   }
 }
