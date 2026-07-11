@@ -80,7 +80,16 @@ describe('getBars — vendor branch', () => {
   })
 
   it('labels TradingView as delayed at provider granularity because free freshness is exchange-dependent', async () => {
-    const deps = makeDeps({ vendorProviders: { equity: 'tradingview', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' } })
+    const getBars = vi.fn(async () => RAW.filter((bar) => bar.close !== null) as never)
+    const deps = makeDeps({
+      vendorProviders: { equity: 'tradingview', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' },
+      barProviders: [{
+        id: 'tradingview',
+        capability: 'delayed',
+        search: async () => [],
+        getBars,
+      }],
+    })
     const svc = createBarService(deps)
 
     const { meta } = await svc.getBars({ symbol: 'HKEX:0700', assetClass: 'equity' }, { interval: '1m', count: 10 })
@@ -92,6 +101,8 @@ describe('getBars — vendor branch', () => {
       barId: 'tradingview|HKEX:0700',
       barCapability: 'delayed',
     })
+    expect(getBars).toHaveBeenCalledWith('HKEX:0700', 'equity', expect.objectContaining({ interval: '1m' }))
+    expect(deps.equityClient.getHistorical).not.toHaveBeenCalled()
   })
 
   it('truncates to `count` (keeps most recent)', async () => {

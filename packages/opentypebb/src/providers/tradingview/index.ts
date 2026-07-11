@@ -10,12 +10,6 @@
  */
 
 import { Provider } from '../../core/provider/abstract/provider.js'
-import { TradingViewCryptoHistoricalFetcher } from './models/crypto-historical.js'
-import { TradingViewCryptoSearchFetcher } from './models/crypto-search.js'
-import { TradingViewCurrencyHistoricalFetcher } from './models/currency-historical.js'
-import { TradingViewCurrencySearchFetcher } from './models/currency-search.js'
-import { TradingViewEquityHistoricalFetcher } from './models/equity-historical.js'
-import { TradingViewEquitySearchFetcher } from './models/equity-search.js'
 
 export const tradingviewProvider = new Provider({
   name: 'tradingview',
@@ -30,12 +24,7 @@ export const tradingviewProvider = new Provider({
       'For US equities that resolve to Cboe, volume is partial-market Cboe One/BATS volume, not SIP consolidated. ' +
       'All timestamps are in UTC for consistency across providers.',
   },
-  fetcherDict: {
-    EquitySearch: TradingViewEquitySearchFetcher,
-    EquityHistorical: TradingViewEquityHistoricalFetcher,
-    CryptoSearch: TradingViewCryptoSearchFetcher,
-    CryptoHistorical: TradingViewCryptoHistoricalFetcher,
-    CurrencyPairs: TradingViewCurrencySearchFetcher,
-    CurrencyHistorical: TradingViewCurrencyHistoricalFetcher,
-  },
+  // Metadata-only compatibility registration for the existing vendor picker.
+  // K-lines and search are implemented by Alice's native BarProvider adapter.
+  fetcherDict: {},
 })

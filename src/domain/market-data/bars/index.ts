@@ -12,6 +12,7 @@ export {
   type GetBarsOpts,
   type BarSourceRef,
   type BarService,
+  type BarProvider,
   type BarServiceDeps,
   type UtaBarAccount,
   type UtaBarGateway,

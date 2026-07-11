@@ -34,9 +34,7 @@ class FakeWebSocket {
   }
 }
 
-vi.mock('undici', () => ({
-  WebSocket: FakeWebSocket,
-}))
+vi.mock('ws', () => ({ default: FakeWebSocket }))
 
 function frame(payload: unknown): string {
   const message = typeof payload === 'string' ? payload : JSON.stringify(payload)
@@ -57,7 +55,7 @@ describe('fetchTradingViewBars', () => {
   })
 
   it('retries a transient close before any bars are returned', async () => {
-    const { fetchTradingViewBars } = await import('./websocket.js')
+    const { fetchTradingViewBars } = await import('./tradingview-websocket.js')
 
     const promise = fetchTradingViewBars({
       symbol: 'NASDAQ:AAPL',
@@ -86,7 +84,7 @@ describe('fetchTradingViewBars', () => {
   })
 
   it('does not retry provider symbol errors', async () => {
-    const { fetchTradingViewBars } = await import('./websocket.js')
+    const { fetchTradingViewBars } = await import('./tradingview-websocket.js')
 
     const promise = fetchTradingViewBars({
       symbol: 'NASDAQ:UNKNOWN',

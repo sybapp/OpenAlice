@@ -13,7 +13,6 @@
  */
 
 import type { BarParams, BarInterval, Bar } from '@traderalice/uta-protocol'
-import { TRADINGVIEW_BAR_CAPABILITY, TRADINGVIEW_PROVIDER_ID } from '@traderalice/opentypebb'
 import { aggregateSymbolSearch, type AssetClass } from '../aggregate-search.js'
 import type {
   BarService,
@@ -25,6 +24,7 @@ import type {
   OhlcvBar,
   BarMeta,
   BarCapability,
+  BarProvider,
 } from './types.js'
 import { formatBarId, parseBarId } from './types.js'
 
@@ -45,7 +45,6 @@ const VENDOR_CAPABILITY: Record<string, BarCapability> = {
   // commonly delayed unless the account has exchange entitlements. At provider
   // granularity, "delayed" is the honest conservative label; the provider docs
   // carry the Cboe/partial-volume caveat.
-  [TRADINGVIEW_PROVIDER_ID]: TRADINGVIEW_BAR_CAPABILITY,
 }
 
 /** Safe VENDOR_CAPABILITY lookup with fallback. */
@@ -197,6 +196,30 @@ function finalize(data: OhlcvBar[], count?: number): OhlcvBar[] {
 }
 
 export function createBarService(deps: BarServiceDeps): BarService {
+  const nativeProviders = new Map((deps.barProviders ?? []).map((provider) => [provider.id, provider]))
+
+  async function getNativeProviderBars(
+    provider: BarProvider,
+    symbol: string,
+    assetClass: AssetClass,
+    opts: GetBarsOpts,
+  ): Promise<BarsResult> {
+    let bars = await provider.getBars(symbol, assetClass, opts)
+    if (opts.end) bars = bars.filter((bar) => bar.date.slice(0, 10) <= opts.end!)
+    const filtered = finalize(bars, opts.count)
+    return {
+      bars: filtered,
+      meta: buildMeta(symbol, filtered, {
+        source: 'vendor',
+        sourceId: provider.id,
+        barId: formatBarId(provider.id, symbol),
+        provider: provider.id,
+        barCapability: provider.capability,
+        ...computeFreshness(filtered[filtered.length - 1]?.date ?? '', opts, () => new Date()),
+      }),
+    }
+  }
+
   // -------- vendor fetch --------
   async function getVendorBars(
     provider: string,
@@ -208,15 +231,11 @@ export function createBarService(deps: BarServiceDeps): BarService {
     // Upper bound: the provider compatibility models apply end_date;
     // we also post-filter defensively in case a provider ignores it.
     const end_date = opts.end
-    // TradingView consumes count server-side; do not send it to every provider
-    // because several OpenTypeBB fetchers map params directly to vendor APIs.
-    const tvCountParam = provider === TRADINGVIEW_PROVIDER_ID && opts.count != null ? { count: opts.count } : {}
     const p = (extra?: Record<string, unknown>) => ({
       symbol,
       start_date,
       provider,
       ...(end_date ? { end_date } : {}),
-      ...tvCountParam,
       ...extra,
     })
     let raw: Array<Record<string, unknown>>
@@ -295,10 +314,14 @@ export function createBarService(deps: BarServiceDeps): BarService {
       // Federate embedded vendor + broker (UTA) search. allSettled so one
       // side failing (e.g. no UTA configured) doesn't kill the other. Flat
       // candidates, no cross-source dedup — redundancy is the feature.
-      const [vendorRes, utaRes, capsRes] = await Promise.allSettled([
+      const enabledNativeProviders = await Promise.all((deps.barProviders ?? []).map(async (provider) =>
+        !provider.isEnabled || await provider.isEnabled() ? provider : null))
+      const [vendorRes, utaRes, capsRes, nativeRes] = await Promise.allSettled([
         aggregateSymbolSearch(deps.marketSearch, query, limit),
         deps.utaManager.searchContracts(query),
         deps.utaManager.getBarCapabilities?.() ?? Promise.resolve<Record<string, BarCapability>>({}),
+        Promise.all(enabledNativeProviders.filter((provider): provider is BarProvider => provider !== null)
+          .map((provider) => provider.search(query, limit))),
       ])
       const caps: Record<string, BarCapability> = capsRes.status === 'fulfilled' ? capsRes.value : {}
       const out: BarSourceCandidate[] = []
@@ -349,6 +372,10 @@ export function createBarService(deps: BarServiceDeps): BarService {
         }
       }
 
+      if (nativeRes.status === 'fulfilled') {
+        for (const candidates of nativeRes.value) out.push(...candidates)
+      }
+
       // Order by freshness so the agent's default pick is the freshest source:
       // broker bars (realtime) and partial-market feeds (iex/TradingView Cboe)
       // float above delayed vendors (yfinance/fmp). The
@@ -369,6 +396,8 @@ export function createBarService(deps: BarServiceDeps): BarService {
     async getBars(ref, opts) {
       if ('symbol' in ref) {
         const provider = deps.vendorProviders[ref.assetClass]
+        const nativeProvider = nativeProviders.get(provider)
+        if (nativeProvider) return getNativeProviderBars(nativeProvider, ref.symbol, ref.assetClass, opts)
         return getVendorBars(provider, ref.assetClass, ref.symbol, opts)
       }
       // barId form
@@ -376,6 +405,13 @@ export function createBarService(deps: BarServiceDeps): BarService {
       if (!parsed) throw new Error(`Invalid barId "${ref.barId}" (expected "sourceId|nativeSymbol")`)
       const isUta = await deps.utaManager.has(parsed.sourceId)
       if (isUta) return getUtaBars(parsed.sourceId, ref.barId, opts)
+      const nativeProvider = nativeProviders.get(parsed.sourceId)
+      if (nativeProvider) {
+        if (!ref.assetClass) {
+          throw new Error(`Vendor barId "${ref.barId}" needs an assetClass to route. Pass { barId, assetClass }.`)
+        }
+        return getNativeProviderBars(nativeProvider, parsed.nativeSymbol, ref.assetClass, opts)
+      }
       // vendor barId — needs an assetClass to route to the right client
       if (!ref.assetClass) {
         throw new Error(

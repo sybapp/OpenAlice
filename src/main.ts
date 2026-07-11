@@ -43,6 +43,7 @@ import { createQuantTools } from './tool/quant.js'
 import { createSnapshotTools } from './tool/snapshot.js'
 import { createSimulateTools } from './tool/simulate.js'
 import { createBarService } from './domain/market-data/bars/index.js'
+import { createTradingViewBarProvider } from './domain/market-data/bars/providers/tradingview.js'
 import { createReferenceData } from './domain/market-data/reference/service.js'
 import { createSectorRotationTools } from './tool/sector-rotation.js'
 import { createReferenceBoardTools } from './tool/reference-board.js'
@@ -208,12 +209,7 @@ async function main() {
     const md = await readMarketDataConfig()
     return [...new Set([md.providers.equity, ...md.extraVendors])]
   }
-  const getAssetProviders = async () => {
-    const md = await readMarketDataConfig()
-    return md.providers
-  }
-
-  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, assetProviders: getAssetProviders, equityClient, cryptoClient, currencyClient, commodityCatalog }
+  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, equityClient, cryptoClient, currencyClient, commodityCatalog }
 
   // Federated bar layer — embedded vendor adapters + broker (UTA) OHLCV behind one
   // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
@@ -225,6 +221,10 @@ async function main() {
     commodityClient,
     utaManager,
     vendorProviders: config.marketData.providers,
+    barProviders: [createTradingViewBarProvider(async () => {
+      const md = await readMarketDataConfig()
+      return Object.values(md.providers).includes('tradingview') || md.extraVendors.includes('tradingview')
+    })],
   })
 
   // Hub-first calendars: tools, CLI and boards all inherit through the

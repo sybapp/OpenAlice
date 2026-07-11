@@ -19,6 +19,7 @@
 
 import type { Bar, BarParams, ContractSearchHit } from '@traderalice/uta-protocol'
 import type { AssetClass, MarketSearchDeps } from '../aggregate-search.js'
+export type { AssetClass } from '../aggregate-search.js'
 import type {
   EquityClientLike,
   CryptoClientLike,
@@ -130,6 +131,16 @@ export interface BarService {
   getBars(ref: BarSourceRef, opts: GetBarsOpts): Promise<BarsResult>
 }
 
+/** A native K-line source adapter. Provider-specific transport stays behind
+ * this seam; BarService owns identity, metadata, caps, and federation. */
+export interface BarProvider {
+  readonly id: string
+  readonly capability: BarCapability
+  isEnabled?(): Promise<boolean>
+  search(query: string, limit: number): Promise<BarSourceCandidate[]>
+  getBars(symbol: string, assetClass: AssetClass, opts: GetBarsOpts): Promise<OhlcvBar[]>
+}
+
 // ==================== deps (structural — no services/ import) ====================
 
 /** Minimal broker-bar account surface (UTAAccountSDK satisfies it structurally). */
@@ -159,4 +170,6 @@ export interface BarServiceDeps {
   utaManager: UtaBarGateway
   /** Configured default provider per asset class — the `provider` we report. */
   vendorProviders: Record<AssetClass, string>
+  /** Native K-line adapters that do not route through OpenBB compatibility clients. */
+  barProviders?: readonly BarProvider[]
 }

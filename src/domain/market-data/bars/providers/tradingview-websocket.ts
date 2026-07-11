@@ -1,5 +1,4 @@
-import { WebSocket } from 'undici'
-import { OpenBBError } from '../../../core/provider/utils/errors.js'
+import WebSocket from 'ws'
 
 export interface TradingViewBar {
   time: number
@@ -34,7 +33,7 @@ const HEADERS = {
   Pragma: 'no-cache',
 }
 
-class RetryableTradingViewWebSocketError extends OpenBBError {
+class RetryableTradingViewWebSocketError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'RetryableTradingViewWebSocketError'
@@ -45,9 +44,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function withAttemptContext(error: unknown, attempt: number, maxAttempts: number): OpenBBError {
+function withAttemptContext(error: unknown, attempt: number, maxAttempts: number): Error {
   const message = error instanceof Error ? error.message : String(error)
-  return new OpenBBError(`${message} (attempt ${attempt}/${maxAttempts})`, error)
+  return new Error(`${message} (attempt ${attempt}/${maxAttempts})`, { cause: error })
 }
 
 function sessionId(prefix: string): string {
@@ -171,7 +170,7 @@ async function fetchTradingViewBarsOnce(opts: FetchTradingViewBarsOptions): Prom
       try {
         packets = parseFrames(raw)
       } catch (error) {
-        fail(new OpenBBError(`Failed to parse TradingView websocket packet: ${error instanceof Error ? error.message : String(error)}`))
+        fail(new Error(`Failed to parse TradingView websocket packet: ${error instanceof Error ? error.message : String(error)}`))
         return
       }
 
@@ -181,15 +180,15 @@ async function fetchTradingViewBarsOnce(opts: FetchTradingViewBarsOptions): Prom
           continue
         }
         if (packet.m === 'symbol_error') {
-          fail(new OpenBBError(`TradingView symbol error for ${opts.symbol}: ${String(packet.p?.[2] ?? 'unknown')}`))
+          fail(new Error(`TradingView symbol error for ${opts.symbol}: ${String(packet.p?.[2] ?? 'unknown')}`))
           return
         }
         if (packet.m === 'series_error') {
-          fail(new OpenBBError(`TradingView series error for ${opts.symbol}: ${String(packet.p?.[3] ?? 'unknown')}`))
+          fail(new Error(`TradingView series error for ${opts.symbol}: ${String(packet.p?.[3] ?? 'unknown')}`))
           return
         }
         if (packet.m === 'critical_error' || packet.m === 'protocol_error') {
-          fail(new OpenBBError(`TradingView protocol error for ${opts.symbol}: ${JSON.stringify(packet.p ?? [])}`))
+          fail(new Error(`TradingView protocol error for ${opts.symbol}: ${JSON.stringify(packet.p ?? [])}`))
           return
         }
         const updates = parsePriceUpdate(packet)
@@ -233,5 +232,5 @@ export async function fetchTradingViewBars(opts: FetchTradingViewBarsOptions): P
     }
   }
 
-  throw new OpenBBError(`TradingView websocket retry loop exited unexpectedly for ${opts.symbol}`)
+  throw new Error(`TradingView websocket retry loop exited unexpectedly for ${opts.symbol}`)
 }
