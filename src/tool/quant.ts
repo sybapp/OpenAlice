@@ -39,6 +39,36 @@ default to the freshest broker candidate.`,
       },
     }),
 
+    getBars: tool({
+      description: `Export raw OHLCV bars and source metadata for a specific barId.
+
+This is the stable collection seam for replayable research workspaces. Use
+searchBars first, then persist the returned { bars, meta } instead of coupling a
+workspace to Alice's internal BarService or provider implementations.`,
+      inputSchema: z.object({
+        barId: z.string().describe('Explicit source id from searchBars'),
+        assetClass: z.enum(['equity', 'crypto', 'currency', 'commodity']).optional()
+          .describe('Required for vendor barIds; broker barIds infer it'),
+        interval: z.string().describe('Bar interval, e.g. 1m, 15m, 1h, 1d'),
+        count: z.number().int().positive().optional().describe('Most-recent bars to return'),
+        start: z.string().optional().describe('Inclusive start date (YYYY-MM-DD)'),
+        end: z.string().optional().describe('Inclusive end date (YYYY-MM-DD)'),
+        asOf: z.string().optional().describe('Point-in-time anchor for count-bounded reads'),
+      }).strict(),
+      execute: async ({ barId, assetClass, interval, count, start, end, asOf }) => {
+        return deps.barService.getBars(
+          assetClass ? { barId, assetClass } : { barId },
+          {
+            interval,
+            ...(count !== undefined ? { count } : {}),
+            ...(start !== undefined ? { start } : {}),
+            ...(end !== undefined ? { end } : {}),
+            ...(asOf !== undefined ? { asOf } : {}),
+          },
+        )
+      },
+    }),
+
     calculateQuant: tool({
       description: `Run a technical-analysis script over K-lines from explicit sources (barId-keyed).
 Get barIds from \`searchBars\` first (or \`searchContracts\` for broker-only).

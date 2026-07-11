@@ -69,6 +69,7 @@ export const CLI_EXPORTS: Record<string, CliExport> = {
       },
       analysis: {
         'search-bars': 'searchBars',
+        bars: 'getBars',
         quant: 'calculateQuant',
         // Honest as-of read (dated bars, no-lookahead, freshness contract) + a
         // path-dependent backtest. The Retrospective / Time-Machine primitives.

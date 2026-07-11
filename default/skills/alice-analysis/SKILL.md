@@ -26,6 +26,7 @@ of values). Get barIds from `alice analysis search-bars` first.
 ```bash
 alice analysis search-bars --query AAPL
 # Pick a broker barId if one came back (realtime, matches your fills); fall back to a vendor only if not.
+alice analysis bars --barId 'yfinance|AAPL' --assetClass equity --interval 1d --count 250
 alice analysis quant --script $'s = bars("alpaca-paper|AAPL", "1d", count=250)\nsma(s.close, 50)'
 ```
 
@@ -96,6 +97,9 @@ d1 = bars("yfinance|BTC-USD", "1d", count=250, asset="crypto")
 hypothetical trade, reach for these instead (see the `retrospective` skill for
 the full workflow):
 
+- **`alice analysis bars --barId … --interval …`** — raw replayable OHLCV plus
+  source and freshness metadata. Use this to collect versioned research inputs;
+  do not couple a workspace to Alice's internal BarService.
 - **`alice analysis snapshot --query XLE [--asOf YYYY-MM-DD]`** — the honest
   as-of read: DATED bars (never past `asOf` — no lookahead), the latest print
   (close + vs-prevClose + day high/low + amplitude), compact levels, and a

@@ -30,4 +30,16 @@ describe('quant tools wiring', () => {
     const r = (await calculateQuant.execute!({ script: `s = bars("yfinance|X","1d",asset="equity")\ns.close[-1]` }, ctx)) as { value: number }
     expect(r.value).toBe(4)
   })
+
+  it('getBars exports the stable bar-service result', async () => {
+    const { getBars } = createQuantTools({ barService: mockSvc })
+    const result = await getBars.execute!({
+      barId: 'yfinance|X',
+      assetClass: 'equity',
+      interval: '1d',
+      count: 2,
+    }, ctx) as { bars: unknown[]; meta: { barId?: string } }
+    expect(result.bars).toHaveLength(2)
+    expect(result.meta.barId).toBe('yfinance|X')
+  })
 })

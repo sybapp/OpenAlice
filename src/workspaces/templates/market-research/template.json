@@ -1,0 +1,9 @@
+{
+  "displayName": "Market Research",
+  "groupOrder": 30,
+  "description": "Replayable market research workspace with snapshot-based technical analysis and a path for fundamental research. Clones the Market Research Lab satellite repository; set MARKET_RESEARCH_LAB_DIR for a local source.",
+  "defaultAgents": ["claude", "codex"],
+  "injectTools": true,
+  "injectPersona": true,
+  "bundledSkills": ["alice-analysis", "build-thesis", "retrospective", "traderhub"]
+}
