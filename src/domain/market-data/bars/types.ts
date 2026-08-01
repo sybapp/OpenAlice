@@ -19,6 +19,7 @@
 
 import type { Bar, BarParams, ContractSearchHit } from '@traderalice/uta-protocol'
 import type { AssetClass, MarketSearchDeps } from '../aggregate-search.js'
+import type { MarketVendorDefinition } from '../vendors.js'
 import type {
   EquityClientLike,
   CryptoClientLike,
@@ -67,6 +68,30 @@ export interface OhlcvBar {
 export type BarSourceKind = 'vendor' | 'uta'
 export type BarCapability = 'free' | 'delayed' | 'subscription' | 'iex' | 'realtime'
 
+export interface VendorBarMetadata {
+  capability: BarCapability
+  supportedIntervals: readonly string[]
+  supportsCount?: boolean
+}
+
+/** Context supplied when a native adapter needs to resolve a shorthand symbol. */
+export interface VendorBarRequestContext {
+  assetClass?: AssetClass
+}
+
+/** OpenAlice-native vendor implementation behind the BarService seam. */
+export interface VendorBarAdapter {
+  readonly id: string
+  readonly vendor: MarketVendorDefinition
+  readonly metadata: VendorBarMetadata
+  search(query: string, opts: { limit: number }): Promise<BarSourceCandidate[]>
+  getBars(
+    nativeSymbol: string,
+    opts: GetBarsOpts,
+    context?: VendorBarRequestContext,
+  ): Promise<OhlcvBar[]>
+}
+
 /** Data-source metadata — structurally a superset of `DataSourceMeta`. */
 export interface BarMeta {
   symbol: string
@@ -78,6 +103,7 @@ export interface BarMeta {
   barId?: string
   provider?: string
   barCapability?: BarCapability
+  supportedIntervals?: string[]
   // ---- freshness contract ----
   // The point-in-time the request was anchored to (opts.end ?? asOf ?? today),
   // and whether the data actually REACHES it. A delayed vendor silently
@@ -101,11 +127,17 @@ export interface BarSourceCandidate {
   assetClass: AssetClass | 'unknown'
   label: string
   barCapability?: BarCapability
+  supportedIntervals?: string[]
 }
 
 export interface BarsResult {
   bars: OhlcvBar[]
   meta: BarMeta
+}
+
+export type BarSourceCapabilities = Pick<BarMeta, 'barCapability' | 'supportedIntervals'> & {
+  /** Whether callers must supply assetClass to route this source. */
+  requiresAssetClass: boolean
 }
 
 // ==================== service contract ====================
@@ -126,7 +158,8 @@ export interface GetBarsOpts {
 /**
  * A getBars reference: either a vendor-default request keyed by
  * `{symbol, assetClass}`, or an explicit `barId` (assetClass optional — only
- * needed to route a *vendor* barId to the right client; UTA barIds don't need it).
+ * needed to route a compatibility-vendor barId to the right client; native
+ * vendor and UTA barIds don't need it).
  */
 export type BarSourceRef =
   | { symbol: string; assetClass: AssetClass }
@@ -134,6 +167,7 @@ export type BarSourceRef =
 
 export interface BarService {
   searchBarSources(query: string, opts?: { limit?: number }): Promise<BarSourceCandidate[]>
+  getSourceCapabilities?(ref: BarSourceRef): Promise<BarSourceCapabilities>
   getBars(ref: BarSourceRef, opts: GetBarsOpts): Promise<BarsResult>
 }
 
@@ -166,4 +200,8 @@ export interface BarServiceDeps {
   utaManager: UtaBarGateway
   /** Configured default provider per asset class — the `provider` we report. */
   vendorProviders: Record<AssetClass, string>
+  /** Provider-owned K-line behavior, keyed by provider id. */
+  vendorBarMetadata?: Record<string, VendorBarMetadata>
+  /** OpenAlice-native K-line implementations, keyed by source id. */
+  vendorBarAdapters?: Record<string, VendorBarAdapter>
 }

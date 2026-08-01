@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { aggregateSymbolSearch, type MarketSearchDeps } from './aggregate-search.js'
 
-function deps(): MarketSearchDeps {
+function deps(over: Partial<MarketSearchDeps> = {}): MarketSearchDeps {
   return {
     symbolIndex: {
       search: vi.fn(() => [
@@ -12,6 +12,7 @@ function deps(): MarketSearchDeps {
       ]),
     } as never,
     equityVendors: ['yfinance'],
+    assetProviders: { crypto: 'yfinance', currency: 'yfinance' },
     equityClient: { search: vi.fn(async () => []) } as never,
     cryptoClient: { search: vi.fn(async () => []) } as never,
     currencyClient: {
@@ -21,6 +22,7 @@ function deps(): MarketSearchDeps {
       ]),
     } as never,
     commodityCatalog: { search: vi.fn(() => []) } as never,
+    ...over,
   }
 }
 
@@ -33,5 +35,26 @@ describe('aggregateSymbolSearch limits', () => {
     expect(results[0]).toMatchObject({ symbol: 'EURUSD', assetClass: 'currency' })
     expect(searchDeps.symbolIndex.search).toHaveBeenCalledWith('EURUSD', 2)
     expect(searchDeps.commodityCatalog.search).toHaveBeenCalledWith('EURUSD', 2)
+  })
+})
+
+describe('aggregateSymbolSearch', () => {
+  it('uses configured crypto and currency providers and preserves sourceId', async () => {
+    const cryptoSearch = vi.fn(async () => [{ symbol: 'BINANCE:BTCUSDT', name: 'Bitcoin / TetherUS' }])
+    const currencySearch = vi.fn(async () => [{ symbol: 'FX:USDJPY', name: 'U.S. Dollar / Japanese Yen' }])
+
+    const out = await aggregateSymbolSearch(deps({
+      symbolIndex: { search: () => [] } as never,
+      assetProviders: { crypto: 'fmp', currency: 'fmp' },
+      cryptoClient: { search: cryptoSearch } as never,
+      currencyClient: { search: currencySearch } as never,
+    }), 'USD')
+
+    expect(cryptoSearch).toHaveBeenCalledWith({ query: 'USD', provider: 'fmp' })
+    expect(currencySearch).toHaveBeenCalledWith({ query: 'USD', provider: 'fmp' })
+    expect(out).toEqual([
+      expect.objectContaining({ symbol: 'BINANCE:BTCUSDT', assetClass: 'crypto', sourceId: 'fmp' }),
+      expect.objectContaining({ symbol: 'FX:USDJPY', assetClass: 'currency', sourceId: 'fmp' }),
+    ])
   })
 })
