@@ -1,16 +1,26 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub
 
-Issues and specs for this repo live as Markdown files in `.scratch/`.
+Issues and PRDs for this repo live in GitHub Issues. All issue operations must
+target `sybapp/OpenAlice` via the `gh` CLI; do not operate on `upstream` or
+another repository.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are separate numbered files under `issues/`
-- Triage state is a `Status:` line near the top of each issue
-- Comments append under `## Comments`
+- **Create an issue**: `gh issue create --repo sybapp/OpenAlice --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **Read an issue**: `gh issue view <number> --repo sybapp/OpenAlice --comments`, including labels when needed.
+- **List issues**: `gh issue list --repo sybapp/OpenAlice --state open` with appropriate label and state filters.
+- **Comment on an issue**: `gh issue comment <number> --repo sybapp/OpenAlice --body "..."`.
+- **Apply / remove labels**: `gh issue edit <number> --repo sybapp/OpenAlice --add-label "..."` / `--remove-label "..."`.
+- **Close**: `gh issue close <number> --repo sybapp/OpenAlice --comment "..."`.
 
-## Publishing
+## Pull requests as a triage surface
 
-When a skill says to publish, create the corresponding file under
-`.scratch/<feature-slug>/`.
+**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
+
+## When a skill says “publish to the issue tracker”
+
+Create a GitHub issue in `sybapp/OpenAlice`.
+
+## When a skill says “fetch the relevant ticket”
+
+Run `gh issue view <number> --repo sybapp/OpenAlice --comments`.

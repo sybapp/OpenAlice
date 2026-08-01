@@ -299,18 +299,19 @@ the tagline, pillars, or other marketing copy.
 - Prefer structured Workspace launcher logs; the main process currently uses
   `console` and does not have a universal pino sink.
 
-## Agent Skills
+## Agent skills
 
-### Issue Tracker
+### Issue tracker
 
-Specs and issues are tracked as local Markdown under `.scratch/`. See
-`docs/agents/issue-tracker.md`.
+Issues and PRDs for `sybapp/OpenAlice` live in GitHub Issues; use `gh` scoped
+only to that repository. See `docs/agents/issue-tracker.md`.
 
-### Triage Labels
+### Triage labels
 
-Triage uses the five canonical role labels. See `docs/agents/triage-labels.md`.
+Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
 
-### Domain Docs
+### Domain docs
 
-This repo uses a single-context glossary and system-level ADRs. See
-`docs/agents/domain.md`.
+This repo uses a single-context layout with root `CONTEXT.md` and `docs/adr/`.
+See `docs/agents/domain.md`.
