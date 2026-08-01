@@ -7,6 +7,7 @@ import { MarketDataPage } from './MarketDataPage'
 
 const mocks = vi.hoisted(() => ({
   hubStatus: vi.fn(),
+  vendors: vi.fn(),
   testProvider: vi.fn(),
   updateConfig: vi.fn(),
   updateConfigImmediate: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('../api', () => ({
   api: {
     marketData: {
       hubStatus: mocks.hubStatus,
+      vendors: mocks.vendors,
       testProvider: mocks.testProvider,
     },
   },
@@ -47,6 +49,7 @@ vi.mock('../hooks/useConfigPage', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.vendors.mockResolvedValue({ vendors: [] })
   mocks.testProvider.mockResolvedValue({ ok: true })
 })
 
