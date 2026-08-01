@@ -16,6 +16,7 @@ import { createEconomyTools } from '../tool/economy.js'
 import { createQuantTools } from '../tool/quant.js'
 import { createSnapshotTools } from '../tool/snapshot.js'
 import { createSimulateTools } from '../tool/simulate.js'
+import { createTechnicalAnalysisTools } from '../tool/technical-analysis.js'
 import { createThinkingTools } from '../tool/thinking.js'
 import { inboxPushFactory } from '../tool/inbox-push.js'
 import { inboxReadFactory } from '../tool/inbox-read.js'
@@ -51,6 +52,7 @@ describe('CLI_EXPORTS — data export (global tools)', () => {
   tc.register(createQuantTools(any), 'quant')
   tc.register(createSnapshotTools(any), 'snapshot')
   tc.register(createSimulateTools(any), 'simulate')
+  tc.register(createTechnicalAnalysisTools(any), 'technical-analysis')
   tc.register(createEconomyTools(any, any), 'economy')
 
   it('every mapped verb resolves to a registered global tool', () => {
