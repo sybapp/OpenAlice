@@ -70,7 +70,7 @@ describe('analyzeOrderFlowContext', () => {
           sourceIndex: 0,
           timestamp: '2024-01-01 09:00:00',
           close: 104,
-          barCompletion: 'unknown',
+          barCompletion: 'complete',
         },
         delta: {
           status: 'available',
@@ -183,7 +183,7 @@ describe('analyzeOrderFlowContext', () => {
     expect(result.summary).toMatchObject({
       fidelity: 'bar_proxy',
       currentState: {
-        bar: { timestamp: '2024-01-01 09:00:00', barCompletion: 'unknown' },
+        bar: { timestamp: '2024-01-01 09:00:00', barCompletion: 'complete' },
         delta: { status: 'available', delta: 1000 },
         profile: { status: 'available', close: 104 },
       },
@@ -344,7 +344,7 @@ describe('analyzeOrderFlowContext', () => {
             index: 0,
             sourceIndex: 0,
             timestamp: '2024-01-01 09:00:00',
-            barCompletion: 'unknown',
+            barCompletion: 'complete',
           },
           delta: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },
           profile: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },

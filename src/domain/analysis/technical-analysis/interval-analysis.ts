@@ -91,8 +91,23 @@ function volumeConfirmationsFromOrderFlow(orderFlow: OrderFlowContextAnalysis): 
 
 function compactOrderFlow(orderFlow: OrderFlowContextAnalysis, mode: TechnicalAnalysisMode): OrderFlowContextAnalysis {
   if (mode === 'debug') return orderFlow
-  const { delta: _delta, profile: _profile, ...compact } = orderFlow
-  return compact
+  const { profile: _profile, ...compact } = orderFlow
+  if (mode !== 'execution' || !orderFlow.delta) {
+    const { delta: _delta, ...withoutDelta } = compact
+    return withoutDelta
+  }
+  return {
+    ...compact,
+    delta: {
+      bars: orderFlow.delta.bars.slice(-5).map((bar) => ({
+        timestamp: bar.timestamp,
+        close: bar.close,
+        delta: bar.delta,
+        deltaRatio: bar.deltaRatio,
+        cvd: bar.cvd,
+      } as unknown as typeof bar)),
+    },
+  }
 }
 
 function intervalSummary(
@@ -109,6 +124,7 @@ function intervalSummary(
     ...(indicators.confluence?.score === undefined ? {} : { confluenceScore: indicators.confluence.score }),
     confluenceZoneCount: indicators.confluenceZones.length,
     fvgCount: priceAction.fvgs.length,
+    misalignedFvgCount: priceAction.fvgs.filter((fvg) => fvg.qualityFlag === 'misaligned_with_pattern').length,
     ifvgCount: priceAction.ifvgs.length,
     orderBlockCount: priceAction.orderBlocks.length,
     liquidityPoolCount: priceAction.liquidityPools.length,
@@ -116,6 +132,9 @@ function intervalSummary(
     warnings: [
       ...indicators.warnings,
       ...(orderFlow.error ? [`Order-flow context: ${orderFlow.error}`] : []),
+      ...(priceAction.fvgs.some((fvg) => fvg.qualityFlag === 'misaligned_with_pattern')
+        ? ['FVG volume is misaligned with the pattern direction']
+        : []),
     ],
   }
 }

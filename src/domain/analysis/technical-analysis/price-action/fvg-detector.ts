@@ -11,6 +11,7 @@ import type {
   PriceActionFamilyFilterMeta,
   PriceActionVolumeConfirmation,
   PriceActionVolumeConfirmationInput,
+  ZoneBoundarySource,
   ZoneOverlapPolicy,
   ZoneMitigationSource,
   ZoneState,
@@ -67,6 +68,7 @@ function pushGap(
     formationVolatility: number
     zoneMitigationSource: ZoneMitigationSource
     volumeConfirmations?: Map<number, PriceActionVolumeConfirmationInput>
+    boundarySource?: ZoneBoundarySource
   },
 ): void {
   const size = opts.top - opts.bottom
@@ -112,7 +114,30 @@ function pushGap(
     sizeAtr,
     ...fillStatus,
     formationVolumeConfirmation: volumeConfirmationFor(opts.volumeConfirmations, opts.confirmationIndex, opts.type),
+    boundarySource: opts.boundarySource ?? inferBoundarySource(opts.bars, opts.formationIndex, opts.confirmationIndex, opts.top, opts.bottom),
+    ...(volumeConfirmationFor(opts.volumeConfirmations, opts.confirmationIndex, opts.type)?.alignedWithPattern === false
+      ? { qualityFlag: 'misaligned_with_pattern' as const }
+      : {}),
   })
+}
+
+function inferBoundarySource(
+  bars: OhlcvBar[],
+  formationIndex: number,
+  confirmationIndex: number,
+  top: number,
+  bottom: number,
+): ZoneBoundarySource {
+  const start = Math.max(0, formationIndex - 1)
+  const end = Math.min(bars.length - 1, confirmationIndex)
+  const find = (value: number): { index: number; field: 'high' | 'low' | 'derived' } => {
+    for (let index = start; index <= end; index += 1) {
+      if (bars[index]!.high === value) return { index, field: 'high' }
+      if (bars[index]!.low === value) return { index, field: 'low' }
+    }
+    return { index: formationIndex, field: 'derived' }
+  }
+  return { top: find(top), bottom: find(bottom) }
 }
 
 function shouldReturnZone(state: ZoneState): boolean {

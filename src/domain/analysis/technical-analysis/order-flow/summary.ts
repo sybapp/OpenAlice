@@ -39,6 +39,8 @@ export interface CurrentDeltaState {
   cvdDirection: OrderFlowDirection
   recentCvdTendency: OrderFlowTendency
   recentCvdChange: number
+  /** CVD change over the reported recent lookback, independent of the window anchor. */
+  cvdChangeOverN: number
   sampleCount: number
   coverage: number
   confidence: OrderFlowDeltaBar['confidence']
@@ -70,7 +72,7 @@ export interface OrderFlowStructureSummary {
       sourceIndex: number
       timestamp: string
       close: number
-      barCompletion: 'unknown'
+      barCompletion: 'complete' | 'incomplete'
     } | null
     delta: CurrentDeltaState | UnavailableSummaryComponent
     profile: CurrentProfileState | UnavailableSummaryComponent
@@ -150,6 +152,7 @@ export function buildOrderFlowStructureSummary(params: {
   const recentCvdChange = cvdWindow.length > 1
     ? cvdWindow[cvdWindow.length - 1]!.cvd - cvdWindow[0]!.cvd
     : 0
+  const cvdChangeOverN = recentCvdChange
 
   const delta = latestDelta
     ? {
@@ -161,6 +164,7 @@ export function buildOrderFlowStructureSummary(params: {
       cvdDirection: direction(latestDelta.cvd),
       recentCvdTendency: tendency(recentCvdChange),
       recentCvdChange,
+      cvdChangeOverN,
       sampleCount: cvdWindow.length,
       coverage: latestDelta.coverage,
       confidence: latestDelta.confidence,
@@ -232,7 +236,7 @@ export function buildOrderFlowStructureSummary(params: {
           sourceIndex: params.targetIndexOffset + latestIndex,
           timestamp: latestBar.date,
           close: latestBar.close,
-          barCompletion: 'unknown',
+          barCompletion: isBarComplete(latestBar.date),
         }
         : null,
       delta,
@@ -255,4 +259,13 @@ export function buildOrderFlowStructureSummary(params: {
       targetIndexOffset: params.targetIndexOffset,
     },
   }
+}
+
+function isBarComplete(date: string): 'complete' | 'incomplete' {
+  const timestamp = Date.parse(date)
+  if (!Number.isFinite(timestamp)) return 'incomplete'
+  // The analysis layer does not receive exchange session calendars. This is a
+  // conservative wall-clock signal: a bar whose timestamp is in the past is
+  // complete, while the currently forming bar is explicitly marked incomplete.
+  return timestamp < Date.now() ? 'complete' : 'incomplete'
 }

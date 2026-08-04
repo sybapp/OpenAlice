@@ -13,6 +13,15 @@ export type ZoneState = 'active' | 'touched' | 'mitigated' | 'filled' | 'broken'
 export type ZoneKind = 'fvg' | 'vi' | 'og' | 'order_block' | 'fvg_breaker' | 'order_block_breaker'
 export type ZoneMitigationSource = 'body' | 'wick' | 'midpoint'
 export type ZoneOverlapPolicy = 'ranked' | 'older' | 'newer' | 'none'
+export type BoundarySourceField = 'open' | 'high' | 'low' | 'close' | 'derived'
+export interface BoundarySource {
+  index: number
+  field: BoundarySourceField
+}
+export interface ZoneBoundarySource {
+  top: BoundarySource
+  bottom: BoundarySource
+}
 
 export interface PriceActionFamilyFilterMeta {
   detectedCount: number
@@ -136,6 +145,7 @@ export interface FairValueGap extends Partial<Omit<ZoneEnvelope, 'top' | 'bottom
   top: number
   /** Gap 下边界 */
   bottom: number
+  boundarySource?: ZoneBoundarySource
   /** FVG 形成位置（中间 K 线的索引） */
   formationIndex: number
   /** FVG/VI/OG signal confirmation bar index used for intrabar confirmation */
@@ -152,6 +162,7 @@ export interface FairValueGap extends Partial<Omit<ZoneEnvelope, 'top' | 'bottom
   completelyFilled: boolean
   /** FVG/VI/OG 形成 K 线的 intrabar delta/coverage 确认 */
   formationVolumeConfirmation?: PriceActionVolumeConfirmation
+  qualityFlag?: 'misaligned_with_pattern'
 }
 
 // ==================== Inverse FVG ====================
@@ -307,6 +318,7 @@ export interface OrderBlock {
   top: number
   /** OB 区域下边界 */
   bottom: number
+  boundarySource?: ZoneBoundarySource
   /** 中线 */
   middle: number
   /** 作为 OB 锚点的极值蜡烛索引 */

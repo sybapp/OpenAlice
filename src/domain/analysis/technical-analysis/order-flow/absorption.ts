@@ -134,7 +134,7 @@ export function detectAbsorptionCandidates(params: OrderFlowCandidateContext): A
       direction: deltaBar.deltaRatio > 0 ? 'positive' : 'negative',
       index,
       sourceIndex: params.targetIndexOffset + index,
-      timestamp: bar.date,
+      timestamp: typeof bar.timestamp === 'string' ? bar.timestamp : typeof bar.date === 'string' ? bar.date : '',
       deltaRatio: deltaBar.deltaRatio,
       absoluteDeltaRatio,
       percentileThreshold,

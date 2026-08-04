@@ -41,6 +41,7 @@ export interface TechnicalAnalysisIntervalSummary {
   confluenceScore?: number
   confluenceZoneCount: number
   fvgCount: number
+  misalignedFvgCount: number
   ifvgCount: number
   orderBlockCount: number
   liquidityPoolCount: number

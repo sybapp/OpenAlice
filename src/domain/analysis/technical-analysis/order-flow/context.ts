@@ -27,7 +27,11 @@ export interface AnalyzeOrderFlowContextParams extends OrderFlowSourceRequest {
   targetMeta?: BarMeta
 }
 
-export interface OrderFlowDeltaBar extends OhlcvBar {
+export interface OrderFlowDeltaBar extends Omit<OhlcvBar, 'date'> {
+  /** Deprecated compatibility field; public responses omit it in favor of timestamp. */
+  date?: string
+  timestamp?: string
+  barCompletion?: 'complete' | 'incomplete'
   delta: number
   approxDelta: number
   cumulativeDelta: number
@@ -46,6 +50,9 @@ export interface OrderFlowMeta extends IntrabarPlan {
   targetIndexOffset: number
   lowConfidenceBars?: number
   isApproximation: true
+  /** CVD is reset at this target-bar date; absolute values are window-scoped. */
+  cvdAnchorDate?: string
+  cvdChangeOverN?: number
   [key: string]: unknown
 }
 
@@ -74,6 +81,11 @@ export interface OrderFlowContextAnalysis {
 const DEFAULT_ORDER_FLOW_COUNT = 100
 const DEFAULT_PROFILE_BINS = 20
 
+function barCompletion(date: string): 'complete' | 'incomplete' {
+  const timestamp = Date.parse(date)
+  return Number.isFinite(timestamp) && timestamp < Date.now() ? 'complete' : 'incomplete'
+}
+
 function sourceRef(source: OrderFlowSourceRequest): BarSourceRef {
   return source.assetClass ? { barId: source.barId, assetClass: source.assetClass } : { barId: source.barId }
 }
@@ -97,6 +109,8 @@ function baseMeta(params: {
   targetBars: number
   targetIndexOffset: number
   lowConfidenceBars?: number
+  cvdAnchorDate?: string
+  cvdChangeOverN?: number
 }): OrderFlowMeta {
   return {
     ...params.targetMeta,
@@ -107,6 +121,8 @@ function baseMeta(params: {
     targetIndexOffset: params.targetIndexOffset,
     ...(params.lowConfidenceBars === undefined ? {} : { lowConfidenceBars: params.lowConfidenceBars }),
     isApproximation: true,
+    ...(params.cvdAnchorDate ? { cvdAnchorDate: params.cvdAnchorDate } : {}),
+    ...(params.cvdChangeOverN === undefined ? {} : { cvdChangeOverN: params.cvdChangeOverN }),
   }
 }
 
@@ -207,8 +223,12 @@ export async function analyzeOrderFlowContext(
     : undefined
 
   const deltaBars: OrderFlowDeltaBar[] = delta
-    ? window.targetBars.map((bar, i) => ({
-      ...bar,
+    ? window.targetBars.map((bar, i) => {
+      const { date: _date, ...withoutDate } = bar
+      return {
+      ...withoutDate,
+      timestamp: bar.date,
+      barCompletion: barCompletion(bar.date),
       delta: delta.deltas[i],
       approxDelta: delta.deltas[i],
       cumulativeDelta: delta.cumulativeDeltas[i],
@@ -218,7 +238,8 @@ export async function analyzeOrderFlowContext(
       confidence: confidenceForCoverage(delta.coverage[i]),
       lowConfidence: delta.lowConfidenceIndices.includes(i),
       isApproximation: true,
-    }))
+      }
+    })
     : []
   const profileContext: OrderFlowProfileContext | null = profile
     ? {
@@ -253,6 +274,10 @@ export async function analyzeOrderFlowContext(
       targetBars: window.targetBars.length,
       targetIndexOffset: window.targetIndexOffset,
       lowConfidenceBars: delta?.lowConfidenceIndices.length,
+      cvdAnchorDate: window.targetBars[0]?.date,
+      cvdChangeOverN: deltaBars.length > 1
+        ? deltaBars.at(-1)!.cvd - deltaBars[Math.max(0, deltaBars.length - 5)]!.cvd
+        : 0,
     }),
   }
 }

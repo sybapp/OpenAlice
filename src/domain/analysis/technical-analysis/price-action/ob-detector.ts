@@ -20,6 +20,7 @@ import type {
   StructureLevel,
   ZoneMitigationSource,
   ZoneOverlapPolicy,
+  ZoneBoundarySource,
 } from './types.js'
 import { applyZoneOverlapFiltering, buildFamilyFilterMeta } from './overlap-filter.js'
 import { evaluateZoneLifecycle } from './zone-lifecycle.js'
@@ -140,6 +141,20 @@ function buildZone(
   }
 }
 
+function boundarySourceFor(bars: OhlcvBar[], index: number, top: number, bottom: number): ZoneBoundarySource {
+  const candidates = [index, Math.max(0, index - 1)]
+  const find = (value: number): { index: number; field: 'open' | 'high' | 'low' | 'close' | 'derived' } => {
+    for (const candidate of candidates) {
+      const bar = bars[candidate]!
+      for (const field of ['open', 'high', 'low', 'close'] as const) {
+        if (bar[field] === value) return { index: candidate, field }
+      }
+    }
+    return { index, field: 'derived' }
+  }
+  return { top: find(top), bottom: find(bottom) }
+}
+
 function triggerMatches(trigger: OrderBlockTrigger, filter: 'all' | OrderBlockTrigger): boolean {
   return filter === 'all' || trigger === filter
 }
@@ -255,6 +270,7 @@ export function detectOrderBlocksWithMeta(params: DetectOrderBlocksParams): Dete
       level: brk.level,
       trigger: brk.trigger,
       ...zone,
+      boundarySource: boundarySourceFor(bars, extremeIndex, zone.top, zone.bottom),
       index: extremeIndex,
       breakoutIndex: brk.index,
       breakoutPrice: brk.price,

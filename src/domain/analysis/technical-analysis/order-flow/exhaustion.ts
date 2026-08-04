@@ -97,7 +97,7 @@ function evidenceRef(
   return {
     index,
     sourceIndex: targetIndexOffset + index,
-    timestamp: bar.date,
+    timestamp: typeof bar.timestamp === 'string' ? bar.timestamp : typeof bar.date === 'string' ? bar.date : '',
   }
 }
 
