@@ -65,6 +65,7 @@ export interface AnalyzePriceActionRuntimeParams extends PriceActionSourceReques
   start?: string
   end?: string
   options?: AnalyzePriceActionBarsOptions
+  volatilityBars?: OhlcvBar[]
 }
 
 export interface AnalyzePriceActionMtfParams extends PriceActionSourceRequest {
@@ -343,6 +344,7 @@ export async function analyzePriceActionLoadedBars(
     options,
     volumeConfirmations: volumeConfirmation.confirmations,
     volumeConfirmationMeta: volumeConfirmation.meta ?? {},
+    volatilityBars: params.volatilityBars,
   })
 }
 

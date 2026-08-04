@@ -98,6 +98,7 @@ function compactOrderFlow(orderFlow: OrderFlowContextAnalysis, mode: TechnicalAn
   }
   return {
     ...compact,
+    profile: null,
     delta: {
       bars: orderFlow.delta.bars.slice(-5).map((bar) => ({
         timestamp: bar.timestamp,
@@ -190,6 +191,15 @@ export async function analyzeTechnicalAnalysisInterval(
       targetBars: loaded.bars,
       targetMeta: loaded.meta,
     })
+    const atrPeriod = params.indicators?.atrPeriod ?? 200
+    const volatilityBars = loaded.bars.length >= atrPeriod
+      ? loaded.bars
+      : (await barService.getBars(ref, {
+        interval,
+        count: atrPeriod,
+        start: params.start,
+        end: params.end,
+      })).bars
     const priceAction = await analyzePriceActionLoadedBars(
       barService,
       ref,
@@ -201,6 +211,7 @@ export async function analyzeTechnicalAnalysisInterval(
         start: params.start,
         end: params.end,
         options: priceActionOptions,
+        volatilityBars,
       },
       loaded.bars,
       loaded.meta,
@@ -210,6 +221,7 @@ export async function analyzeTechnicalAnalysisInterval(
       loaded.bars,
       priceAction.marketStructure,
       params.indicators,
+      volatilityBars,
     )
 
     return {

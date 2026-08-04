@@ -69,6 +69,7 @@ export interface AnalyzePriceActionBarsParams {
   options?: AnalyzePriceActionBarsOptions
   volumeConfirmations?: Map<number, PriceActionVolumeConfirmationInput>
   volumeConfirmationMeta?: object
+  volatilityBars?: OhlcvBar[]
 }
 
 export type PriceActionAnalysisResult = PriceActionAnalysis & {
@@ -285,14 +286,15 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
     }
   }
 
-  const volatility = calculatePriceActionVolatility(bars)
+  const volatility = calculatePriceActionVolatility(params.volatilityBars ?? bars)
+  const formationVolatilityByIndex = volatility.formationVolatilityByIndex.slice(-bars.length)
 
   const fvgDetection = detectFairValueGapsWithMeta({
     bars,
     gapMode,
     zoneMitigationSource: fvgZoneMitigationSource ?? zoneMitigationSource,
     minGapAtrMultiplier,
-    formationVolatilityByIndex: volatility.formationVolatilityByIndex,
+    formationVolatilityByIndex,
     minBodyRatio,
     overlapPolicy,
     volumeConfirmations: gapVolumeConfirmation ? volumeConfirmations : undefined,

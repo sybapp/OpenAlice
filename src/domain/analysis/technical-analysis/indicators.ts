@@ -86,6 +86,8 @@ export interface TechnicalAnalysisVwapContext {
   value?: number
   anchor?: TechnicalAnalysisVwapAnchor
   relation: TechnicalAnalysisVwapRelation
+  /** All computable anchors for comparison; value/anchor remain the selected primary. */
+  anchors?: Partial<Record<TechnicalAnalysisVwapAnchor, { value: number; relation: TechnicalAnalysisVwapRelation }>>
 }
 
 export interface TechnicalAnalysisFibLevel {
@@ -380,6 +382,7 @@ function selectVwap(
       value: round(provided),
       anchor: 'session',
       relation: vwapRelation(bar.close, provided),
+      anchors: { session: { value: round(provided), relation: vwapRelation(bar.close, provided) } },
     }
   }
 
@@ -397,6 +400,11 @@ function selectVwap(
     year,
     structure: structure.value,
   }
+  const anchors = Object.fromEntries(
+    (Object.entries(values) as Array<[TechnicalAnalysisVwapAnchor, number]>)
+      .filter(([, value]) => Number.isFinite(value))
+      .map(([anchor, value]) => [anchor, { value: round(value), relation: vwapRelation(bar.close, value) }]),
+  ) as TechnicalAnalysisVwapContext['anchors']
 
   const order: TechnicalAnalysisVwapAnchor[] = config.anchor === 'auto'
     ? structure.anchorIndex !== undefined && index - structure.anchorIndex <= config.volumeLookback * 2
@@ -411,10 +419,11 @@ function selectVwap(
         value: round(value),
         anchor,
         relation: vwapRelation(bar.close, value),
+        anchors,
       }
     }
   }
-  return { relation: 'unavailable' }
+  return { relation: 'unavailable', anchors }
 }
 
 function latestStructureEvent(marketStructure: MarketStructureAnalysis): StructureBreakEvent | undefined {
@@ -521,11 +530,12 @@ function buildConfluenceZones(
   fibRetracements: TechnicalAnalysisFibRetracement[],
   confluence: TechnicalAnalysisConfluence | undefined,
   config: TechnicalAnalysisIndicatorConfiguration,
+  volatilityBars: OhlcvBar[] = bars,
 ): TechnicalAnalysisConfluenceZone[] {
   if (!config.confluence.enabled || !confluence || bars.length === 0) return []
   const latestIndex = bars.length - 1
   const latestClose = bars[latestIndex]!.close
-  const volatility = calculatePriceActionVolatility(bars, config.atrPeriod).currentVolatility
+  const volatility = calculatePriceActionVolatility(volatilityBars, config.atrPeriod).currentVolatility
   const tolerance = Math.max(volatility * config.confluence.overlapAtrMultiplier, 1e-6)
   const points: TechnicalAnalysisConfluenceComponent[] = []
   if (confluence.emaFast !== undefined) points.push({ family: 'ema', label: 'ema_fast', price: confluence.emaFast })
@@ -580,6 +590,7 @@ export function buildTechnicalAnalysisIndicators(
   bars: OhlcvBar[],
   marketStructure: MarketStructureAnalysis,
   options: TechnicalAnalysisIndicatorOptions = {},
+  volatilityBars: OhlcvBar[] = bars,
 ): TechnicalAnalysisIndicatorResult {
   const configuration = normalizeOptions(options)
   const warnings: string[] = []
@@ -606,7 +617,7 @@ export function buildTechnicalAnalysisIndicators(
     warnings.push('Fibonacci retracement unavailable because no usable structure leg was detected')
   }
   const confluence = buildConfluence(bars, ema, vwap)
-  const confluenceZones = buildConfluenceZones(bars, fibRetracements, confluence, configuration)
+  const confluenceZones = buildConfluenceZones(bars, fibRetracements, confluence, configuration, volatilityBars)
 
   return {
     configuration,

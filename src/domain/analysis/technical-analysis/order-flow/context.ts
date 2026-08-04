@@ -75,7 +75,7 @@ export interface OrderFlowContextAnalysis {
   status: OrderFlowContextStatus
   error?: string
   delta?: OrderFlowDeltaContext
-  profile?: OrderFlowProfileContext
+  profile?: OrderFlowProfileContext | null
   summary?: OrderFlowStructureSummary
   meta: OrderFlowMeta
 }
