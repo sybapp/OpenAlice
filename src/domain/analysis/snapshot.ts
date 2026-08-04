@@ -141,6 +141,10 @@ export async function getSnapshot(
   const prevClose = bars.length >= 2 ? bars[bars.length - 2].close : null
   const periodHigh = Math.max(...bars.map((b) => b.high))
   const periodLow = Math.min(...bars.map((b) => b.low))
+  const lastDay = last.date.slice(0, 10)
+  const dayBars = bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+  const dayHigh = Math.max(...dayBars.map((bar) => bar.high))
+  const dayLow = Math.min(...dayBars.map((bar) => bar.low))
 
   return {
     ...base,
@@ -150,9 +154,9 @@ export async function getSnapshot(
       close: r(last.close)!,
       prevClose: r(prevClose),
       changePct: r(prevClose != null ? ((last.close - prevClose) / prevClose) * 100 : null, 2),
-      dayHigh: r(last.high)!,
-      dayLow: r(last.low)!,
-      dayAmplitudePct: r(prevClose != null ? ((last.high - last.low) / prevClose) * 100 : null, 2),
+      dayHigh: r(dayHigh)!,
+      dayLow: r(dayLow)!,
+      dayAmplitudePct: r(prevClose != null ? ((dayHigh - dayLow) / prevClose) * 100 : null, 2),
     },
     levels: {
       sma20: r(closes.length >= 20 ? safe(() => SMA(closes, 20)) : null),

@@ -6,6 +6,7 @@ import {
 } from './delta-volume.js'
 import { confidenceForCoverage, type IntrabarPlan } from './intrabar-plan.js'
 import { loadIntrabarWindow } from './intrabar-window.js'
+import { intervalToMinutesOrDefault } from './interval-time.js'
 import { buildOrderFlowStructureSummary, type OrderFlowStructureSummary } from './summary.js'
 
 export type OrderFlowContextMode = 'context' | 'summary' | 'delta' | 'profile'
@@ -53,6 +54,7 @@ export interface OrderFlowMeta extends IntrabarPlan {
   /** CVD is reset at this target-bar date; absolute values are window-scoped. */
   cvdAnchorDate?: string
   cvdChangeOverN?: number
+  cvdChangeLookback?: number
   [key: string]: unknown
 }
 
@@ -81,9 +83,10 @@ export interface OrderFlowContextAnalysis {
 const DEFAULT_ORDER_FLOW_COUNT = 100
 const DEFAULT_PROFILE_BINS = 20
 
-function barCompletion(date: string): 'complete' | 'incomplete' {
+function barCompletion(date: string, interval: string): 'complete' | 'incomplete' {
   const timestamp = Date.parse(date)
-  return Number.isFinite(timestamp) && timestamp < Date.now() ? 'complete' : 'incomplete'
+  const durationMs = intervalToMinutesOrDefault(interval, 60) * 60 * 1000
+  return Number.isFinite(timestamp) && timestamp + durationMs <= Date.now() ? 'complete' : 'incomplete'
 }
 
 function sourceRef(source: OrderFlowSourceRequest): BarSourceRef {
@@ -111,6 +114,7 @@ function baseMeta(params: {
   lowConfidenceBars?: number
   cvdAnchorDate?: string
   cvdChangeOverN?: number
+  cvdChangeLookback?: number
 }): OrderFlowMeta {
   return {
     ...params.targetMeta,
@@ -123,6 +127,7 @@ function baseMeta(params: {
     isApproximation: true,
     ...(params.cvdAnchorDate ? { cvdAnchorDate: params.cvdAnchorDate } : {}),
     ...(params.cvdChangeOverN === undefined ? {} : { cvdChangeOverN: params.cvdChangeOverN }),
+    ...(params.cvdChangeLookback === undefined ? {} : { cvdChangeLookback: params.cvdChangeLookback }),
   }
 }
 
@@ -162,6 +167,7 @@ export async function analyzeOrderFlowContext(
         ? buildOrderFlowStructureSummary({
           targetBars: [],
           deltaBars: [],
+          targetInterval: params.interval,
           profile: null,
           intrabarCount: 0,
           targetIndexOffset: window.targetIndexOffset,
@@ -190,6 +196,7 @@ export async function analyzeOrderFlowContext(
         ? buildOrderFlowStructureSummary({
           targetBars: window.targetBars,
           deltaBars: [],
+          targetInterval: params.interval,
           profile: null,
           intrabarCount: 0,
           targetIndexOffset: window.targetIndexOffset,
@@ -228,7 +235,7 @@ export async function analyzeOrderFlowContext(
       return {
       ...withoutDate,
       timestamp: bar.date,
-      barCompletion: barCompletion(bar.date),
+      barCompletion: barCompletion(bar.date, params.interval),
       delta: delta.deltas[i],
       approxDelta: delta.deltas[i],
       cumulativeDelta: delta.cumulativeDeltas[i],
@@ -260,6 +267,7 @@ export async function analyzeOrderFlowContext(
       ? buildOrderFlowStructureSummary({
         targetBars: window.targetBars,
         deltaBars,
+        targetInterval: params.interval,
         profile: profileContext,
         intrabarCount: window.intrabars.length,
         targetIndexOffset: window.targetIndexOffset,
@@ -278,6 +286,7 @@ export async function analyzeOrderFlowContext(
       cvdChangeOverN: deltaBars.length > 1
         ? deltaBars.at(-1)!.cvd - deltaBars[Math.max(0, deltaBars.length - 5)]!.cvd
         : 0,
+      cvdChangeLookback: Math.min(5, deltaBars.length),
     }),
   }
 }

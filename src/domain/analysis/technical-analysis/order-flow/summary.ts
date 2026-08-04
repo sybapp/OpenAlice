@@ -4,6 +4,7 @@ import { detectAbsorptionCandidates, type AbsorptionAnalysis } from './absorptio
 import { buildOrderFlowDivergence, type OrderFlowDivergenceSummary } from './divergence.js'
 import { detectExhaustionCandidates, type ExhaustionAnalysis } from './exhaustion.js'
 import { buildProfileStructure, type ProfileStructure } from './profile-structure.js'
+import { intervalToMinutesOrDefault, parseBarDateUTC } from './interval-time.js'
 
 export type OrderFlowFidelity = 'bar_proxy'
 export type OrderFlowDirection = 'positive' | 'negative' | 'neutral'
@@ -41,6 +42,7 @@ export interface CurrentDeltaState {
   recentCvdChange: number
   /** CVD change over the reported recent lookback, independent of the window anchor. */
   cvdChangeOverN: number
+  cvdChangeLookback: number
   sampleCount: number
   coverage: number
   confidence: OrderFlowDeltaBar['confidence']
@@ -135,6 +137,7 @@ export function buildOrderFlowStructureSummary(params: {
   profile: OrderFlowProfileContext | null
   intrabarCount: number
   targetIndexOffset: number
+  targetInterval: string
   unavailableReason?: 'missing_target_bars' | 'missing_intrabars'
   degradationReason?: string
   inputWindowTruncated?: boolean
@@ -165,6 +168,7 @@ export function buildOrderFlowStructureSummary(params: {
       recentCvdTendency: tendency(recentCvdChange),
       recentCvdChange,
       cvdChangeOverN,
+      cvdChangeLookback: cvdWindow.length,
       sampleCount: cvdWindow.length,
       coverage: latestDelta.coverage,
       confidence: latestDelta.confidence,
@@ -236,7 +240,7 @@ export function buildOrderFlowStructureSummary(params: {
           sourceIndex: params.targetIndexOffset + latestIndex,
           timestamp: latestBar.date,
           close: latestBar.close,
-          barCompletion: isBarComplete(latestBar.date),
+          barCompletion: isBarComplete(latestBar.date, params.targetInterval),
         }
         : null,
       delta,
@@ -261,11 +265,9 @@ export function buildOrderFlowStructureSummary(params: {
   }
 }
 
-function isBarComplete(date: string): 'complete' | 'incomplete' {
-  const timestamp = Date.parse(date)
+function isBarComplete(date: string, interval: string): 'complete' | 'incomplete' {
+  const timestamp = parseBarDateUTC(date).getTime()
   if (!Number.isFinite(timestamp)) return 'incomplete'
-  // The analysis layer does not receive exchange session calendars. This is a
-  // conservative wall-clock signal: a bar whose timestamp is in the past is
-  // complete, while the currently forming bar is explicitly marked incomplete.
-  return timestamp < Date.now() ? 'complete' : 'incomplete'
+  const durationMs = intervalToMinutesOrDefault(interval, 60) * 60 * 1000
+  return timestamp + durationMs <= Date.now() ? 'complete' : 'incomplete'
 }
