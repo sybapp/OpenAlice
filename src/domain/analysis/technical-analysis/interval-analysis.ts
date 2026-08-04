@@ -98,14 +98,15 @@ function compactOrderFlow(orderFlow: OrderFlowContextAnalysis, mode: TechnicalAn
   }
   return {
     ...compact,
-    profile: null,
     delta: {
       bars: orderFlow.delta.bars.slice(-5).map((bar) => ({
         timestamp: bar.timestamp,
         close: bar.close,
+        volume: bar.volume,
         delta: bar.delta,
         deltaRatio: bar.deltaRatio,
         cvd: bar.cvd,
+        barCompletion: bar.barCompletion,
       } as unknown as typeof bar)),
     },
   }
