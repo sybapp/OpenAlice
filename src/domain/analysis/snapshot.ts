@@ -93,6 +93,13 @@ function safe(fn: () => number): number | null {
   try { const v = fn(); return Number.isFinite(v) ? v : null } catch { return null }
 }
 
+function intradayMinutes(interval: string): number | null {
+  const match = interval.match(/^(\d+)(m|h)$/)
+  if (!match) return null
+  const value = Number(match[1])
+  return match[2] === 'h' ? value * 60 : value
+}
+
 export async function getSnapshot(
   barService: BarService,
   ref: BarSourceRef,
@@ -142,7 +149,22 @@ export async function getSnapshot(
   const periodHigh = Math.max(...bars.map((b) => b.high))
   const periodLow = Math.min(...bars.map((b) => b.low))
   const lastDay = last.date.slice(0, 10)
-  const dayBars = bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+  const minutes = intradayMinutes(interval)
+  let dayBars = bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+  if (minutes !== null) {
+    try {
+      const sessionResult = await barService.getBars(ref, {
+        interval,
+        start: lastDay,
+        end: lastDay,
+        count: Math.ceil((24 * 60) / minutes) + 1,
+      })
+      const completeDayBars = sessionResult.bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+      if (completeDayBars.length > 0) dayBars = completeDayBars
+    } catch {
+      // Keep the bounded-window range if the provider cannot serve a day slice.
+    }
+  }
   const dayHigh = Math.max(...dayBars.map((bar) => bar.high))
   const dayLow = Math.min(...dayBars.map((bar) => bar.low))
 
