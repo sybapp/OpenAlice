@@ -75,6 +75,7 @@ export interface ZoneEnvelope {
 
 export interface PriceActionVolatilityMeta {
   period: number
+  atrWindowBars?: number
   currentVolatility: number
   fallback: {
     used: boolean

@@ -4,7 +4,7 @@ import { detectAbsorptionCandidates, type AbsorptionAnalysis } from './absorptio
 import { buildOrderFlowDivergence, type OrderFlowDivergenceSummary } from './divergence.js'
 import { detectExhaustionCandidates, type ExhaustionAnalysis } from './exhaustion.js'
 import { buildProfileStructure, type ProfileStructure } from './profile-structure.js'
-import { intervalToMinutesOrDefault, parseBarDateUTC } from './interval-time.js'
+import { barCompletionFor } from './bar-completion.js'
 
 export type OrderFlowFidelity = 'bar_proxy'
 export type OrderFlowDirection = 'positive' | 'negative' | 'neutral'
@@ -151,7 +151,8 @@ export function buildOrderFlowStructureSummary(params: {
   const latestIndex = params.targetBars.length - 1
   const latestBar = params.targetBars[latestIndex]
   const latestDelta = params.deltaBars[latestIndex]
-  const cvdWindow = params.deltaBars.slice(-CVD_TENDENCY_LOOKBACK)
+  // A change over N bars needs N+1 CVD samples (the endpoint and N deltas).
+  const cvdWindow = params.deltaBars.slice(-(CVD_TENDENCY_LOOKBACK + 1))
   const recentCvdChange = cvdWindow.length > 1
     ? cvdWindow[cvdWindow.length - 1]!.cvd - cvdWindow[0]!.cvd
     : 0
@@ -168,7 +169,7 @@ export function buildOrderFlowStructureSummary(params: {
       recentCvdTendency: tendency(recentCvdChange),
       recentCvdChange,
       cvdChangeOverN,
-      cvdChangeLookback: cvdWindow.length,
+      cvdChangeLookback: Math.max(0, cvdWindow.length - 1),
       sampleCount: cvdWindow.length,
       coverage: latestDelta.coverage,
       confidence: latestDelta.confidence,
@@ -240,7 +241,7 @@ export function buildOrderFlowStructureSummary(params: {
           sourceIndex: params.targetIndexOffset + latestIndex,
           timestamp: latestBar.date,
           close: latestBar.close,
-          barCompletion: isBarComplete(latestBar.date, params.targetInterval),
+          barCompletion: barCompletionFor(latestBar.date, params.targetInterval),
         }
         : null,
       delta,
@@ -263,11 +264,4 @@ export function buildOrderFlowStructureSummary(params: {
       targetIndexOffset: params.targetIndexOffset,
     },
   }
-}
-
-function isBarComplete(date: string, interval: string): 'complete' | 'incomplete' {
-  const timestamp = parseBarDateUTC(date).getTime()
-  if (!Number.isFinite(timestamp)) return 'incomplete'
-  const durationMs = intervalToMinutesOrDefault(interval, 60) * 60 * 1000
-  return timestamp + durationMs <= Date.now() ? 'complete' : 'incomplete'
 }

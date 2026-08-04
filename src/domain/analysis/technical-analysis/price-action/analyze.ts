@@ -123,6 +123,24 @@ function recalculateOrderBlockVolumeShares(orderBlocks: OrderBlock[]): OrderBloc
   return orderBlocks
 }
 
+function annotateIndexTimestamps(value: unknown, bars: OhlcvBar[]): void {
+  if (!value || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    value.forEach((item) => annotateIndexTimestamps(item, bars))
+    return
+  }
+  const record = value as Record<string, unknown>
+  if (typeof record.index === 'number' && bars[record.index]) {
+    record.timestamp = bars[record.index]!.date
+  }
+  for (const [key, child] of Object.entries(record)) {
+    if (key.endsWith('Index') && typeof child === 'number' && bars[child]) {
+      record[`${key.slice(0, -5)}Timestamp`] = bars[child]!.date
+    }
+    annotateIndexTimestamps(child, bars)
+  }
+}
+
 function annotateSweptLiquidityPools(pools: LiquidityPool[], sweeps: LiquiditySweep[]): LiquidityPool[] {
   const poolSweeps = sweeps.filter((sweep) => sweep.kind === 'liquidity_pool_sweep')
 
@@ -248,6 +266,7 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
         schemaVersion: 2,
         volatility: {
           period: volatility.period,
+          atrWindowBars: volatility.atrWindowBars,
           currentVolatility: volatility.currentVolatility,
           fallback: volatility.fallback,
         },
@@ -385,7 +404,7 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
     premiumDiscount,
   )
 
-  return {
+  const analysis = {
     marketStructure,
     premiumDiscount,
     liquidityPools,
@@ -399,6 +418,7 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
       schemaVersion: 2,
       volatility: {
         period: volatility.period,
+        atrWindowBars: volatility.atrWindowBars,
         currentVolatility: volatility.currentVolatility,
         fallback: volatility.fallback,
       },
@@ -418,4 +438,6 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
       chochCount: marketStructure.choch.length,
     } as PriceActionMeta,
   }
+  annotateIndexTimestamps(analysis, bars)
+  return analysis
 }

@@ -135,6 +135,10 @@ function intervalSummary(
       ...(priceAction.fvgs.some((fvg) => fvg.qualityFlag === 'misaligned_with_pattern')
         ? ['FVG volume is misaligned with the pattern direction']
         : []),
+      ...(priceAction.meta.volatility.atrWindowBars !== undefined
+        && priceAction.meta.volatility.atrWindowBars < priceAction.meta.volatility.period
+        ? [`ATR uses ${priceAction.meta.volatility.atrWindowBars} bars, below its ${priceAction.meta.volatility.period}-bar period; structure thresholds are window-sensitive`]
+        : []),
     ],
   }
 }

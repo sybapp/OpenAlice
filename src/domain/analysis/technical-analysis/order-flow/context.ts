@@ -6,7 +6,7 @@ import {
 } from './delta-volume.js'
 import { confidenceForCoverage, type IntrabarPlan } from './intrabar-plan.js'
 import { loadIntrabarWindow } from './intrabar-window.js'
-import { intervalToMinutesOrDefault } from './interval-time.js'
+import { barCompletionFor } from './bar-completion.js'
 import { buildOrderFlowStructureSummary, type OrderFlowStructureSummary } from './summary.js'
 
 export type OrderFlowContextMode = 'context' | 'summary' | 'delta' | 'profile'
@@ -82,12 +82,6 @@ export interface OrderFlowContextAnalysis {
 
 const DEFAULT_ORDER_FLOW_COUNT = 100
 const DEFAULT_PROFILE_BINS = 20
-
-function barCompletion(date: string, interval: string): 'complete' | 'incomplete' {
-  const timestamp = Date.parse(date)
-  const durationMs = intervalToMinutesOrDefault(interval, 60) * 60 * 1000
-  return Number.isFinite(timestamp) && timestamp + durationMs <= Date.now() ? 'complete' : 'incomplete'
-}
 
 function sourceRef(source: OrderFlowSourceRequest): BarSourceRef {
   return source.assetClass ? { barId: source.barId, assetClass: source.assetClass } : { barId: source.barId }
@@ -235,7 +229,7 @@ export async function analyzeOrderFlowContext(
       return {
       ...withoutDate,
       timestamp: bar.date,
-      barCompletion: barCompletion(bar.date, params.interval),
+      barCompletion: barCompletionFor(bar.date, params.interval),
       delta: delta.deltas[i],
       approxDelta: delta.deltas[i],
       cumulativeDelta: delta.cumulativeDeltas[i],
@@ -284,9 +278,9 @@ export async function analyzeOrderFlowContext(
       lowConfidenceBars: delta?.lowConfidenceIndices.length,
       cvdAnchorDate: window.targetBars[0]?.date,
       cvdChangeOverN: deltaBars.length > 1
-        ? deltaBars.at(-1)!.cvd - deltaBars[Math.max(0, deltaBars.length - 5)]!.cvd
+        ? deltaBars.at(-1)!.cvd - deltaBars[Math.max(0, deltaBars.length - 6)]!.cvd
         : 0,
-      cvdChangeLookback: Math.min(5, deltaBars.length),
+      cvdChangeLookback: Math.max(0, Math.min(5, deltaBars.length - 1)),
     }),
   }
 }

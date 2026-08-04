@@ -79,6 +79,7 @@ export function calculateAverageRange(bars: OhlcvBar[], lookback = 20): number[]
 
 export interface PriceActionVolatilityContext {
   period: number
+  atrWindowBars: number
   currentVolatility: number
   formationVolatilityByIndex: number[]
   fallback: {
@@ -106,6 +107,7 @@ export function calculatePriceActionVolatility(
   if (bars.length === 0) {
     return {
       period,
+      atrWindowBars: 0,
       currentVolatility: Number.EPSILON,
       formationVolatilityByIndex: [],
       fallback: {
@@ -127,6 +129,7 @@ export function calculatePriceActionVolatility(
 
   return {
     period,
+    atrWindowBars: Math.min(period, bars.length),
     currentVolatility,
     formationVolatilityByIndex,
     fallback: {
