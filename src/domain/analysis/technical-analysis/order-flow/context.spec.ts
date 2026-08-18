@@ -45,6 +45,7 @@ describe('analyzeOrderFlowContext', () => {
     expect(result.status).toBe('ok')
     expect(result.delta?.bars).toHaveLength(1)
     expect(result.delta?.bars[0]).toMatchObject({
+      barCompletion: 'unknown',
       delta: 3000,
       approxDelta: 3000,
       cumulativeDelta: 3000,
@@ -70,7 +71,7 @@ describe('analyzeOrderFlowContext', () => {
           sourceIndex: 0,
           timestamp: '2024-01-01 09:00:00',
           close: 104,
-          barCompletion: 'complete',
+          barCompletion: 'unknown',
         },
         delta: {
           status: 'available',
@@ -152,6 +153,35 @@ describe('analyzeOrderFlowContext', () => {
     expect(result.summary).toBeUndefined()
   })
 
+  it('marks profile evidence unavailable when intrabars have no volume', async () => {
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({
+        bars: [{ date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: null }],
+        meta: { symbol: 'EURUSD', from: '2024-01-01', to: '2024-01-01', bars: 1 },
+      } as BarsResult)
+      .mockResolvedValueOnce({
+        bars: [{ date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: null }],
+        meta: { symbol: 'EURUSD', from: '2024-01-01', to: '2024-01-01', bars: 1 },
+      } as BarsResult)
+    const barService = { searchBarSources: vi.fn(), getBars } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|FX:EURUSD', interval: '15m', count: 1,
+    })
+
+    expect(result.profile).toBeUndefined()
+    expect(result.delta?.bars).toEqual([])
+    expect(result.summary?.currentState.delta).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 0,
+    })
+    expect(result.summary?.currentState.profile).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 1,
+    })
+    expect(result.summary?.profileStructure).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 0,
+    })
+  })
+
   it('returns the same interpreted state without raw views in summary mode', async () => {
     const getBars = vi.fn()
       .mockResolvedValueOnce({
@@ -183,7 +213,7 @@ describe('analyzeOrderFlowContext', () => {
     expect(result.summary).toMatchObject({
       fidelity: 'bar_proxy',
       currentState: {
-        bar: { timestamp: '2024-01-01 09:00:00', barCompletion: 'complete' },
+        bar: { timestamp: '2024-01-01 09:00:00', barCompletion: 'unknown' },
         delta: { status: 'available', delta: 1000 },
         profile: { status: 'available', close: 104 },
       },
@@ -344,7 +374,7 @@ describe('analyzeOrderFlowContext', () => {
             index: 0,
             sourceIndex: 0,
             timestamp: '2024-01-01 09:00:00',
-            barCompletion: 'complete',
+            barCompletion: 'unknown',
           },
           delta: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },
           profile: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },

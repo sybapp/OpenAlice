@@ -1,7 +1,6 @@
 import type {
   BarMeta,
   BarService,
-  BarSourceRef,
   GetBarsOpts,
   OhlcvBar,
 } from '@/domain/market-data/bars/index.js'
@@ -29,14 +28,7 @@ import type {
   TechnicalAnalysisMode,
   TechnicalAnalysisSourceRequest,
 } from './context.js'
-
-function sourceRef(source: TechnicalAnalysisSourceRequest): BarSourceRef {
-  return source.assetClass ? { barId: source.barId, assetClass: source.assetClass } : { barId: source.barId }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+import { errorMessage, sourceRef } from './shared.js'
 
 function dominantTrend(priceAction: PriceActionAnalysisResult): TrendDirection {
   const trends = [
@@ -55,7 +47,7 @@ function volumeConfirmationsFromOrderFlow(orderFlow: OrderFlowContextAnalysis): 
   confirmations?: Map<number, SignedVolumeEvidence>
   meta: Record<string, unknown>
 } {
-  if (!orderFlow.delta) {
+  if (!orderFlow.delta?.bars.length) {
     return {
       meta: {
         volumeConfirmation: 'unavailable',
@@ -156,21 +148,30 @@ export async function analyzeTechnicalAnalysisInterval(
   mode: TechnicalAnalysisMode,
 ): Promise<TechnicalAnalysisIntervalResult> {
   const ref = sourceRef(params)
+  const requestedCount = params.count ?? 200
+  const atrPeriod = params.indicators?.atrPeriod ?? 200
   const getBarsOptions: GetBarsOpts = {
     interval,
-    count: params.count ?? 200,
+    count: Math.max(requestedCount, atrPeriod),
     start: params.start,
     end: params.end,
   }
 
   try {
     const loaded = await barService.getBars(ref, getBarsOptions)
-    if (loaded.bars.length < 3) {
+    const targetBars = loaded.bars.slice(-requestedCount)
+    const targetMeta: BarMeta = {
+      ...loaded.meta,
+      from: targetBars[0]?.date ?? loaded.meta.from,
+      to: targetBars.at(-1)?.date ?? loaded.meta.to,
+      bars: targetBars.length,
+    }
+    if (targetBars.length < 3) {
       return {
         interval,
         status: 'insufficient',
-        priceAction: emptyPriceAction(interval, loaded.meta, loaded.bars),
-        meta: loaded.meta,
+        priceAction: emptyPriceAction(interval, targetMeta, targetBars),
+        meta: targetMeta,
         error: 'Insufficient bars returned for technical analysis',
       }
     }
@@ -184,23 +185,14 @@ export async function analyzeTechnicalAnalysisInterval(
       barId: params.barId,
       assetClass: params.assetClass,
       interval,
-      count: loaded.bars.length,
+      count: targetBars.length,
       start: params.start,
       end: params.end,
       mode: 'context',
       numBins: params.numBins,
-      targetBars: loaded.bars,
-      targetMeta: loaded.meta,
+      targetBars,
+      targetMeta,
     })
-    const atrPeriod = params.indicators?.atrPeriod ?? 200
-    const volatilityBars = loaded.bars.length >= atrPeriod
-      ? loaded.bars
-      : (await barService.getBars(ref, {
-        interval,
-        count: atrPeriod,
-        start: params.start,
-        end: params.end,
-      })).bars
     const priceAction = await analyzePriceActionLoadedBars(
       barService,
       ref,
@@ -212,27 +204,27 @@ export async function analyzeTechnicalAnalysisInterval(
         start: params.start,
         end: params.end,
         options: priceActionOptions,
-        volatilityBars,
+        volatilityBars: loaded.bars,
       },
-      loaded.bars,
-      loaded.meta,
+      targetBars,
+      targetMeta,
       volumeConfirmationsFromOrderFlow(orderFlow),
     )
     const indicators = buildTechnicalAnalysisIndicators(
-      loaded.bars,
+      targetBars,
       priceAction.marketStructure,
       params.indicators,
-      volatilityBars,
+      loaded.bars,
     )
 
     return {
       interval,
       status: 'ok',
-      summary: intervalSummary(loaded.bars, indicators, priceAction, orderFlow),
+      summary: intervalSummary(targetBars, indicators, priceAction, orderFlow),
       indicators,
       priceAction,
       orderFlow: compactOrderFlow(orderFlow, mode),
-      meta: loaded.meta,
+      meta: targetMeta,
     }
   } catch (error) {
     return {

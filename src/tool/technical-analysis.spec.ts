@@ -29,6 +29,7 @@ describe('createTechnicalAnalysisTools', () => {
     expect(Object.keys(tools)).toEqual(['analyzeTechnicalAnalysis'])
     const schema = (tools.analyzeTechnicalAnalysis as any).inputSchema
     expect(schema.safeParse({ barId: 'tradingview|AAPL', interval: '15m' }).success).toBe(true)
+    expect(schema.safeParse({ barId: 'alpaca-paper|AAPL', interval: '2h' }).success).toBe(false)
     expect(schema.safeParse({ barId: 'tradingview|AAPL' }).success).toBe(false)
     expect(tools.analyzeTechnicalAnalysis.description).toContain('EMA/VWAP/Fibonacci')
     expect(tools.analyzeTechnicalAnalysis.description).toContain('bar_proxy')
@@ -83,5 +84,15 @@ describe('createTechnicalAnalysisTools', () => {
     })
     expect(result.intervals[0].indicators.vwap).toMatchObject({ relation: 'above' })
     expect((barService.getBars as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2)
+    expect(barService.getBars).toHaveBeenNthCalledWith(1, { barId: 'tradingview|AAPL' }, {
+      interval: '15m',
+      count: 200,
+      start: undefined,
+      end: undefined,
+    })
+    expect(result.intervals[0].priceAction.meta).toMatchObject({
+      volumeConfirmation: 'unavailable',
+      volumeConfirmationIntrabarCount: 0,
+    })
   })
 })

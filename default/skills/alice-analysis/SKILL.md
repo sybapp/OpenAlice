@@ -1,366 +1,131 @@
 ---
 name: alice-analysis
 description: >
-  How to use OpenAlice's `alice analysis` tools over K-lines keyed by barId:
-  source discovery (`search-bars`), unified technical analysis
-  (`technical-analysis`), and Quant Calculator (v2)
-  scripts. Use whenever the task is technical/quantitative on price data:
-  "RSI on BTC", "is AAPL above its 200-day", "50/200 golden cross check",
-  "multi-timeframe momentum", "delta/CVD", "volume profile", "where is
-  POC/value area", "FVG/iFVG", "order blocks", "BOS/CHoCH", "market structure",
-  "how extended is X (z-score)", "does this track the sector (correlation)", "trend
-  strength", "compare 1h/4h/12h at once". Start with
-  `alice analysis search-bars` to find a barId, then use
-  `technical-analysis` for a coherent market read or `quant` for custom scalar
-  calculations.
+  Use OpenAlice K-line analysis for technical or quantitative price questions:
+  source discovery, unified market structure and Delta Proxy context, indicators,
+  multi-timeframe reads, dated snapshots, simulations, and custom Quant
+  Calculator expressions. Trigger for RSI/MACD/EMA/VWAP/Fibonacci, FVG/iFVG,
+  order blocks, BOS/CHoCH, liquidity, delta/CVD, volume profile, correlations,
+  z-scores, and historical price-path questions.
 ---
 
-# `alice analysis` — Quant Calculator (v2)
+# Alice K-line analysis
 
-OpenAlice's analysis commands operate on K-lines by **barId**. Get barIds from
-`alice analysis search-bars` first, then choose the analysis verb that matches
-the question.
-
-## Quick Index
-
-| Need | Command | Use when |
-|---|---|---|
-| Find K-line sources | `alice analysis search-bars` | Return broker/vendor `barId` candidates and freshness labels |
-| Unified market read | `alice analysis technical-analysis` | Combine Price Action, approximate order flow, EMA/VWAP/Fibonacci, and confluence |
-| Technical indicators / custom panels | `alice analysis quant` | RSI, MACD, moving averages, correlations, z-score, batches |
-
-## The loop
+All commands use an explicit `barId`. Discover one first, then choose the
+smallest verb that answers the question.
 
 ```bash
 alice analysis search-bars --query AAPL
-# Pick a broker barId if one came back (realtime, matches your fills); fall back to a vendor only if not.
-alice analysis technical-analysis --barId tradingview\|AAPL --assetClass equity --interval 15m --count 200
-alice analysis quant --script $'s = bars("alpaca-paper|AAPL", "1d", count=250)\nsma(s.close, 50)'
+alice analysis technical-analysis --bar-id 'tradingview|NASDAQ:AAPL' --interval 1h --count 200
 ```
 
-For a compact multi-timeframe read, pass intervals in higher-timeframe-to-execution order:
+## Choose the source
+
+Prefer a returned broker source that matches the account being traded. Otherwise
+use a paid vendor, then a delayed/free source. Treat `barCapability`, freshness,
+coverage, and degradation metadata as part of the answer.
+
+- Native sources such as `tradingview|NASDAQ:AAPL` and broker barIds infer
+  routing; do not pass `assetClass` unless the source requires it.
+- Compatibility vendor barIds such as `yfinance|AAPL` require
+  `--asset-class equity` (or `crypto`, `currency`, `commodity`).
+- TradingView accepts exchange-qualified symbols directly. Bare symbols such as
+  `tradingview|AAPL` are resolved by search and can be ambiguous.
+- Optional vendors only participate when enabled. Inspect or change them with
+  `alice market vendors` and `alice market vendor-set --vendor <id> --enabled true`.
+
+## Unified technical analysis
+
+Use `technical-analysis` for one coherent descriptive read across Price Action,
+the OHLCV-derived Delta Proxy, EMA/VWAP/Fibonacci, and confluence zones.
+
+Supported target intervals are `15m`, `30m`, `1h`, `4h`, `1d`, and `1w`.
 
 ```bash
-alice analysis technical-analysis --barId tradingview\|AAPL --assetClass equity --intervals 4h,1h,15m --count 200
+# One interval
+alice analysis technical-analysis \
+  --bar-id 'tradingview|NASDAQ:AAPL' \
+  --interval 1h \
+  --count 200
+
+# Higher timeframe to execution timeframe; arrays are JSON CLI values
+alice analysis technical-analysis \
+  --bar-id 'alpaca-paper|AAPL' \
+  --intervals '["4h","1h","15m"]' \
+  --mode execution \
+  --count 200
 ```
 
-## Choosing a source
+Modes:
 
-`search-bars` federates broker bars and vendor bars (freshest-first). Pick in
-this order:
+- `context` (default): compact read; Price Action volume confirmation is off.
+- `execution`: enables lower-timeframe confirmation and retains the latest five
+  Delta Proxy bars.
+- `debug`: returns raw delta bars and volume-profile bins.
 
-1. **A broker you actually trade** (`barCapability: "realtime"`) — freshest, and
-   the chart matches your fills. Always prefer this when it's in the results.
-2. **A paid vendor** (`fmp`, …) when no broker source exists.
-3. **`yfinance` — free fallback only.** Its end-of-day bars can lag a **day or
-   two**, so never use it for anything time-sensitive (a fresh signal, an entry
-   check) or to chart a live position when a broker source is available.
+The tool loads each target interval once, automatically selects a supported
+intrabar interval, and caps intrabar work at 5,000 bars. Read
+`requestedCount`, `actualCount`, `truncated`, `intrabarInterval`, and
+`degradationReason` before using derived evidence.
 
-Vendor barIds (`yfinance|…`, `fmp|…`) need `asset=`; broker barIds infer it.
-Keyless exchange data sources such as `binance-readonly` are opt-in in
-Trading settings, so do not assume they exist before `search-bars` returns them.
+Interpret the result as context, not a trade signal:
 
-**No candidates for a non-US symbol?** `search-bars` only fans out over the
-vendors that are *on*. A Taiwan or CN A-share searched by its native name can
-come back empty just because its vendor is off — `alice market vendors` to see
-what's available, `alice market vendor-set --vendor twse --enabled true` to add
-it (live immediately), then re-run search-bars. See the `alice` skill.
+- `fidelity: bar_proxy` and `isApproximation: true` mean delta/CVD and profile
+  use lower-timeframe OHLCV, not trades, tape, footprint, or order-book depth.
+- `barCompletion: unknown` means the source contract cannot prove the latest
+  bar is closed. Latest-bar absorption/exhaustion candidates remain provisional.
+- Unavailable components include a reason such as missing intrabars, missing
+  volume, insufficient coverage, or insufficient samples. Do not turn an
+  unavailable component into neutral evidence.
+- Multi-timeframe `bias`, `alignment`, `conflicts`, and `confluences` summarize
+  the returned intervals; inspect the interval results for supporting facts.
 
-TradingView is the broad free fallback for global intraday bars when enabled:
-`tradingview|NASDAQ:AAPL`, `tradingview|HKEX:0700`, `tradingview|SZSE:300820`,
-`tradingview|BINANCE:BTCUSDT`, `tradingview|FX:EURUSD`. Treat its freshness as
-exchange-dependent and conservatively delayed unless verified; timestamps are
-UTC.
+Use runtime help for the current tuning schema instead of guessing flags:
 
-## Unified Technical Analysis
-
-Use `alice analysis technical-analysis` for one coherent read when the question
-touches buying/selling pressure, CVD, volume concentration, POC/Value Area,
-ICT/SMC structure, classic indicators, or confluence. It returns one interval
-result containing Price Action, approximate Order Flow, and EMA/VWAP/Fibonacci
-context. Pass `intervals` for a sequential multi-timeframe read.
-
-### Order-flow portion
-
-Estimates Delta Volume and Cumulative Delta (CVD). Each lower-timeframe intrabar
-is classified by candle direction, its volume is signed, then intrabars are
-aggregated into each target bar.
-
-Key inputs:
-
-- `barId`: required. Use `search-bars` first.
-- `assetClass`: required for vendor barIds, such as `equity`, `crypto`, or
-  `currency`.
-- `interval`: target bar interval: `15m`, `30m`, `1h`, `4h`, `1d`, `1w`.
-- `count` or `start`/`end`: requested window.
-
-Returns per-bar `delta`, `cvd`, `deltaRatio`, `coverage`, and a confidence flag.
-Low coverage means the lower-timeframe bars did not cover enough of the target
-bar's volume; treat the result as weak evidence.
-
-### Volume Profile portion
-
-Builds a Volume Profile histogram from lower-timeframe intrabars inside the
-requested target window.
-
-Key inputs:
-
-- `barId`, `assetClass`, `interval`, `count`, `start`, `end`: same source/window
-  pattern as the unified technical-analysis call.
-- `bins`: optional price-bin count. Higher is more granular; lower is more
-  stable.
-
-Returns price bins with volume, POC (Point of Control), Value Area high/low, and
-metadata about the intrabar sample used.
-
-### Intrabar selection is automatic
-
-Do **not** pass an `intrabarInterval`. The tool chooses it.
-
-- It picks the finest intrabar interval that keeps
-  `requested_count * intrabars_per_parent <= 5000`.
-- TradingView can use internal `3m` intrabars between `1m` and `5m`.
-- If the finest interval would exceed the cap, the tool falls back to coarser
-  intrabars or reduces `count`.
-- The response `meta` reports `intrabarInterval`, `intrabarTimeframe`,
-  `requestedCount`, `actualCount`, `truncated`, and `degradationReason`.
-
-Examples:
-
-- `1d` target * 100 bars usually uses `1h` intrabars.
-- `1h` target * 100 bars may fall back from `1m` to `3m`.
-- `15m` target * 100 bars usually uses `1m` intrabars.
-
-### Price Action portion
-
-Use the Price Action portion when the question is about ICT/SMC-style structure:
-Fair Value Gaps, inverse FVGs, trend continuation/reversal breaks, liquidity
-zones, or whether current price is near an imbalance.
-
-It detects:
-
-- **FVG / VI / OG:** standard three-candle Fair Value Gaps,
-  Volume Imbalance body gaps, and Opening Gaps. Use `gapMode` to pick
-  `FVG`, `VI`, `OG`, or `all`; use `zoneMitigationSource` as `body`, `wick`,
-  or `midpoint` (default `body`), or `fvgZoneMitigationSource` to override
-  only FVG/VI/OG zone mitigation.
-  The result includes both `formationIndex` and `confirmationIndex`; by default
-  the confirmation candle gets lower-timeframe intrabar delta confirmation when
-  available.
-- **iFVG (Inverse FVG):** a confirmed subset of FVG breaker zones. The source
-  FVG must break through its far edge, create a breaker with reversed direction,
-  then show reversal/impulse confirmation; each iFVG links back to that breaker.
-  By default the reversal candle gets lower-timeframe intrabar delta
-  confirmation when available.
-- **OB (Order Block):** volumetric order block: after a
-  BOS/CHoCH, locate the extreme candle between the broken swing and breakout,
-  derive a zone, and mark it mitigated when the configured zone trigger source
-  reaches the mitigation boundary. By default the tool also tries to attach lower-timeframe intrabar
-  delta confirmation for the OB anchor candle and breakout candle, including
-  delta ratio, coverage, confidence, and whether the delta direction agrees
-  with the OB direction. When anchor intrabars are available, it also estimates
-  `internalBuyVolume` / `internalSellVolume` and their percentages from the
-  anchor candle's intrabar delta. Overlapping OBs are hidden by default using
-  Pine-style overlap filtering. Use `orderBlockZoneMitigationSource` to
-  override OB mitigation separately from the shared `zoneMitigationSource`.
-- **BOS (Break of Structure):** continuation break of the active structure.
-- **CHoCH (Change of Character):** reversal break that flips the
-  active structure state.
-- **CHoCH+:** CHoCH with stronger opposing swing context. The tool reports it
-  via `isPlus: true`.
-- **Structure modes and strong/weak swings:** `marketStructureMode` defaults to
-  `pivot`; use `extreme` when you want cleaner top-down structure with minor
-  pivots compressed into active extremes. `adjusted` is not a public mode.
-- **Liquidity and location context:** the v2 result always includes
-  `premiumDiscount`, `liquidityPools`, `liquiditySweeps`, and `breakers`.
-  Zone-like results may include premium/discount annotations.
-
-Key inputs:
-
-- `barId`: required. Use `search-bars` first.
-- `assetClass`: required for vendor barIds.
-- `interval`: analysis interval, such as `15m`, `1h`, `4h`, `1d`.
-- `count` or `start`/`end`: requested window.
-- `gapMode`, `zoneMitigationSource`, `fvgZoneMitigationSource`,
-  `gapVolumeConfirmation`, `minGapAtrMultiplier`, `minBodyRatio`: gap type,
-  mitigation trigger source, volume confirmation, and ATR-normalized noise
-  filters for FVG/VI/OG detection.
-- `maxFVGs`, `maxIFVGs`, `includeFilled`, `proximityPct`: result filters.
-- `maxIFVGLookAheadBars`, `ifvgVolumeConfirmation`, `minImpulseRatio`,
-  `minEngulfingStrength`: iFVG confirmation filters.
-- `maxOrderBlocks`, `includeMitigatedOrderBlocks`, `orderBlockTrigger`,
-  `orderBlockPosition`, `orderBlockZoneMitigationSource`,
-  `overlapPolicy`, `orderBlockVolumeConfirmation`: OB result, zone,
-  mitigation, ranked overlap, and intrabar delta confirmation controls.
-- `internalLookback`, `swingLookback`, `externalLookback`: swing lengths.
-  Defaults are `5`, `20`, and `50`.
-- `marketStructureMode`: `pivot` or `extreme` (default `pivot`).
-- `liquidityPoolToleranceAtrMultiplier`, `liquidityPoolTolerancePctCap`,
-  `minLiquidityPoolTouches`, `liquidityPoolLevels`: EQH/EQL liquidity-pool
-  controls.
-
-Returns ranked FVG/VI/OG/iFVG zones, OB zones with mitigation status, intrabar
-delta confirmation and OB internal buy/sell activity when available, swing
-points, strong/weak swing context, liquidity pools/sweeps, breaker zones,
-premium/discount context, BOS/CHoCH breaks, and `stateByLevel` for current
-internal/swing/external structure. The single-timeframe result uses schema v2
-and top-down key order: `marketStructure`, `premiumDiscount`,
-`liquidityPools`, `liquiditySweeps`, `fvgs`, `ifvgs`, `orderBlocks`,
-`breakers`, `meta`.
-Volume confirmation is approximate lower-timeframe bar delta, not tick/order-book
-data; check `coverage` and `confidence` before treating it as reliable. For FVG
-it is an auxiliary quality signal, not part of the gap definition.
-For zone mitigation sources, `body` uses the adverse candle body edge
-(`min(open, close)` for bullish zones and `max(open, close)` for bearish
-zones), `wick` uses the adverse wick, and `midpoint` triggers when that body
-edge reaches the zone midpoint.
-
-Pass `intervals: ["4h", "1h", "15m"]` when you need a multi-timeframe summary.
-The top-level result returns condensed trend alignment, conflicts, confluences,
-and one full technical-analysis result per interval.
-
-### Indicator and confluence portion
-
-The unified result includes:
-
-- EMA fast/slow/long values and ordered bias (`bullish`, `bearish`, `mixed`, or
-  `unavailable`). Defaults are 12/20/50.
-- VWAP with `auto`, rolling, session, week, month, year, and structure anchors.
-  The relation is `above`, `below`, `at`, or `unavailable`; missing positive
-  volume is reported as a warning.
-- Fibonacci retracements anchored to the latest usable swing structure leg.
-  Each level reports its ratio, price, touch, cross, and active/broken state.
-- Confluence zones that group distinct EMA, VWAP, and Fibonacci families within
-  an ATR-normalized distance. Each zone reports its support/resistance/pivot
-  classification, component prices, family list, and strength.
-
-The defaults are visible in `indicators.configuration`. Use `indicators` only
-when a different period, anchor, Fibonacci level set, or confluence threshold is
-needed. Use `priceAction` for detector tuning; `mode=execution` enables the
-lower-timeframe confirmation path, while `mode=debug` also returns raw delta and
-profile views.
-
-## Language
-
-`quant` is a bounded, side-effect-free expression language for technical
-analysis. A script is zero or more `name = ...` bindings, then a final result
-expression:
-
-```python
-s = bars("alpaca-paper|AAPL", "1d", count=250)
-sma(s.close, 50) - sma(s.close, 200)        # +ve = 50 above 200 (uptrend)
+```bash
+alice analysis technical-analysis --help
 ```
 
-**`bars(barId, interval, count=, asOf=, start=, end=, asset=)`**
-- `barId`: `"{source}|{symbol}"` from search-bars. Broker (`alpaca-paper|AAPL`)
-  or opt-in keyless exchange data (`binance-readonly|BTC/USDT`) needs NO
-  `asset=`; vendor (`yfinance|AAPL`, `fmp|AAPL`) needs
-  `asset="equity"|"crypto"|"currency"|"commodity"`.
-- `interval`: `1m 5m 15m 30m 1h 4h 1d 1w`.
-- Window: `count=N` (most-recent N bars — the natural window for indicators), OR
-  `start=/end=` (YYYY-MM-DD date range), OR `end=+count=` (point-in-time backtest).
+Nested `--indicators` and `--price-action` values are JSON objects, for example:
 
-**Columns** of a bars() series: `s.open / s.high / s.low / s.close / s.volume`.
-
-**Indexing:** raw columns are series — index them: `s.close[-1]` (latest),
-`s.close[-2]` (one back). **Indicators already return the latest scalar — do NOT
-index them** (`sma(s.close, 50)`, not `sma(...)[-1]`).
-
-**Arithmetic:** `+ - * /`, parentheses, unary minus.
-
-## Panels — batch many computations in one call
-
-The result can be a **labeled dict** or a **positional list** (each entry a single
-value, max 200). Use this instead of calling the tool N times:
-
-```python
-h1 = bars("yfinance|BTC-USD", "1h", count=250, asset="crypto")
-h4 = bars("yfinance|BTC-USD", "4h", count=250, asset="crypto")
-d1 = bars("yfinance|BTC-USD", "1d", count=250, asset="crypto")
-{ "1h": rsi(h1.close, 14), "4h": rsi(h4.close, 14), "1d": rsi(d1.close, 14) }
-```
-→ `{ "1h": 53.2, "4h": 48.9, "1d": 61.4 }`
-
-## Sibling verbs — dated reads & backtests
-
-`quant` returns latest scalars with no dates. When you need the time axis or a
-hypothetical trade, reach for these instead (see the `retrospective` skill for
-the full workflow):
-
-- **`alice analysis snapshot --query XLE [--asOf YYYY-MM-DD]`** — the honest
-  as-of read: DATED bars (never past `asOf` — no lookahead), the latest print
-  (close + vs-prevClose + day high/low + amplitude), compact levels, and a
-  **freshness contract** (`isLatestActual` / `staleTradingDays`). Use this for
-  "what does/did X look like", not a hand-rolled quant dump.
-- **`alice analysis simulate --query XLE --entryDate … --exitRule …`** —
-  backtest one entry + one exit (`trailing_stop`/`ma_break`/`stop`/`target`/
-  `hold`); returns entry/exit, returnPct, MFE/MAE.
-- **`alice analysis quant … --dates`** — opt-in date axis on a quant result
-  (`dates[barId]` for one interval; `dates["barId@interval"]` when the same
-  barId is used at multiple intervals), to map a dumped series back to days.
-
-## Function catalog
-
-| Group | Functions |
-|---|---|
-| Trend | `sma(s, n)` `ema(s, n)` `macd(s, fast, slow, signal)` `slope(s, n)` (signed, rankable trend) |
-| Momentum | `rsi(s, n=14)` `roc(s, n)` (% change over n) |
-| Volatility | `stdev(s)` `atr(high, low, close, n)` `bbands(s, n, std)` `zscore(s, n?)` (how extended vs window) |
-| Volume | `rvol(volume, n=20)` `obv(close, volume)` `mfi(high, low, close, volume, n=14)` `vwap(high, low, close, volume)` |
-| Stats | `max/min/sum/average/median(s)` `highest(s, n)` `lowest(s, n)` |
-| Comparison | `correlation(a, b)` (−1..1; relative strength / pairs / "tracks the sector?") |
-
-Records: `bbands` → `{upper, middle, lower}`; `macd` → `{macd, signal, histogram}`.
-
-## Examples
-
-> Examples below use `yfinance|…` for brevity (it's always available without a
-> broker). When you have a broker source for the symbol, swap its barId in —
-> see *Choosing a source*.
-
-```python
-# Momentum % over the last 20 bars
-s = bars("yfinance|AAPL", "1d", count=60, asset="equity")
-roc(s.close, 20)
-
-# How overbought/oversold vs the trailing 20 sessions
-s = bars("yfinance|TSLA", "1d", count=60, asset="equity")
-zscore(s.close, 20)
-
-# Does this token move with BTC? (relative strength)
-btc = bars("yfinance|BTC-USD", "1d", count=90, asset="crypto")
-sui = bars("yfinance|SUI-USD", "1d", count=90, asset="crypto")
-correlation(btc.close, sui.close)
-
-# A one-call dashboard
-s = bars("yfinance|NVDA", "1d", count=250, asset="equity")
-{
-  "rsi":        rsi(s.close, 14),
-  "roc_20d_%":  roc(s.close, 20),
-  "vs_200ma":   s.close[-1] - sma(s.close, 200),
-  "trend":      slope(s.close, 50),
-  "z_20d":      zscore(s.close, 20),
-  "atr_14":     atr(s.high, s.low, s.close, 14),
-}
+```bash
+alice analysis technical-analysis \
+  --bar-id 'tradingview|NASDAQ:AAPL' \
+  --interval 1h \
+  --indicators '{"vwapAnchor":"week","atrPeriod":100}' \
+  --price-action '{"marketStructureMode":"extreme","gapMode":"all"}'
 ```
 
-## Self-correction
+## Quant Calculator
 
-On failure the tool returns `{ error: { kind, message, suggestion } }`, not a
-crash — read it and fix the script. It pinpoints the problem: unknown function
-(with "did you mean"), wrong arity/type, insufficient bars (raise `count=`),
-undeclared name, and common Python reflexes (`s.close.rolling(50).mean()` →
-"use `sma(s.close, 50)`"; `sma(...)[-1]` → "drop the [-1]"; slices/`if` → not
-supported here).
+Use `quant` for custom scalar calculations or a labeled panel. The language is
+bounded and side-effect-free: assignments followed by one result expression.
 
-## Gotchas
+```bash
+alice analysis quant --script $'s = bars("alpaca-paper|AAPL", "1d", count=250)\n{"rsi": rsi(s.close, 14), "vs_200ma": s.close[-1] - sma(s.close, 200)}'
+```
 
-- Indicators return the latest **scalar** — never `[-1]` them; only raw columns
-  are series.
-- Vendor barIds need `asset=`; broker barIds infer it.
-- **Source freshness:** `yfinance`/`fmp` are delayed (yfinance EOD can lag a day
-  or two). Prefer a broker barId for anything you trade or anything time-sensitive.
-- No conditionals/booleans (no `if`, no crossover operator) — compute the parts
-  and compare in your own reasoning, or return them in a panel.
-- For arbitrary/looping logic beyond these primitives, spawn a separate
-  Auto-Quant workspace, not this tool.
+`bars(barId, interval, count=, asOf=, start=, end=, asset=)` returns
+`open/high/low/close/volume` series. Raw columns require indexing; indicator
+functions already return their latest scalar.
+
+- Trend: `sma`, `ema`, `macd`, `slope`
+- Momentum: `rsi`, `roc`
+- Volatility: `stdev`, `atr`, `bbands`, `zscore`
+- Volume: `rvol`, `obv`, `mfi`, `vwap`
+- Stats: `max`, `min`, `sum`, `average`, `median`, `highest`, `lowest`
+- Comparison: `correlation`
+
+Batch related calculations into one object instead of making repeated calls.
+On a structured Quant error, follow its `suggestion`; common fixes are raising
+`count`, removing `[-1]` from an indicator result, or replacing pandas syntax
+with a listed function.
+
+## Dated paths
+
+- `snapshot`: dated, no-lookahead read with freshness metadata. Use for “what
+  did this look like as of T?”
+- `simulate`: one bounded entry/exit path with return, MFE, and MAE.
+- `quant --dates true`: attach date axes when a custom calculation needs them.
+
+Run `alice analysis <verb> --help` for the live flags before using either path.

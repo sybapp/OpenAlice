@@ -15,6 +15,7 @@ import type {
   StructureBreakEvent,
   TrendDirection,
 } from './types.js'
+import { errorMessage, sourceRef } from '../shared.js'
 
 export type PriceActionContextMode = 'context' | 'execution' | 'debug'
 
@@ -163,10 +164,6 @@ export function priceActionContextDefaults(mode: PriceActionContextMode = 'conte
   }
 }
 
-function sourceRef(source: PriceActionSourceRequest): BarSourceRef {
-  return source.assetClass ? { barId: source.barId, assetClass: source.assetClass } : { barId: source.barId }
-}
-
 function latestBreak(marketStructure: MarketStructureAnalysis): StructureBreakEvent | undefined {
   return [...marketStructure.bos, ...marketStructure.choch].sort((a, b) => b.index - a.index)[0]
 }
@@ -202,10 +199,6 @@ function buildDetailRequest(args: Record<string, unknown>, interval: string): Pr
       interval,
     } as PriceActionDetailRequest['args'],
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function emptyIntervalMeta(bars: OhlcvBar[], meta: object): PriceActionMeta {

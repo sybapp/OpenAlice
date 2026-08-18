@@ -4,8 +4,10 @@ import { SaveIndicator } from '../components/SaveIndicator'
 import { ConfigSection, SettingsScrollArea, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'
 import { useConfigPage } from '../hooks/useConfigPage'
+import { useMarketVendors } from '../hooks/useMarketVendors'
 import { PageHeader } from '../components/PageHeader'
 import { CenteredLoading } from '../components/StateViews'
+import { Button } from '../components/ui/button'
 import type { MarketVendorInfo } from '../api/openbb'
 
 type MarketDataConfig = Record<string, unknown>
@@ -133,8 +135,7 @@ export function MarketDataPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [highlightFmp, setHighlightFmp] = useState(false)
   const [ping, setPing] = useState<HubPing>('checking')
-  const [chartVendors, setChartVendors] = useState<MarketVendorInfo[] | null>(null)
-  const [vendorLoadError, setVendorLoadError] = useState(false)
+  const { vendors: chartVendors, error: vendorLoadError, retry: retryVendors } = useMarketVendors()
   const fmpRef = useRef<HTMLDivElement>(null)
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -163,18 +164,6 @@ export function MarketDataPage() {
   }, [hub.enabled, hub.baseUrl])
 
   useEffect(() => () => clearTimeout(highlightTimer.current), [])
-
-  useEffect(() => {
-    let cancelled = false
-    api.marketData.vendors()
-      .then(({ vendors }) => {
-        if (!cancelled) setChartVendors(vendors)
-      })
-      .catch(() => {
-        if (!cancelled) setVendorLoadError(true)
-      })
-    return () => { cancelled = true }
-  }, [])
 
   if (!config) {
     return (
@@ -248,6 +237,7 @@ export function MarketDataPage() {
           <ChartVendorsSection
             vendors={chartVendors}
             loadError={vendorLoadError}
+            onRetry={retryVendors}
             extraVendors={extraVendors}
             onToggle={handleExtraVendorToggle}
           />
@@ -352,11 +342,13 @@ function SourcesCard({ rows, onAddFmp }: { rows: SourceRow[]; onAddFmp: () => vo
 function ChartVendorsSection({
   vendors,
   loadError,
+  onRetry,
   extraVendors,
   onToggle,
 }: {
   vendors: MarketVendorInfo[] | null
   loadError: boolean
+  onRetry: () => void
   extraVendors: string[]
   onToggle: (id: string, on: boolean) => void
 }) {
@@ -370,7 +362,12 @@ function ChartVendorsSection({
       </p>
       <div className="space-y-2.5">
         {loadError && (
-          <p className="text-[12px] text-destructive">Failed to load chart vendors.</p>
+          <div role="alert" className="flex items-center gap-3 text-[12px] text-destructive">
+            <span>Failed to load chart vendors.</span>
+            <Button type="button" variant="destructive" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
         )}
         {!loadError && vendors === null && <CenteredLoading />}
         {vendors?.map((v) => {

@@ -1,4 +1,5 @@
 import { intervalToMinutes } from './interval-time.js'
+import { SUPPORTED_BAR_INTERVALS } from '@/domain/market-data/bars/types.js'
 
 export const MAX_INTRABAR_BARS = 5000
 
@@ -10,8 +11,6 @@ const INTRABAR_CANDIDATES: Record<string, string[]> = {
   '1d': ['3m', '5m', '15m', '1h'],
   '1w': ['1h', '4h', '1d'],
 }
-
-const DEFAULT_SUPPORTED_INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
 
 export interface IntrabarPlan {
   intrabarInterval: string
@@ -39,7 +38,7 @@ function candidatesFor(targetInterval: string, supportedIntervals?: readonly str
             : targetMinutes <= 1440
               ? ['3m', '5m', '15m', '1h']
               : ['1h', '4h', '1d'])
-  const supported = new Set(supportedIntervals ?? DEFAULT_SUPPORTED_INTERVALS)
+  const supported = new Set(supportedIntervals ?? SUPPORTED_BAR_INTERVALS)
   return candidates.filter((interval) => supported.has(interval))
 }
 

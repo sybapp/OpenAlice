@@ -1,4 +1,5 @@
-import type { BarMeta, BarService, BarSourceRef, OhlcvBar } from '@/domain/market-data/bars/index.js'
+import type { BarMeta, BarService, OhlcvBar } from '@/domain/market-data/bars/index.js'
+import { sourceRef } from '../shared.js'
 import {
   calculateDeltaVolume,
   calculateVolumeProfile,
@@ -6,7 +7,6 @@ import {
 } from './delta-volume.js'
 import { confidenceForCoverage, type IntrabarPlan } from './intrabar-plan.js'
 import { loadIntrabarWindow } from './intrabar-window.js'
-import { barCompletionFor } from './bar-completion.js'
 import { buildOrderFlowStructureSummary, type OrderFlowStructureSummary } from './summary.js'
 
 export type OrderFlowContextMode = 'context' | 'summary' | 'delta' | 'profile'
@@ -32,7 +32,7 @@ export interface OrderFlowDeltaBar extends Omit<OhlcvBar, 'date'> {
   /** Deprecated compatibility field; public responses omit it in favor of timestamp. */
   date?: string
   timestamp?: string
-  barCompletion?: 'complete' | 'incomplete'
+  barCompletion?: 'unknown'
   delta: number
   approxDelta: number
   cumulativeDelta: number
@@ -82,10 +82,6 @@ export interface OrderFlowContextAnalysis {
 
 const DEFAULT_ORDER_FLOW_COUNT = 100
 const DEFAULT_PROFILE_BINS = 20
-
-function sourceRef(source: OrderFlowSourceRequest): BarSourceRef {
-  return source.assetClass ? { barId: source.barId, assetClass: source.assetClass } : { barId: source.barId }
-}
 
 function wantsDelta(mode: OrderFlowContextMode): boolean {
   return mode === 'context' || mode === 'delta'
@@ -209,14 +205,15 @@ export async function analyzeOrderFlowContext(
     }
   }
 
-  const delta = (wantsDelta(mode) || wantsSummary(mode))
+  const hasVolumeEvidence = window.intrabars.some((bar) => bar.volume != null && bar.volume > 0)
+  const delta = hasVolumeEvidence && (wantsDelta(mode) || wantsSummary(mode))
     ? calculateDeltaVolume({
       targetBars: window.targetBars,
       intrabars: window.intrabars,
       targetInterval: params.interval,
     })
     : undefined
-  const profile = (wantsProfile(mode) || wantsSummary(mode))
+  const profile = hasVolumeEvidence && (wantsProfile(mode) || wantsSummary(mode))
     ? calculateVolumeProfile({
       bars: window.intrabars,
       numBins: params.numBins ?? DEFAULT_PROFILE_BINS,
@@ -229,7 +226,7 @@ export async function analyzeOrderFlowContext(
       return {
       ...withoutDate,
       timestamp: bar.date,
-      barCompletion: barCompletionFor(bar.date, params.interval),
+      barCompletion: 'unknown',
       delta: delta.deltas[i],
       approxDelta: delta.deltas[i],
       cumulativeDelta: delta.cumulativeDeltas[i],
@@ -242,7 +239,7 @@ export async function analyzeOrderFlowContext(
       }
     })
     : []
-  const profileContext: OrderFlowProfileContext | null = profile
+  const profileContext: OrderFlowProfileContext | null = profile?.bins.length
     ? {
       bins: profile.bins,
       poc: profile.poc,
@@ -265,6 +262,7 @@ export async function analyzeOrderFlowContext(
         profile: profileContext,
         intrabarCount: window.intrabars.length,
         targetIndexOffset: window.targetIndexOffset,
+        ...(!hasVolumeEvidence ? { unavailableReason: 'missing_volume' as const } : {}),
         inputWindowTruncated: window.plan.truncated,
         ...(window.plan.degradationReason ? { degradationReason: window.plan.degradationReason } : {}),
       })

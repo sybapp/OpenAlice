@@ -316,6 +316,18 @@ describe('calculateVolumeProfile', () => {
     expect(totalVolume).toBeCloseTo(1000, 1)
   })
 
+  it('returns no profile when every bar lacks volume evidence', () => {
+    const result = calculateVolumeProfile({
+      bars: [
+        { date: '2024-01-01', open: 100, high: 110, low: 100, close: 105, volume: null },
+        { date: '2024-01-02', open: 105, high: 120, low: 105, close: 115, volume: null },
+      ],
+      numBins: 10,
+    })
+
+    expect(result.bins).toEqual([])
+  })
+
   it('价格范围异常（maxPrice <= minPrice）返回空结果', () => {
     const bars: OhlcvBar[] = [
       { date: '2024-01-01', open: 100, high: 100, low: 100, close: 100, volume: 1000 },

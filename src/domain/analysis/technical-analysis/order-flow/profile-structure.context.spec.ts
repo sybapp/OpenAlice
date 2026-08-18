@@ -180,17 +180,22 @@ describe('analyzeOrderFlowContext profile structure', () => {
     ]))
   })
 
-  it.each([
-    { name: 'flat', volumes: [10, 10, 10, 10, 10, 10, 10, 10] },
-    { name: 'zero-volume', volumes: [0, 0, 0, 0, 0, 0, 0, 0] },
-  ])('returns an available empty result for a $name distribution', async ({ volumes }) => {
-    const result = await analyzeProfile(volumes)
+  it('returns an available empty result for a flat distribution', async () => {
+    const result = await analyzeProfile([10, 10, 10, 10, 10, 10, 10, 10])
 
     expect(result.summary?.profileStructure).toMatchObject({
       status: 'available',
       sampleCount: 8,
       nodes: [],
       volumeGaps: [],
+    })
+  })
+
+  it('reports a zero-volume distribution as unavailable evidence', async () => {
+    const result = await analyzeProfile([0, 0, 0, 0, 0, 0, 0, 0])
+
+    expect(result.summary?.profileStructure).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 0,
     })
   })
 

@@ -4,7 +4,6 @@ import { detectAbsorptionCandidates, type AbsorptionAnalysis } from './absorptio
 import { buildOrderFlowDivergence, type OrderFlowDivergenceSummary } from './divergence.js'
 import { detectExhaustionCandidates, type ExhaustionAnalysis } from './exhaustion.js'
 import { buildProfileStructure, type ProfileStructure } from './profile-structure.js'
-import { barCompletionFor } from './bar-completion.js'
 
 export type OrderFlowFidelity = 'bar_proxy'
 export type OrderFlowDirection = 'positive' | 'negative' | 'neutral'
@@ -13,6 +12,7 @@ export type ProfilePriceRelation = 'above' | 'inside' | 'below'
 export type SummaryUnavailableReason =
   | 'missing_target_bars'
   | 'missing_intrabars'
+  | 'missing_volume'
   | 'insufficient_samples'
   | 'insufficient_confirmed_pivots'
   | 'insufficient_coverage'
@@ -74,7 +74,7 @@ export interface OrderFlowStructureSummary {
       sourceIndex: number
       timestamp: string
       close: number
-      barCompletion: 'complete' | 'incomplete'
+      barCompletion: 'unknown'
     } | null
     delta: CurrentDeltaState | UnavailableSummaryComponent
     profile: CurrentProfileState | UnavailableSummaryComponent
@@ -138,7 +138,7 @@ export function buildOrderFlowStructureSummary(params: {
   intrabarCount: number
   targetIndexOffset: number
   targetInterval: string
-  unavailableReason?: 'missing_target_bars' | 'missing_intrabars'
+  unavailableReason?: 'missing_target_bars' | 'missing_intrabars' | 'missing_volume'
   degradationReason?: string
   inputWindowTruncated?: boolean
 }): OrderFlowStructureSummary {
@@ -241,7 +241,7 @@ export function buildOrderFlowStructureSummary(params: {
           sourceIndex: params.targetIndexOffset + latestIndex,
           timestamp: latestBar.date,
           close: latestBar.close,
-          barCompletion: barCompletionFor(latestBar.date, params.targetInterval),
+          barCompletion: 'unknown',
         }
         : null,
       delta,

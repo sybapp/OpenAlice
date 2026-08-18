@@ -67,6 +67,7 @@ export interface OhlcvBar {
 
 export type BarSourceKind = 'vendor' | 'uta'
 export type BarCapability = 'free' | 'delayed' | 'subscription' | 'iex' | 'realtime'
+export const SUPPORTED_BAR_INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'] as const
 
 export interface VendorBarMetadata {
   capability: BarCapability

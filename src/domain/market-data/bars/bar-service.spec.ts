@@ -238,6 +238,20 @@ describe('getBars — UTA branch', () => {
     expect(meta.barCapability).toBe('realtime')
   })
 
+  it('rejects unsupported intervals instead of silently fetching daily bars', async () => {
+    const getHistorical = vi.fn(async () => WIRE)
+    const utaManager: UtaBarGateway = {
+      has: async () => true,
+      get: async () => ({ getHistorical }),
+      searchContracts: async () => [],
+    }
+    const svc = createBarService(makeDeps({ utaManager }))
+
+    await expect(svc.getBars({ barId: 'alpaca-paper|AAPL' }, { interval: '2h' }))
+      .rejects.toThrow('Unsupported bar interval "2h"')
+    expect(getHistorical).not.toHaveBeenCalled()
+  })
+
   it('rejects a UTA source that does not advertise historical-bar support', async () => {
     const getHistorical = vi.fn(async () => WIRE)
     const utaManager: UtaBarGateway = {

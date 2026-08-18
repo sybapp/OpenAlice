@@ -236,6 +236,11 @@ export function calculateVolumeProfile(params: VolumeProfileParams): VolumeProfi
     }
   }
 
+  if (totalVolume <= 0) {
+    const emptyBin = { priceLow: 0, priceHigh: 0, volume: 0, count: 0 }
+    return { bins: [], poc: emptyBin, valueAreaHigh: 0, valueAreaLow: 0 }
+  }
+
   // 4. POC — volume 最大的 bin（平手时取第一个）
   let pocIdx = 0
   for (let i = 1; i < bins.length; i++) {

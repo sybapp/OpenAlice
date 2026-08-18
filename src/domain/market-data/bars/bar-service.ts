@@ -23,17 +23,18 @@ import type {
   BarMeta,
   BarCapability,
 } from './types.js'
-import { formatBarId, isDerivativeBarId, parseBarId } from './types.js'
+import { formatBarId, isDerivativeBarId, parseBarId, SUPPORTED_BAR_INTERVALS } from './types.js'
 
 /** Hard ceiling on bars returned by any single fetch (explosion guard). */
 const MAX_BARS = 5000
 
-const BAR_INTERVALS: readonly BarInterval[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
+const BAR_INTERVALS: readonly BarInterval[] = SUPPORTED_BAR_INTERVALS
 
 function toBarInterval(interval: string): BarInterval {
-  return (BAR_INTERVALS as readonly string[]).includes(interval)
-    ? (interval as BarInterval)
-    : '1d'
+  if (!(BAR_INTERVALS as readonly string[]).includes(interval)) {
+    throw new Error(`Unsupported bar interval "${interval}"`)
+  }
+  return interval as BarInterval
 }
 
 /** Map a broker secType to the data-vendor asset class (for candidate display

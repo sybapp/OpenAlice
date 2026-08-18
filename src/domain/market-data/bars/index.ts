@@ -8,6 +8,7 @@ export {
   type BarMeta,
   type BarSourceKind,
   type BarCapability,
+  SUPPORTED_BAR_INTERVALS,
   type BarSourceCandidate,
   type BarsResult,
   type GetBarsOpts,
