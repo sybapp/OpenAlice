@@ -28,7 +28,9 @@ describe('createTechnicalAnalysisTools', () => {
 
     expect(Object.keys(tools)).toEqual(['analyzeTechnicalAnalysis'])
     const schema = (tools.analyzeTechnicalAnalysis as any).inputSchema
-    expect(schema.safeParse({ barId: 'tradingview|AAPL', interval: '15m' }).success).toBe(true)
+    for (const interval of ['1m', '5m', '15m']) {
+      expect(schema.safeParse({ barId: 'tradingview|AAPL', interval }).success).toBe(true)
+    }
     expect(schema.safeParse({ barId: 'alpaca-paper|AAPL', interval: '2h' }).success).toBe(false)
     expect(schema.safeParse({ barId: 'tradingview|AAPL' }).success).toBe(false)
     expect(tools.analyzeTechnicalAnalysis.description).toContain('EMA/VWAP/Fibonacci')

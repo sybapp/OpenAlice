@@ -19,13 +19,13 @@ export interface TechnicalAnalysisToolsDeps {
 }
 
 const assetClassSchema = z.enum(['equity', 'crypto', 'currency', 'commodity'])
-const intervalSchema = z.enum(['15m', '30m', '1h', '4h', '1d', '1w'])
+const intervalSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'])
 const technicalAnalysisInputSchema = z.object({
   barId: z.string().describe('Bar source ID from search-bars'),
   assetClass: assetClassSchema.optional()
     .describe('Required only for compatibility vendor barIds; native and broker sources infer routing'),
   interval: intervalSchema.optional()
-    .describe('One target interval, for example 15m, 1h, 4h, or 1d'),
+    .describe('One target interval, for example 1m, 5m, 15m, 1h, 4h, or 1d'),
   intervals: z.array(intervalSchema).min(1).max(8).optional()
     .describe('Optional higher-timeframe-to-execution interval list; runs sequentially'),
   count: z.number().int().positive().optional().describe('Bars per interval (default 200)'),

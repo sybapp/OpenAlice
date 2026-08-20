@@ -39,7 +39,7 @@ coverage, and degradation metadata as part of the answer.
 Use `technical-analysis` for one coherent descriptive read across Price Action,
 the OHLCV-derived Delta Proxy, EMA/VWAP/Fibonacci, and confluence zones.
 
-Supported target intervals are `15m`, `30m`, `1h`, `4h`, `1d`, and `1w`.
+Supported target intervals are `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, and `1w`.
 
 ```bash
 # One interval
