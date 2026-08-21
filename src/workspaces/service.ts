@@ -371,6 +371,7 @@ import { WorkspaceCreator } from './workspace-creator.js';
 import { WorkspaceCatalog } from './workspace-catalog.js';
 import { WorkspaceAbsorbManager } from './workspace-absorb.js';
 import { WorkspaceLifecycleManager } from './workspace-lifecycle.js';
+import { WorkspaceBackgroundProcessManager } from './workspace-background-process.js';
 import {
   WorkspaceHeadlessActivityTracker,
   type WorkspaceRuntimeActivity,
@@ -936,6 +937,12 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       bundledSkills: [],
     });
   }
+  const backgroundProcesses = new WorkspaceBackgroundProcessManager({
+    webPort: opts.webPort,
+    logger: launcherLogger.child({ scope: 'workspace-background' }),
+  });
+  const startWorkspaceProcesses = (workspace: WorkspaceMeta): Promise<void> =>
+    backgroundProcesses.start(workspace, workspace.template ? templates.get(workspace.template) : undefined);
 
   const adapters = createBuiltinAdapterRegistry();
   const sessionCoordinator = new ProductSessionCoordinator(
@@ -982,7 +989,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     bootstrapTimeoutMs: config.bootstrapTimeoutMs,
     registry,
     isWorkspaceIdReserved: (id) => catalog.hasId(id),
-    onWorkspaceCreated: (workspace) => catalog.recordCreated(workspace),
+    onWorkspaceCreated: async (workspace) => {
+      await catalog.recordCreated(workspace);
+      await startWorkspaceProcesses(workspace);
+    },
     logger: launcherLogger.child({ scope: 'creator' }),
   });
   const chatWorkspaceResolver = new ChatWorkspaceResolver({
@@ -2826,6 +2836,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       if (!existsSync(join(cwd, '.pi', 'openalice-provider.json')) && !existsSync(join(cwd, '.pi-agent'))) return;
       await piAdapter.writeAiConfig?.(cwd, {});
     },
+    stopWorkspaceProcesses: (workspaceId) => backgroundProcesses.stop(workspaceId),
+    startWorkspaceProcesses,
     logger: launcherLogger.child({ scope: 'workspace-lifecycle' }),
   });
   await lifecycle.recover();
@@ -2846,6 +2858,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     logger: launcherLogger.child({ scope: 'workspace-absorb' }),
   });
   await workspaceAbsorbs.recover();
+  await Promise.all(registry.list().map((workspace) => startWorkspaceProcesses(workspace)));
   // Recovery owns the active/departed boundary. Scheduled work must not see an
   // interrupted offboarding/upgrade row between registry load and repair.
   scheduleScanner.start();
@@ -2933,6 +2946,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     shuttingDown = true;
     launcherLogger.info('workspaces.dispose', { reason, activeSessions: pool.size() });
     scheduleScanner.stop();
+    await backgroundProcesses.stopAll();
     pool.disposeAll('plugin shutdown');
     await webPi.stopAll('plugin shutdown');
     transcriptWatcher.disposeAll();

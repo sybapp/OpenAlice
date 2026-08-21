@@ -1,0 +1,24 @@
+{
+  "displayName": "Binance Signal Satellite",
+  "groupOrder": 30,
+  "community": true,
+  "description": "Read-only Binance USD-M perpetual market collector with immutable snapshots and isolated OpenAlice analysis.",
+  "defaultAgents": ["codex", "claude"],
+  "injectTools": true,
+  "injectInstructions": false,
+  "bundledSkills": [],
+  "backgroundProcess": {
+    "command": ["pnpm", "watch"],
+    "logPath": "data/collector.log"
+  },
+  "source": {
+    "repository": "https://github.com/sybapp/binance-signal-satellite.git",
+    "defaultVersion": "v0.1.0",
+    "versions": [
+      {
+        "version": "v0.1.0",
+        "commit": "5530689553d83920f0796e9c3240cb607be878d7"
+      }
+    ]
+  }
+}

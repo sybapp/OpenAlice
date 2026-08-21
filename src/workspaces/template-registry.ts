@@ -45,6 +45,11 @@ export interface TemplateSourceCatalog {
   readonly versions: readonly TemplateSourceVersion[];
 }
 
+export interface TemplateBackgroundProcess {
+  readonly command: readonly string[];
+  readonly logPath?: string;
+}
+
 export interface TemplateMeta {
   readonly name: string;
   readonly description?: string;
@@ -133,6 +138,8 @@ export interface TemplateMeta {
    * UI step. Agents not listed are left to fall back to the CLI's global login.
    */
   readonly agentCredentials?: Readonly<Record<string, AgentCredentialDecl>>;
+  /** Optional Workspace-local process kept alive by the launcher. */
+  readonly backgroundProcess?: TemplateBackgroundProcess;
 }
 
 /**
@@ -200,6 +207,7 @@ export class TemplateRegistry {
           ? { upgradeStrategy: tplMeta.upgradeStrategy }
           : {}),
         ...(tplMeta.agentCredentials !== undefined ? { agentCredentials: tplMeta.agentCredentials } : {}),
+        ...(tplMeta.backgroundProcess !== undefined ? { backgroundProcess: tplMeta.backgroundProcess } : {}),
       };
       reg.byName.set(name, meta);
     }
@@ -250,6 +258,7 @@ interface ParsedTemplateMeta {
   readonly source?: TemplateSourceCatalog;
   readonly upgradeStrategy?: 'managed-context';
   readonly agentCredentials?: Readonly<Record<string, AgentCredentialDecl>>;
+  readonly backgroundProcess?: TemplateBackgroundProcess;
 }
 
 /**
@@ -343,6 +352,7 @@ async function readTemplateMeta(path: string): Promise<ParsedTemplateMeta> {
       ? 'managed-context' as const
       : undefined;
     const agentCredentials = parseAgentCredentials(obj['agentCredentials']);
+    const backgroundProcess = parseBackgroundProcess(obj['backgroundProcess']);
     return {
       ...(description !== undefined ? { description } : {}),
       ...(displayName !== undefined ? { displayName } : {}),
@@ -355,10 +365,25 @@ async function readTemplateMeta(path: string): Promise<ParsedTemplateMeta> {
       ...(source !== undefined ? { source } : {}),
       ...(upgradeStrategy !== undefined ? { upgradeStrategy } : {}),
       ...(agentCredentials !== undefined ? { agentCredentials } : {}),
+      ...(backgroundProcess !== undefined ? { backgroundProcess } : {}),
     };
   } catch {
     return fallback;
   }
+}
+
+function parseBackgroundProcess(raw: unknown): TemplateBackgroundProcess | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const value = raw as Record<string, unknown>;
+  const command = Array.isArray(value['command'])
+    ? value['command'].filter((part): part is string => typeof part === 'string' && part.length > 0)
+    : [];
+  if (command.length === 0) return undefined;
+  const logPath = typeof value['logPath'] === 'string' && value['logPath'].trim().length > 0
+    ? value['logPath'].trim()
+    : undefined;
+  if (logPath?.startsWith('/') || logPath?.startsWith('..') || logPath?.includes('\\..')) return undefined;
+  return { command, ...(logPath ? { logPath } : {}) };
 }
 
 function parseTemplateSource(raw: unknown): TemplateSourceCatalog | undefined {

@@ -36,4 +36,21 @@ describe('TemplateRegistry manifest compatibility', () => {
       injectTools: false,
     });
   });
+
+  it('loads a template-declared background process', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'template-registry-background-'));
+    roots.push(root);
+    const templateDir = join(root, 'background-template');
+    await mkdir(templateDir, { recursive: true });
+    await writeFile(join(templateDir, 'bootstrap.mjs'), 'export {}\n');
+    await writeFile(join(templateDir, 'template.json'), JSON.stringify({
+      backgroundProcess: { command: ['pnpm', 'watch'], logPath: 'data/collector.log' },
+    }));
+
+    const registry = await TemplateRegistry.load(root, logger);
+
+    expect(registry.get('background-template')).toMatchObject({
+      backgroundProcess: { command: ['pnpm', 'watch'], logPath: 'data/collector.log' },
+    });
+  });
 });

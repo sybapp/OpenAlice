@@ -54,6 +54,9 @@ export interface WorkspaceLifecycleManagerDeps {
   operationGuard?: WorkspaceOperationGuard
   /** Remove runtime state projected outside a checkout before its final purge. */
   cleanupWorkspaceState?: (record: WorkspaceCatalogRecord, cwd: string) => Promise<void>
+  /** Stop and restart template-declared Workspace background processes. */
+  stopWorkspaceProcesses?: (workspaceId: string) => Promise<void>
+  startWorkspaceProcesses?: (workspace: WorkspaceMeta) => Promise<void>
   logger: Logger
 }
 
@@ -206,6 +209,8 @@ export class WorkspaceLifecycleManager {
       }
     }
 
+    await this.deps.stopWorkspaceProcesses?.(meta.id)
+
     try {
       // Prepare the handoff while the checkout is still at its active path. A
       // write failure cancels the transition instead of archiving a desk with
@@ -274,6 +279,7 @@ export class WorkspaceLifecycleManager {
       await this.deps.registry.add(catalogRecordToMeta(record))
       await this.deps.resumeRegistry.recallWorkspace(id)
       const active = await this.deps.catalog.markActive(id)
+      await this.deps.startWorkspaceProcesses?.(catalogRecordToMeta(active))
       const assessment = await this.assess(id)
       if (!assessment) throw new Error('restored workspace did not re-enter the active registry')
       this.deps.logger.info('workspace.restored', { id, dir: record.activeDir })
@@ -295,6 +301,7 @@ export class WorkspaceLifecycleManager {
       return { ok: false, code: 'already_purged', message: 'workspace files were already purged' }
     }
     await this.deps.catalog.beginPurging(id)
+    await this.deps.stopWorkspaceProcesses?.(record.id)
     if (record.departedDir) {
       await this.deps.cleanupWorkspaceState?.(record, record.departedDir)
       await rm(record.departedDir, { recursive: true, force: true })
@@ -317,6 +324,7 @@ export class WorkspaceLifecycleManager {
   private async recoverRecord(record: WorkspaceCatalogRecord | null): Promise<void> {
     if (!record) return
     if (record.lifecycle === 'offboarding') {
+      await this.deps.stopWorkspaceProcesses?.(record.id)
       await this.deps.registry.remove(record.id)
       await this.pauseWorkspaceSessions(record.id)
       if (record.handoff && existsSync(record.activeDir)) {
@@ -351,10 +359,12 @@ export class WorkspaceLifecycleManager {
       if (!existsSync(record.activeDir)) throw new Error('cannot finish restore: workspace directory is missing')
       if (!this.deps.registry.hasId(record.id)) await this.deps.registry.add(catalogRecordToMeta(record))
       await this.deps.resumeRegistry.recallWorkspace(record.id)
-      await this.deps.catalog.markActive(record.id)
+      const active = await this.deps.catalog.markActive(record.id)
+      await this.deps.startWorkspaceProcesses?.(catalogRecordToMeta(active))
       return
     }
     if (record.lifecycle === 'purging') {
+      await this.deps.stopWorkspaceProcesses?.(record.id)
       if (record.departedDir) {
         await this.deps.cleanupWorkspaceState?.(record, record.departedDir)
         await rm(record.departedDir, { recursive: true, force: true })
