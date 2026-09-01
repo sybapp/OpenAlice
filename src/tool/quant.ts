@@ -36,15 +36,14 @@ A script is one or more \`name = bars(...)\` bindings followed by a final result
   sma(s.close, 50) - sma(s.close, 200)
 
 bars(barId, interval, count=, asOf=, start=, end=, asset=):
-  - barId: "{source}|{symbol}" from searchBars (broker, e.g. "alpaca-paper|AAPL";
-    opt-in keyless data source, e.g. "binance-readonly|BTC/USDT"; or vendor,
-    e.g. "yfinance|AAPL", "fmp|AAPL"). Prefer a broker/keyless exchange barId
-    for anything time-sensitive when available — yfinance is a delayed free
-    fallback (EOD bars can lag a day or two).
+  - barId: "{source}|{symbol}" from searchBars (broker, e.g. "alpaca-paper|AAPL",
+    "binance-readonly|BTC/USDT") or a vendor ("yfinance|AAPL", "fmp|AAPL", "tradingview|NASDAQ:AAPL").
+    Prefer a broker barId for anything you trade or anything time-sensitive. TradingView vendor
+    barIds are valid bar sources after enabling that vendor.
   - interval: "1m" "5m" "15m" "30m" "1h" "4h" "1d" "1w".
   - count=N: number of most-recent bars (the natural window for indicators).
-  - asset=: REQUIRED for vendor barIds — "equity" | "crypto" | "currency" | "commodity".
-    (Broker barIds infer it.)
+  - asset=: REQUIRED only for compatibility vendor barIds — "equity" | "crypto" | "currency" | "commodity".
+    Broker and native vendor barIds infer routing.
 Series columns: s.open / s.high / s.low / s.close / s.volume
 Functions: sma(series, n), ema(series, n), stdev(series), max/min/sum/average/median(series),
   rsi(series, n=14), bbands(series, n, std), macd(series, fast, slow, signal),

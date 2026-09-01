@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { createBarService, parseBarId, formatBarId, isDerivativeBarId } from './index.js'
-import type { BarServiceDeps, UtaBarGateway } from './types.js'
+import type { BarServiceDeps, UtaBarGateway, VendorBarAdapter } from './types.js'
 import type {
   EquityClientLike, CryptoClientLike, CurrencyClientLike, CommodityClientLike,
 } from '../client/types.js'
@@ -114,6 +114,61 @@ describe('getBars — vendor branch', () => {
 })
 
 describe('getBars — barId forms', () => {
+  it('routes native vendor barIds through their adapter without an assetClass', async () => {
+    const adapter: VendorBarAdapter = {
+      id: 'native',
+      vendor: {
+        id: 'native', name: 'Native', keyless: true, coverage: 'test', howToUse: 'test',
+      },
+      metadata: { capability: 'delayed', supportedIntervals: ['1m', '1d'] },
+      search: async () => [],
+      getBars: vi.fn(async () => RAW as never),
+    }
+    const svc = createBarService(makeDeps({ vendorBarAdapters: { native: adapter } }))
+
+    const { bars, meta } = await svc.getBars({ barId: 'native|NASDAQ:AAPL' }, { interval: '1m', count: 2 })
+
+    expect(adapter.getBars).toHaveBeenCalledWith('NASDAQ:AAPL', { interval: '1m', count: 2 })
+    expect(bars.map((bar) => bar.date)).toEqual(['2024-01-02', '2024-01-03'])
+    expect(meta).toMatchObject({
+      source: 'vendor',
+      sourceId: 'native',
+      provider: 'native',
+      barId: 'native|NASDAQ:AAPL',
+      barCapability: 'delayed',
+      supportedIntervals: ['1m', '1d'],
+    })
+    await expect(svc.getSourceCapabilities?.({ barId: 'native|NASDAQ:AAPL' })).resolves.toEqual({
+      barCapability: 'delayed',
+      supportedIntervals: ['1m', '1d'],
+      requiresAssetClass: false,
+    })
+  })
+
+  it('passes assetClass to native adapters for shorthand barIds', async () => {
+    const adapter: VendorBarAdapter = {
+      id: 'native',
+      vendor: {
+        id: 'native', name: 'Native', keyless: true, coverage: 'test', howToUse: 'test',
+      },
+      metadata: { capability: 'delayed', supportedIntervals: ['1m', '1d'] },
+      search: async () => [],
+      getBars: vi.fn(async () => RAW as never),
+    }
+    const svc = createBarService(makeDeps({ vendorBarAdapters: { native: adapter } }))
+
+    await svc.getBars(
+      { barId: 'native|AAPL', assetClass: 'equity' },
+      { interval: '1d', count: 2 },
+    )
+
+    expect(adapter.getBars).toHaveBeenCalledWith(
+      'AAPL',
+      { interval: '1d', count: 2 },
+      { assetClass: 'equity' },
+    )
+  })
+
   it('vendor barId routes to the vendor client (needs assetClass)', async () => {
     const deps = makeDeps()
     const svc = createBarService(deps)
@@ -183,6 +238,20 @@ describe('getBars — UTA branch', () => {
     expect(meta.barCapability).toBe('realtime')
   })
 
+  it('rejects unsupported intervals instead of silently fetching daily bars', async () => {
+    const getHistorical = vi.fn(async () => WIRE)
+    const utaManager: UtaBarGateway = {
+      has: async () => true,
+      get: async () => ({ getHistorical }),
+      searchContracts: async () => [],
+    }
+    const svc = createBarService(makeDeps({ utaManager }))
+
+    await expect(svc.getBars({ barId: 'alpaca-paper|AAPL' }, { interval: '2h' }))
+      .rejects.toThrow('Unsupported bar interval "2h"')
+    expect(getHistorical).not.toHaveBeenCalled()
+  })
+
   it('rejects a UTA source that does not advertise historical-bar support', async () => {
     const getHistorical = vi.fn(async () => WIRE)
     const utaManager: UtaBarGateway = {
@@ -237,6 +306,71 @@ describe('getBars — UTA branch', () => {
 })
 
 describe('searchBarSources — federated candidates', () => {
+  it('includes candidates returned by native vendor adapters', async () => {
+    const adapter: VendorBarAdapter = {
+      id: 'native',
+      vendor: {
+        id: 'native', name: 'Native', keyless: true, coverage: 'test', howToUse: 'test',
+      },
+      metadata: { capability: 'delayed', supportedIntervals: ['1m'] },
+      search: vi.fn(async () => [{
+        barId: 'native|NASDAQ:AAPL',
+        source: 'vendor' as const,
+        sourceId: 'native',
+        symbol: 'NASDAQ:AAPL',
+        name: 'Apple Inc.',
+        assetClass: 'equity' as const,
+        label: 'NASDAQ:AAPL · Apple Inc. (native) · delayed',
+        barCapability: 'delayed' as const,
+        supportedIntervals: ['1m'],
+      }]),
+      getBars: async () => [],
+    }
+    const svc = createBarService(makeDeps({ vendorBarAdapters: { native: adapter } }))
+
+    const out = await svc.searchBarSources('AAPL', { limit: 7 })
+
+    expect(adapter.search).toHaveBeenCalledWith('AAPL', { limit: 7 })
+    expect(out).toContainEqual(expect.objectContaining({
+      barId: 'native|NASDAQ:AAPL',
+      sourceId: 'native',
+      assetClass: 'equity',
+    }))
+  })
+
+  it('de-dupes adapter candidates and drops ones with an empty symbol or barId', async () => {
+    const row = (barId: string, symbol: string) => ({
+      barId,
+      source: 'vendor' as const,
+      sourceId: 'native',
+      symbol,
+      assetClass: 'equity' as const,
+      label: `${symbol} (native)`,
+      barCapability: 'delayed' as const,
+      supportedIntervals: ['1m'],
+    })
+    const adapter: VendorBarAdapter = {
+      id: 'native',
+      vendor: {
+        id: 'native', name: 'Native', keyless: true, coverage: 'test', howToUse: 'test',
+      },
+      metadata: { capability: 'delayed', supportedIntervals: ['1m'] },
+      // Two symbol_search hits normalizing to one EXCHANGE:SYMBOL, plus a blank row.
+      search: async () => [
+        row('native|NASDAQ:AAPL', 'NASDAQ:AAPL'),
+        row('native|NASDAQ:AAPL', 'NASDAQ:AAPL'),
+        row('native|', ''),
+      ],
+      getBars: async () => [],
+    }
+    const svc = createBarService(makeDeps({ vendorBarAdapters: { native: adapter } }))
+
+    const out = await svc.searchBarSources('AAPL')
+
+    expect(out.filter((c) => c.barId === 'native|NASDAQ:AAPL')).toHaveLength(1)
+    expect(out.some((c) => !c.symbol.trim())).toBe(false)
+  })
+
   it('maps vendor results to barId-tagged candidates', async () => {
     const svc = createBarService(makeDeps())
     const out = await svc.searchBarSources('AAPL')

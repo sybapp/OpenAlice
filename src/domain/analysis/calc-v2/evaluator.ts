@@ -275,7 +275,7 @@ function barFetchSuggestion(detail: string): string {
   if (/^NETWORK_UNREACHABLE:|cannot reach|unreachable|\bDNS\b|proxy/i.test(detail)) {
     return 'Not a script error — the data source was unreachable from this network. Do not retry blindly; try a different source, or surface the network/VPN issue to the user.'
   }
-  return 'Not a script error in the math — check the barId is one returned by searchBars/searchContracts (vendor barIds also need asset=). If the source genuinely has no data for this symbol/interval, try another source.'
+  return 'Not a script error in the math — check the barId is one returned by searchBars/searchContracts (compatibility vendor barIds also need asset=; native vendors do not). If the source genuinely has no data for this symbol/interval, try another source.'
 }
 
 // ---- function registry (reuses indicator math) ----
