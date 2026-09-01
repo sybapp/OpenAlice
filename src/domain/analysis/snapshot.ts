@@ -93,6 +93,13 @@ function safe(fn: () => number): number | null {
   try { const v = fn(); return Number.isFinite(v) ? v : null } catch { return null }
 }
 
+function intradayMinutes(interval: string): number | null {
+  const match = interval.match(/^(\d+)(m|h)$/)
+  if (!match) return null
+  const value = Number(match[1])
+  return match[2] === 'h' ? value * 60 : value
+}
+
 export async function getSnapshot(
   barService: BarService,
   ref: BarSourceRef,
@@ -141,6 +148,31 @@ export async function getSnapshot(
   const prevClose = bars.length >= 2 ? bars[bars.length - 2].close : null
   const periodHigh = Math.max(...bars.map((b) => b.high))
   const periodLow = Math.min(...bars.map((b) => b.low))
+  const lastDay = last.date.slice(0, 10)
+  const minutes = intradayMinutes(interval)
+  let dayBars = bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+  // Only re-fetch when the analysis window itself starts on the last day — then
+  // `count` may have clipped the session open and the day range would be wrong.
+  // If the window starts earlier it already holds every bar of the last day, and
+  // a second round-trip is pure cost (a TradingView getBars opens a fresh socket
+  // with a 25s timeout and up to 3 attempts) for an identical answer.
+  const windowStartsOnLastDay = bars[0].date.slice(0, 10) === lastDay
+  if (minutes !== null && windowStartsOnLastDay) {
+    try {
+      const sessionResult = await barService.getBars(ref, {
+        interval,
+        start: lastDay,
+        end: lastDay,
+        count: Math.ceil((24 * 60) / minutes) + 1,
+      })
+      const completeDayBars = sessionResult.bars.filter((bar) => bar.date.slice(0, 10) === lastDay)
+      if (completeDayBars.length > 0) dayBars = completeDayBars
+    } catch {
+      // Keep the bounded-window range if the provider cannot serve a day slice.
+    }
+  }
+  const dayHigh = Math.max(...dayBars.map((bar) => bar.high))
+  const dayLow = Math.min(...dayBars.map((bar) => bar.low))
 
   return {
     ...base,
@@ -150,9 +182,9 @@ export async function getSnapshot(
       close: r(last.close)!,
       prevClose: r(prevClose),
       changePct: r(prevClose != null ? ((last.close - prevClose) / prevClose) * 100 : null, 2),
-      dayHigh: r(last.high)!,
-      dayLow: r(last.low)!,
-      dayAmplitudePct: r(prevClose != null ? ((last.high - last.low) / prevClose) * 100 : null, 2),
+      dayHigh: r(dayHigh)!,
+      dayLow: r(dayLow)!,
+      dayAmplitudePct: r(prevClose != null ? ((dayHigh - dayLow) / prevClose) * 100 : null, 2),
     },
     levels: {
       sma20: r(closes.length >= 20 ? safe(() => SMA(closes, 20)) : null),
