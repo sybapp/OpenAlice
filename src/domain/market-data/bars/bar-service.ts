@@ -23,25 +23,18 @@ import type {
   BarMeta,
   BarCapability,
 } from './types.js'
-import { formatBarId, isDerivativeBarId, parseBarId } from './types.js'
+import { formatBarId, isDerivativeBarId, parseBarId, SUPPORTED_BAR_INTERVALS } from './types.js'
 
 /** Hard ceiling on bars returned by any single fetch (explosion guard). */
 const MAX_BARS = 5000
 
-/** Vendor → bar capability (honest-ish defaults; vendors mostly serve delayed). */
-const VENDOR_CAPABILITY: Record<string, BarCapability> = {
-  yfinance: 'delayed',
-  fmp: 'delayed',
-  eastmoney: 'delayed',
-  twse: 'delayed', // K-lines via Yahoo chart (symbols are .TW/.TWO)
-}
-
-const BAR_INTERVALS: readonly BarInterval[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
+const BAR_INTERVALS: readonly BarInterval[] = SUPPORTED_BAR_INTERVALS
 
 function toBarInterval(interval: string): BarInterval {
-  return (BAR_INTERVALS as readonly string[]).includes(interval)
-    ? (interval as BarInterval)
-    : '1d'
+  if (!(BAR_INTERVALS as readonly string[]).includes(interval)) {
+    throw new Error(`Unsupported bar interval "${interval}"`)
+  }
+  return interval as BarInterval
 }
 
 /** Map a broker secType to the data-vendor asset class (for candidate display
@@ -191,6 +184,38 @@ function finalize(data: OhlcvBar[], count?: number): OhlcvBar[] {
 }
 
 export function createBarService(deps: BarServiceDeps): BarService {
+  const vendorMetadata = (provider: string) => deps.vendorBarMetadata?.[provider]
+  const getVendorCapability = (provider: string): BarCapability =>
+    vendorMetadata(provider)?.capability ?? 'delayed'
+  const getVendorIntervals = (provider: string): string[] | undefined => {
+    const intervals = vendorMetadata(provider)?.supportedIntervals
+    return intervals ? [...intervals] : undefined
+  }
+
+  async function getNativeVendorBars(
+    adapter: NonNullable<BarServiceDeps['vendorBarAdapters']>[string],
+    symbol: string,
+    opts: GetBarsOpts,
+    assetClass?: AssetClass,
+  ): Promise<BarsResult> {
+    const raw = assetClass === undefined
+      ? await adapter.getBars(symbol, opts)
+      : await adapter.getBars(symbol, opts, { assetClass })
+    const bars = finalize(raw.filter(isFullBar), opts.count)
+    return {
+      bars,
+      meta: buildMeta(symbol, bars, {
+        source: 'vendor',
+        sourceId: adapter.id,
+        barId: formatBarId(adapter.id, symbol),
+        provider: adapter.id,
+        barCapability: adapter.metadata.capability,
+        supportedIntervals: [...adapter.metadata.supportedIntervals],
+        ...computeFreshness(bars[bars.length - 1]?.date ?? '', opts, () => new Date()),
+      }),
+    }
+  }
+
   // -------- vendor fetch --------
   async function getVendorBars(
     provider: string,
@@ -202,20 +227,30 @@ export function createBarService(deps: BarServiceDeps): BarService {
     // Upper bound: the provider compatibility models apply end_date;
     // we also post-filter defensively in case a provider ignores it.
     const end_date = opts.end
-    const p = (extra?: Record<string, unknown>) => ({ symbol, start_date, provider, ...(end_date ? { end_date } : {}), ...extra })
+    // Only providers that declare server-side count support receive this field;
+    // several compatibility fetchers map params directly to vendor APIs.
+    const countParam = vendorMetadata(provider)?.supportsCount && opts.count != null ? { count: opts.count } : {}
+    const buildHistoricalParams = (extra?: Record<string, unknown>) => ({
+      symbol,
+      start_date,
+      provider,
+      ...(end_date ? { end_date } : {}),
+      ...countParam,
+      ...extra,
+    })
     let raw: Array<Record<string, unknown>>
     switch (assetClass) {
       case 'equity':
-        raw = await deps.equityClient.getHistorical(p({ interval: opts.interval }))
+        raw = await deps.equityClient.getHistorical(buildHistoricalParams({ interval: opts.interval }))
         break
       case 'crypto':
-        raw = await deps.cryptoClient.getHistorical(p({ interval: opts.interval }))
+        raw = await deps.cryptoClient.getHistorical(buildHistoricalParams({ interval: opts.interval }))
         break
       case 'currency':
-        raw = await deps.currencyClient.getHistorical(p({ interval: opts.interval }))
+        raw = await deps.currencyClient.getHistorical(buildHistoricalParams({ interval: opts.interval }))
         break
       case 'commodity':
-        raw = await deps.commodityClient.getSpotPrices(p())
+        raw = await deps.commodityClient.getSpotPrices(buildHistoricalParams())
         break
     }
     let bars = raw.filter(isFullBar) as OhlcvBar[]
@@ -228,7 +263,8 @@ export function createBarService(deps: BarServiceDeps): BarService {
         sourceId: provider,
         barId: formatBarId(provider, symbol),
         provider,
-        barCapability: VENDOR_CAPABILITY[provider],
+        barCapability: getVendorCapability(provider),
+        supportedIntervals: getVendorIntervals(provider),
         ...computeFreshness(filtered[filtered.length - 1]?.date ?? '', opts, () => new Date()),
       }),
     }
@@ -269,6 +305,7 @@ export function createBarService(deps: BarServiceDeps): BarService {
         sourceId,
         barId,
         barCapability: effectiveCap,
+        supportedIntervals: [...BAR_INTERVALS],
         ...computeFreshness(bars[bars.length - 1]?.date ?? '', opts, () => new Date()),
       }),
     }
@@ -282,10 +319,12 @@ export function createBarService(deps: BarServiceDeps): BarService {
       // Federate embedded vendor + broker (UTA) search. allSettled so one
       // side failing (e.g. no UTA configured) doesn't kill the other. Flat
       // candidates, no cross-source dedup — redundancy is the feature.
-      const [vendorRes, utaRes, capsRes] = await Promise.allSettled([
+      const adapters = Object.values(deps.vendorBarAdapters ?? {})
+      const [vendorRes, utaRes, capsRes, ...adapterResults] = await Promise.allSettled([
         aggregateSymbolSearch(deps.marketSearch, query, limit),
         deps.utaManager.searchContracts(query),
         deps.utaManager.getBarCapabilities?.() ?? Promise.resolve<Record<string, BarCapability>>({}),
+        ...adapters.map((adapter) => adapter.search(query, { limit })),
       ])
       const caps: Record<string, BarCapability> = capsRes.status === 'fulfilled' ? capsRes.value : {}
       const out: BarSourceCandidate[] = []
@@ -302,7 +341,7 @@ export function createBarService(deps: BarServiceDeps): BarService {
           // Per-result vendor attribution (multi-vendor equity); falls back to
           // the configured per-asset provider for crypto/currency/commodity.
           const provider = r.sourceId ?? deps.vendorProviders[r.assetClass]
-          const cap = VENDOR_CAPABILITY[provider]
+          const cap = getVendorCapability(provider)
           const base = r.name ? `${symbol} · ${r.name} (${provider})` : `${symbol} (${provider})`
           append({
             barId: formatBarId(provider, symbol),
@@ -316,8 +355,17 @@ export function createBarService(deps: BarServiceDeps): BarService {
             // when it deliberately falls back to one (yfinance/fmp are EOD-delayed).
             label: cap ? `${base} · ${cap}` : base,
             barCapability: cap,
+            supportedIntervals: getVendorIntervals(provider),
           })
         }
+      }
+
+      for (const result of adapterResults) {
+        if (result.status !== 'fulfilled') continue
+        // Through append(), not push(): adapter rows share the dedup set and the
+        // empty-symbol/barId guard with every other branch. Two symbol_search
+        // hits can normalize to the same EXCHANGE:SYMBOL barId.
+        for (const candidate of result.value) append(candidate)
       }
 
       if (utaRes.status === 'fulfilled') {
@@ -346,6 +394,7 @@ export function createBarService(deps: BarServiceDeps): BarService {
             // blanket 'realtime'.
             label: `${symbol} (${hit.source}) · ${effectiveCap}`,
             barCapability: effectiveCap,
+            supportedIntervals: [...BAR_INTERVALS],
           })
         }
       }
@@ -368,14 +417,62 @@ export function createBarService(deps: BarServiceDeps): BarService {
       return out.slice(0, limit)
     },
 
+    async getSourceCapabilities(ref) {
+      if ('symbol' in ref) {
+        const provider = deps.vendorProviders[ref.assetClass]
+        const adapter = deps.vendorBarAdapters?.[provider]
+        if (adapter) {
+          return {
+            barCapability: adapter.metadata.capability,
+            supportedIntervals: [...adapter.metadata.supportedIntervals],
+            requiresAssetClass: false,
+          }
+        }
+        return {
+          barCapability: getVendorCapability(provider),
+          supportedIntervals: getVendorIntervals(provider),
+          requiresAssetClass: true,
+        }
+      }
+
+      const parsed = parseBarId(ref.barId)
+      if (!parsed) throw new Error(`Invalid barId "${ref.barId}" (expected "sourceId|nativeSymbol")`)
+      const adapter = deps.vendorBarAdapters?.[parsed.sourceId]
+      if (adapter) {
+        return {
+          barCapability: adapter.metadata.capability,
+          supportedIntervals: [...adapter.metadata.supportedIntervals],
+          requiresAssetClass: false,
+        }
+      }
+      if (await deps.utaManager.has(parsed.sourceId)) {
+        const caps = await deps.utaManager.getBarCapabilities?.() ?? {}
+        return {
+          barCapability: caps[parsed.sourceId] ?? 'realtime',
+          supportedIntervals: [...BAR_INTERVALS],
+          requiresAssetClass: false,
+        }
+      }
+
+      return {
+        barCapability: getVendorCapability(parsed.sourceId),
+        supportedIntervals: getVendorIntervals(parsed.sourceId),
+        requiresAssetClass: true,
+      }
+    },
+
     async getBars(ref, opts) {
       if ('symbol' in ref) {
         const provider = deps.vendorProviders[ref.assetClass]
+        const adapter = deps.vendorBarAdapters?.[provider]
+        if (adapter) return getNativeVendorBars(adapter, ref.symbol, opts, ref.assetClass)
         return getVendorBars(provider, ref.assetClass, ref.symbol, opts)
       }
       // barId form
       const parsed = parseBarId(ref.barId)
       if (!parsed) throw new Error(`Invalid barId "${ref.barId}" (expected "sourceId|nativeSymbol")`)
+      const adapter = deps.vendorBarAdapters?.[parsed.sourceId]
+      if (adapter) return getNativeVendorBars(adapter, parsed.nativeSymbol, opts, ref.assetClass)
       const isUta = await deps.utaManager.has(parsed.sourceId)
       if (isUta) return getUtaBars(parsed.sourceId, ref.barId, opts)
       // vendor barId — needs an assetClass to route to the right client

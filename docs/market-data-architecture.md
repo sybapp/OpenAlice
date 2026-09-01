@@ -84,7 +84,8 @@ across search, charting, snapshots, and simulations.
 
 BarService federates:
 
-- vendor K-lines from the embedded provider adapters;
+- native vendor adapters owned under `src/domain/market-data/bars/providers/`;
+- remaining vendor K-lines from embedded compatibility adapters;
 - broker/exchange K-lines exposed through UTA;
 - source metadata such as capability and freshness.
 
@@ -95,6 +96,13 @@ supplies the selected broker engine implementation. Missing support makes that
 UTA source unavailable with an actionable error; it must not remove the UTA
 provider kind, rewrite `asVendor`, or silently route the same `barId` through a
 different vendor.
+
+TradingView is the reference native vendor adapter. Its search, anonymous chart
+protocol, retry policy, source metadata, and tests live entirely under
+`src/domain/market-data/bars/providers/`; it has no compatibility-package
+Provider, asset-class fetchers, or `/api/market-data-v1` routes. Search results
+use exchange-qualified bar IDs; fetches also accept bare IDs such as
+`tradingview|AAPL` and resolve them serially through TradingView symbol search.
 
 New K-line sources should implement the bar/provider contract and appear in bar
 source discovery. They should not require a new OpenBB-style asset-class client

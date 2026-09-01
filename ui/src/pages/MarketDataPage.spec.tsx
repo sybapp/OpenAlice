@@ -7,6 +7,8 @@ import { MarketDataPage } from './MarketDataPage'
 
 const mocks = vi.hoisted(() => ({
   hubStatus: vi.fn(),
+  marketVendors: { vendors: [] as unknown[] | null, error: false },
+  retryVendors: vi.fn(),
   testProvider: vi.fn(),
   updateConfig: vi.fn(),
   updateConfigImmediate: vi.fn(),
@@ -45,8 +47,14 @@ vi.mock('../hooks/useConfigPage', () => ({
   }),
 }))
 
+vi.mock('../hooks/useMarketVendors', () => ({
+  useMarketVendors: () => ({ ...mocks.marketVendors, retry: mocks.retryVendors }),
+}))
+
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.marketVendors.vendors = []
+  mocks.marketVendors.error = false
   mocks.testProvider.mockResolvedValue({ ok: true })
 })
 
@@ -58,6 +66,17 @@ function openProviderKeys() {
 }
 
 describe('MarketDataPage provider credentials', () => {
+  it('offers a retry when chart vendors fail to load', () => {
+    mocks.marketVendors.vendors = null
+    mocks.marketVendors.error = true
+    render(<MarketDataPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(screen.getByRole('alert').textContent).toContain('Failed to load chart vendors.')
+    expect(mocks.retryVendors).toHaveBeenCalledOnce()
+  })
+
   it('gives every key field and test action a provider-specific name', () => {
     openProviderKeys()
 

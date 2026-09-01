@@ -13,6 +13,7 @@ vi.mock('@/core/config.js', () => ({
 
 import { readMarketDataConfig, updateExtraVendors } from '@/core/config.js'
 import { listMarketVendors, setMarketVendor } from './vendors.js'
+import { TRADINGVIEW_VENDOR_INFO } from './bars/providers/tradingview.js'
 
 const META = { coverage: 'cov', howToUse: 'how' }
 
@@ -61,6 +62,19 @@ describe('listMarketVendors', () => {
     expect(v.find((x) => x.id === 'twse')).toMatchObject({ alwaysOn: false, enabled: false, coverage: 'cov' })
     expect(v.some((x) => x.id === 'fmp')).toBe(false)
   })
+
+  it('includes OpenAlice-native vendors that are absent from the compatibility registry', async () => {
+    const vendors = await listMarketVendors(fakeExecutor([
+      P('yfinance', { meta: META }),
+    ]), [TRADINGVIEW_VENDOR_INFO])
+
+    expect(vendors).toContainEqual(expect.objectContaining({
+      id: 'tradingview',
+      name: 'TradingView',
+      enabled: false,
+      keyless: true,
+    }))
+  })
 })
 
 describe('setMarketVendor', () => {
@@ -81,6 +95,29 @@ describe('setMarketVendor', () => {
     await setMarketVendor(exec, 'eastmoney', false)
     const mutate = vi.mocked(updateExtraVendors).mock.calls[0]![0]
     expect(mutate(['eastmoney', 'twse'])).toEqual(['twse'])
+  })
+
+  it('enables an OpenAlice-native vendor without a compatibility Provider', async () => {
+    const r = await setMarketVendor(exec, 'tradingview', true, [TRADINGVIEW_VENDOR_INFO])
+    expect(r).toMatchObject({ id: 'tradingview', enabled: true })
+    const mutate = vi.mocked(updateExtraVendors).mock.calls[0]![0]
+    expect(mutate([])).toEqual(['tradingview'])
+  })
+
+  it('rejects disabling a vendor configured as a non-equity primary', async () => {
+    vi.mocked(readMarketDataConfig).mockResolvedValue({
+      providers: {
+        equity: 'yfinance',
+        crypto: 'tradingview',
+        currency: 'yfinance',
+        commodity: 'yfinance',
+      },
+      extraVendors: [],
+    } as unknown as Awaited<ReturnType<typeof readMarketDataConfig>>)
+
+    await expect(setMarketVendor(exec, 'tradingview', false, [TRADINGVIEW_VENDOR_INFO]))
+      .rejects.toThrow(/configured provider/)
+    expect(updateExtraVendors).not.toHaveBeenCalled()
   })
 
   it('rejects toggling the always-on primary (yfinance)', async () => {

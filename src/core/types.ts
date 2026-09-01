@@ -4,6 +4,7 @@ import type { INewsProvider } from '../domain/news/types.js'
 import type { MarketSearchDeps } from '../domain/market-data/aggregate-search.js'
 import type { EquityClientLike } from '../domain/market-data/client/types.js'
 import type { BarService } from '../domain/market-data/bars/index.js'
+import type { MarketVendorDefinition } from '../domain/market-data/vendors.js'
 import type { ReferenceDataService } from '../domain/market-data/reference/types.js'
 import type { Config, WebChannel } from './config.js'
 import type { TradingModePolicy } from '../services/trading-mode.js'
@@ -53,6 +54,8 @@ export interface EngineContext {
    *  OHLCV behind one barId-keyed interface. Consumed by the analysis tools and
    *  (Phase 3) the /api/bars chart route. */
   barService: BarService
+  /** Self-described native vendors registered in the composition root. */
+  marketVendors: readonly MarketVendorDefinition[]
   /** Reference-data contract (low-frequency boards: movers, macro, calendar,
    *  …). OpenAlice's own standard replacing the OpenBB-compatible
    *  passthrough; the future hosted-hub seam. Served at /api/reference. */

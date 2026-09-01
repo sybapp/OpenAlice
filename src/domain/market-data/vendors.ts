@@ -2,9 +2,8 @@
  * Market-vendor catalog — the agent-facing "what data sources do I have, and
  * how do I drive them" surface.
  *
- * Each vendor OWNS its self-description: the prose (coverage + howToUse) lives on
- * the embedded Provider's `vendorMeta`, so adding a vendor carries its own
- * usage note — there is no outer table to forget to update. This module only
+ * Each vendor owns its self-description. Native OpenAlice vendors publish it
+ * beside their adapter; compatibility providers publish `vendorMeta`. This module
  * JOINS that self-description to runtime state read fresh from market-data.json:
  *
  *   - alwaysOn  — is this the primary equity vendor (yfinance)? can't be toggled.
@@ -38,27 +37,57 @@ export interface MarketVendorInfo {
   website?: string
 }
 
-/** Every provider that has opted into the vendor picker (declared `vendorMeta`),
- *  joined to current on/off state. Always-on first, then enabled, then the rest. */
-export async function listMarketVendors(executor: QueryExecutor): Promise<MarketVendorInfo[]> {
+export interface MarketVendorDefinition {
+  id: string
+  name: string
+  keyless: boolean
+  coverage: string
+  howToUse: string
+  website?: string
+}
+
+function vendorDefinitions(
+  executor: QueryExecutor,
+  nativeVendors: readonly MarketVendorDefinition[],
+): MarketVendorDefinition[] {
+  const definitions = new Map<string, MarketVendorDefinition>()
+  for (const provider of executor.listProviders()) {
+    if (!provider.vendorMeta) continue
+    definitions.set(provider.name, {
+      id: provider.name,
+      name: provider.reprName ?? provider.name,
+      keyless: provider.credentials.length === 0,
+      coverage: provider.vendorMeta.coverage,
+      howToUse: provider.vendorMeta.howToUse,
+      website: provider.website,
+    })
+  }
+  for (const vendor of nativeVendors) definitions.set(vendor.id, vendor)
+  return [...definitions.values()]
+}
+
+/** Native and compatibility vendors joined to current on/off state.
+ *  Always-on first, then enabled, then the rest. */
+export async function listMarketVendors(
+  executor: QueryExecutor,
+  nativeVendors: readonly MarketVendorDefinition[] = [],
+): Promise<MarketVendorInfo[]> {
   const md = await readMarketDataConfig()
-  const primary = md.providers.equity
+  const configuredProviders = new Set(Object.values(md.providers))
   const extra = new Set(md.extraVendors)
 
-  return executor
-    .listProviders()
-    .filter((p) => p.vendorMeta)
-    .map((p): MarketVendorInfo => {
-      const alwaysOn = p.name === primary
+  return vendorDefinitions(executor, nativeVendors)
+    .map((vendor): MarketVendorInfo => {
+      const alwaysOn = configuredProviders.has(vendor.id)
       return {
-        id: p.name,
-        name: p.reprName ?? p.name,
+        id: vendor.id,
+        name: vendor.name,
         alwaysOn,
-        enabled: alwaysOn || extra.has(p.name),
-        keyless: p.credentials.length === 0,
-        coverage: p.vendorMeta!.coverage,
-        howToUse: p.vendorMeta!.howToUse,
-        website: p.website,
+        enabled: Object.values(md.providers).includes(vendor.id) || extra.has(vendor.id),
+        keyless: vendor.keyless,
+        coverage: vendor.coverage,
+        howToUse: vendor.howToUse,
+        website: vendor.website,
       }
     })
     .sort(
@@ -84,24 +113,27 @@ export async function setMarketVendor(
   executor: QueryExecutor,
   id: string,
   enabled: boolean,
+  nativeVendors: readonly MarketVendorDefinition[] = [],
 ): Promise<SetVendorResult> {
-  const known = executor.listProviders().filter((p) => p.vendorMeta)
-  const target = known.find((p) => p.name.toLowerCase() === id.trim().toLowerCase())
+  const known = vendorDefinitions(executor, nativeVendors)
+  const target = known.find((vendor) => vendor.id.toLowerCase() === id.trim().toLowerCase())
   if (!target) {
-    const names = known.map((p) => p.name).join(', ')
+    const names = known.map((vendor) => vendor.id).join(', ')
     throw new Error(`Unknown market vendor "${id}". Available vendors: ${names}.`)
   }
 
   const md = await readMarketDataConfig()
-  if (target.name === md.providers.equity) {
+  const configuredAssetClass = Object.entries(md.providers)
+    .find(([, provider]) => provider === target.id)?.[0]
+  if (configuredAssetClass) {
     throw new Error(
-      `"${target.name}" is the always-on primary equity vendor and cannot be toggled.`,
+      `"${target.id}" is the always-on configured provider for ${configuredAssetClass} and cannot be toggled.`,
     )
   }
 
   await updateExtraVendors((current) =>
-    enabled ? [...current, target.name] : current.filter((v) => v !== target.name),
+    enabled ? [...current, target.id] : current.filter((v) => v !== target.id),
   )
 
-  return { id: target.name, enabled, vendors: await listMarketVendors(executor) }
+  return { id: target.id, enabled, vendors: await listMarketVendors(executor, nativeVendors) }
 }

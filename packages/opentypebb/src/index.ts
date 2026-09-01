@@ -8,7 +8,11 @@
 
 // Core abstractions
 export { Fetcher, type FetcherClass } from './core/provider/abstract/fetcher.js'
-export { Provider, type ProviderConfig, type VendorMeta } from './core/provider/abstract/provider.js'
+export {
+  Provider,
+  type ProviderConfig,
+  type VendorMeta,
+} from './core/provider/abstract/provider.js'
 export { BaseQueryParamsSchema, type BaseQueryParams } from './core/provider/abstract/query-params.js'
 export { BaseDataSchema, type BaseData, ForceInt } from './core/provider/abstract/data.js'
 
