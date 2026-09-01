@@ -70,10 +70,16 @@ src/                           Alice process
 ├── ai-providers/              provider/model preset catalog only
 ├── domain/                    non-broker domains
 │   ├── market-data/           market/fundamental data access
-│   ├── analysis/              indicators and technical analysis
+│   ├── analysis/              analysis domains
+│   │   └── technical-analysis/
+│   │       ├── context.ts     unified external seam
+│   │       ├── indicators.ts  EMA/VWAP/Fibonacci/confluence
+│   │       ├── price-action/  internal Price Action implementation
+│   │       └── order-flow/    internal OHLCV Delta Proxy implementation
 │   ├── news/                  RSS collection and archive search
 │   └── thinking/              safe expression evaluation
 ├── tool/                      agent-facing tool definitions and bridges
+│   └── technical-analysis.ts  single public K-line analysis adapter
 ├── workspaces/                launcher, PTYs, templates, adapters, issues,
 │   │                          schedules, CLI shims, file/git operations
 │   ├── adapters/              claude / codex / cursor / agy / grok / omp / opencode / pi / shell
