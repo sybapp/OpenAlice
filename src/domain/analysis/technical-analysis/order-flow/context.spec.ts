@@ -1,0 +1,326 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { BarService, BarsResult } from '@/domain/market-data/bars/index.js'
+import { analyzeOrderFlowContext } from './context.js'
+
+describe('analyzeOrderFlowContext', () => {
+  it('returns delta and profile context with intrabar precision metadata', async () => {
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({
+        bars: [
+          { date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: 3000 },
+        ],
+        meta: {
+          symbol: 'AAPL',
+          from: '2024-01-01',
+          to: '2024-01-01',
+          bars: 1,
+          barId: 'tradingview|AAPL',
+          supportedIntervals: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'],
+        },
+      } as BarsResult)
+      .mockResolvedValueOnce({
+        bars: [
+          { date: '2024-01-01 09:00:00', open: 100, high: 101, low: 99, close: 101, volume: 1000 },
+          { date: '2024-01-01 09:05:00', open: 101, high: 102, low: 100, close: 102, volume: 1000 },
+          { date: '2024-01-01 09:10:00', open: 102, high: 105, low: 101, close: 104, volume: 1000 },
+        ],
+        meta: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-01', bars: 3, barId: 'tradingview|AAPL' },
+      } as BarsResult)
+    const barService = {
+      searchBarSources: vi.fn(),
+      getSourceCapabilities: async () => ({
+        supportedIntervals: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'],
+      }),
+      getBars,
+    } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|AAPL',
+      assetClass: 'equity',
+      interval: '15m',
+      count: 1,
+      numBins: 5,
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.delta?.bars).toHaveLength(1)
+    expect(result.delta?.bars[0]).toMatchObject({
+      barCompletion: 'unknown',
+      delta: 3000,
+      cvd: 3000,
+      deltaRatio: 1,
+      coverage: 1,
+      confidence: 'high',
+      lowConfidence: false,
+      isApproximation: true,
+    })
+    expect(result.profile?.bins).toHaveLength(5)
+    expect(result.profile?.poc).toBeTruthy()
+    expect(result.profile?.valueArea).toEqual(expect.objectContaining({
+      high: expect.any(Number),
+      low: expect.any(Number),
+    }))
+    expect(result.summary).toMatchObject({
+      fidelity: 'bar_proxy',
+      isApproximation: true,
+      currentState: {
+        bar: {
+          index: 0,
+          sourceIndex: 0,
+          timestamp: '2024-01-01 09:00:00',
+          close: 104,
+          barCompletion: 'unknown',
+        },
+        delta: {
+          status: 'available',
+          direction: 'positive',
+          normalizedStrength: 1,
+          delta: 3000,
+          cvd: 3000,
+          cvdDirection: 'positive',
+          recentCvdTendency: 'flat',
+          recentCvdChange: 0,
+          sampleCount: 1,
+        },
+        profile: {
+          status: 'available',
+          close: 104,
+          poc: expect.any(Number),
+          distanceFromPoc: expect.any(Number),
+          pocRelation: expect.stringMatching(/above|inside|below/),
+          valueArea: {
+            high: expect.any(Number),
+            low: expect.any(Number),
+            location: expect.stringMatching(/above|inside|below/),
+            distanceToValueArea: expect.any(Number),
+          },
+          sampleCount: 3,
+        },
+      },
+      methods: {
+        delta: 'lower_timeframe_ohlcv_signed_volume',
+        deltaStrength: 'absolute_delta_ratio',
+        cvdTendency: 'endpoint_change',
+        cvdTendencyLookback: 5,
+        profileLocation: 'latest_close_vs_window_profile',
+      },
+      window: {
+        targetBarCount: 1,
+        intrabarCount: 3,
+        targetIndexOffset: 0,
+      },
+    })
+    expect(result.meta).toMatchObject({
+      intrabarInterval: '1m',
+      intrabarCount: 3,
+      targetBars: 1,
+      requestedCount: 1,
+      actualCount: 1,
+      truncated: false,
+      lowConfidenceBars: 0,
+      isApproximation: true,
+    })
+  })
+
+  it('marks profile evidence unavailable when intrabars have no volume', async () => {
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({
+        bars: [{ date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: null }],
+        meta: { symbol: 'EURUSD', from: '2024-01-01', to: '2024-01-01', bars: 1 },
+      } as BarsResult)
+      .mockResolvedValueOnce({
+        bars: [{ date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: null }],
+        meta: { symbol: 'EURUSD', from: '2024-01-01', to: '2024-01-01', bars: 1 },
+      } as BarsResult)
+    const barService = { searchBarSources: vi.fn(), getBars } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|FX:EURUSD', interval: '15m', count: 1,
+    })
+
+    expect(result.profile).toBeUndefined()
+    expect(result.delta?.bars).toEqual([])
+    expect(result.summary?.currentState.delta).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 0,
+    })
+    expect(result.summary?.currentState.profile).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 1,
+    })
+    expect(result.summary?.profileStructure).toMatchObject({
+      status: 'unavailable', reason: 'missing_volume', sampleCount: 0,
+    })
+  })
+
+  it('chooses TradingView 3m intrabars for a long 1h window', async () => {
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({
+        bars: [
+          { date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: 3000 },
+        ],
+        meta: {
+          symbol: 'AAPL',
+          from: '2024-01-01',
+          to: '2024-01-01',
+          bars: 1,
+          barId: 'tradingview|AAPL',
+          supportedIntervals: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'],
+        },
+      } as BarsResult)
+      .mockResolvedValueOnce({
+        bars: [
+          { date: '2024-01-01 09:00:00', open: 100, high: 101, low: 99, close: 101, volume: 1000 },
+        ],
+        meta: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-01', bars: 1, barId: 'tradingview|AAPL' },
+      } as BarsResult)
+    const barService = {
+      searchBarSources: vi.fn(),
+      getSourceCapabilities: async () => ({
+        supportedIntervals: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'],
+      }),
+      getBars,
+    } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|AAPL',
+      assetClass: 'equity',
+      interval: '1h',
+      count: 100,
+    })
+
+    expect(getBars).toHaveBeenNthCalledWith(1, { barId: 'tradingview|AAPL', assetClass: 'equity' }, {
+      interval: '1h',
+      count: 100,
+      start: undefined,
+      end: undefined,
+    })
+    expect(getBars).toHaveBeenNthCalledWith(2, { barId: 'tradingview|AAPL', assetClass: 'equity' }, {
+      interval: '3m',
+      start: '2024-01-01',
+      end: '2024-01-02',
+    })
+    expect(result.meta).toMatchObject({
+      intrabarInterval: '3m',
+      intrabarsPerParent: 20,
+      requiredIntrabarBars: 2000,
+      truncated: false,
+      degradationReason: '1m intrabar would require 6000 bars, exceeding MAX_BARS=5000. Auto-selected 3m.',
+    })
+  })
+
+  it('returns no_target_bars without running a profile calculation', async () => {
+    const barService = {
+      searchBarSources: vi.fn(),
+      getBars: vi.fn(async () => ({
+        bars: [],
+        meta: { symbol: 'AAPL', from: '', to: '', bars: 0 },
+      } as BarsResult)),
+    } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|AAPL',
+      assetClass: 'equity',
+      interval: '15m',
+    })
+
+    expect(result).toMatchObject({
+      status: 'no_target_bars',
+      error: 'No target bars returned for the requested window',
+      delta: { bars: [] },
+      profile: { bins: [], poc: null, valueArea: null },
+      summary: {
+        fidelity: 'bar_proxy',
+        isApproximation: true,
+        currentState: {
+          bar: null,
+          delta: { status: 'unavailable', reason: 'missing_target_bars', sampleCount: 0 },
+          profile: { status: 'unavailable', reason: 'missing_target_bars', sampleCount: 0 },
+        },
+      },
+      meta: {
+        intrabarCount: 0,
+        targetBars: 0,
+        isApproximation: true,
+      },
+    })
+  })
+
+  it('preserves no-intrabars status and returns an honest summary envelope', async () => {
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({
+        bars: [
+          { date: '2024-01-01 09:00:00', open: 100, high: 105, low: 99, close: 104, volume: 1000 },
+        ],
+        meta: { symbol: 'AAPL', from: '2024-01-01', to: '2024-01-01', bars: 1 },
+      } as BarsResult)
+      .mockResolvedValueOnce({
+        bars: [],
+        meta: { symbol: 'AAPL', from: '', to: '', bars: 0 },
+      } as BarsResult)
+    const barService = { searchBarSources: vi.fn(), getBars } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'tradingview|AAPL',
+      assetClass: 'equity',
+      interval: '15m',
+    })
+
+    expect(result).toMatchObject({
+      status: 'no_intrabars',
+      error: 'No intrabar data (1m) returned for the target window',
+      summary: {
+        fidelity: 'bar_proxy',
+        currentState: {
+          bar: {
+            index: 0,
+            sourceIndex: 0,
+            timestamp: '2024-01-01 09:00:00',
+            barCompletion: 'unknown',
+          },
+          delta: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },
+          profile: { status: 'unavailable', reason: 'missing_intrabars', sampleCount: 0 },
+        },
+      },
+    })
+    expect(result.delta).toEqual({ bars: [] })
+    expect(result.profile).toEqual({ bins: [], poc: null, valueArea: null })
+  })
+
+  it('reports target index offset when supplied bars are capped to the supported intrabar window', async () => {
+    const targetBars = Array.from({ length: 122 }, (_, index) => ({
+      date: new Date(Date.UTC(2024, 0, 1 + index, 0, 0, 0)).toISOString().slice(0, 10),
+      open: 100 + index,
+      high: 101 + index,
+      low: 99 + index,
+      close: 100 + index,
+      volume: 100,
+    }))
+    const barService = {
+      searchBarSources: vi.fn(),
+      getBars: vi.fn(async () => ({
+        bars: [{ date: '2024-01-04', open: 1, high: 1, low: 1, close: 1, volume: 1 }],
+        meta: { symbol: 'AAPL', from: '2024-01-04', to: '2024-05-01', bars: 1 },
+      } as BarsResult)),
+    } as unknown as BarService
+
+    const result = await analyzeOrderFlowContext(barService, {
+      barId: 'yfinance|AAPL',
+      assetClass: 'equity',
+      interval: '1000h',
+      count: targetBars.length,
+      targetBars,
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.meta.targetIndexOffset).toBe(3)
+    expect(result.meta.targetBars).toBe(119)
+    expect(result.meta.truncated).toBe(true)
+    expect(result.summary?.window.targetIndexOffset).toBe(3)
+    expect(result.summary?.currentState.bar).toMatchObject({ index: 118, sourceIndex: 121 })
+    expect(result.summary?.currentState.delta.reliability.inputWindowTruncated).toBe(true)
+    expect(result.summary?.currentState.profile.reliability.inputWindowTruncated).toBe(true)
+    expect(result.summary?.profileStructure.reliability.inputWindowTruncated).toBe(true)
+    expect(result.summary?.divergence).toMatchObject({ status: 'unavailable', reason: 'degraded_data' })
+    expect(result.summary?.absorption).toMatchObject({ status: 'unavailable', reason: 'degraded_data' })
+    expect(result.summary?.exhaustion).toMatchObject({ status: 'unavailable', reason: 'degraded_data' })
+  })
+})
