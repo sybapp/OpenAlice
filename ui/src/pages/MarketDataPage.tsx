@@ -5,46 +5,15 @@ import { SaveIndicator } from '../components/SaveIndicator'
 import { ConfigSection, SettingsScrollArea, inputClass } from '../components/form'
 import { Toggle } from '../components/Toggle'
 import { useConfigPage } from '../hooks/useConfigPage'
+import { useMarketVendors } from '../hooks/useMarketVendors'
 import { PageHeader } from '../components/PageHeader'
 import { CenteredLoading } from '../components/StateViews'
 import { Button } from '@/components/ui/button'
+import type { MarketVendorInfo } from '../api/openbb'
 
 type MarketDataConfig = Record<string, unknown>
 
 // ==================== Constants ====================
-
-// Chart vendors — live K-line / quote sources. These are the high-frequency,
-// can't-be-mediated data the Data Hub deliberately doesn't carry, so each is a
-// direct vendor you switch on. There is NO per-asset-class configuration: a
-// vendor that's on joins the searchBars candidate pool, and what it can serve
-// is discovered by searching (heuristic), never declared here. yfinance is the
-// always-on global default; the rest are user-opted regional vendors
-// (marketData.extraVendors). TWSE / Vietnam slot in here as new rows.
-interface ChartVendor {
-  id: string
-  name: string
-  desc: string
-  alwaysOn?: boolean
-}
-
-const CHART_VENDORS: ChartVendor[] = [
-  {
-    id: 'yfinance',
-    name: 'yfinance',
-    desc: 'Global charts and quotes across Yahoo-listed markets. Free and keyless.',
-    alwaysOn: true,
-  },
-  {
-    id: 'eastmoney',
-    name: 'Eastmoney 东方财富',
-    desc: 'Chinese search and adjusted A-share K-lines from public keyless endpoints.',
-  },
-  {
-    id: 'twse',
-    name: 'TWSE + TPEx 臺灣證交所',
-    desc: 'Official Taiwan company roster, valuation ratios, and profiles. Yahoo serves K-lines for .TW and .TWO symbols.',
-  },
-]
 
 // Data-provider keys — LOW-frequency data (boards, economy, fundamentals). The
 // Data Hub already mediates all of this, so a key here is just a compatibility
@@ -167,6 +136,7 @@ export function MarketDataPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [highlightFmp, setHighlightFmp] = useState(false)
   const [ping, setPing] = useState<HubPing>('checking')
+  const { vendors: chartVendors, error: vendorLoadError, retry: retryVendors } = useMarketVendors()
   const fmpRef = useRef<HTMLDivElement>(null)
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -265,7 +235,13 @@ export function MarketDataPage() {
 
           <SourcesCard rows={sourceRows} onAddFmp={jumpToFmp} />
 
-          <ChartVendorsSection extraVendors={extraVendors} onToggle={handleExtraVendorToggle} />
+          <ChartVendorsSection
+            vendors={chartVendors}
+            loadError={vendorLoadError}
+            onRetry={retryVendors}
+            extraVendors={extraVendors}
+            onToggle={handleExtraVendorToggle}
+          />
 
           <AdvancedSection
             open={advancedOpen}
@@ -368,9 +344,15 @@ function SourcesCard({ rows, onAddFmp }: { rows: SourceRow[]; onAddFmp: () => vo
 // ==================== Chart Vendors (live K-line sources) ====================
 
 function ChartVendorsSection({
+  vendors,
+  loadError,
+  onRetry,
   extraVendors,
   onToggle,
 }: {
+  vendors: MarketVendorInfo[] | null
+  loadError: boolean
+  onRetry: () => void
   extraVendors: string[]
   onToggle: (id: string, on: boolean) => void
 }) {
@@ -383,7 +365,16 @@ function ChartVendorsSection({
         the always-on global default.
       </p>
       <div className="space-y-2.5">
-        {CHART_VENDORS.map((v) => {
+        {loadError && (
+          <div role="alert" className="flex items-center gap-3 text-[12px] text-destructive">
+            <span>Failed to load chart vendors.</span>
+            <Button type="button" variant="destructive" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {!loadError && vendors === null && <CenteredLoading />}
+        {vendors?.map((v) => {
           const on = v.alwaysOn || extraVendors.includes(v.id)
           return (
             <div key={v.id} className="rounded-lg border border-border/70 bg-card px-4 py-3.5">
@@ -400,7 +391,7 @@ function ChartVendorsSection({
                   <Toggle ariaLabel={v.name} size="sm" checked={on} onChange={(val) => onToggle(v.id, val)} />
                 )}
               </div>
-              <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-muted-foreground/70">{v.desc}</p>
+              <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-muted-foreground/70">{v.coverage}</p>
             </div>
           )
         })}
