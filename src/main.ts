@@ -41,7 +41,10 @@ import { createVendorTools } from './tool/market-vendors.js'
 import { createQuantTools } from './tool/quant.js'
 import { createSnapshotTools } from './tool/snapshot.js'
 import { createSimulateTools } from './tool/simulate.js'
+import { createTechnicalAnalysisTools } from './tool/technical-analysis.js'
 import { createBarService } from './domain/market-data/bars/index.js'
+import { createTradingViewBarAdapter, TRADINGVIEW_PROVIDER_ID, tradingViewAssetClasses } from './domain/market-data/bars/providers/tradingview.js'
+import { createTradingViewClient } from './domain/market-data/bars/providers/tradingview-client.js'
 import { createReferenceData } from './domain/market-data/reference/service.js'
 import { createSectorRotationTools } from './tool/sector-rotation.js'
 import { createReferenceBoardTools } from './tool/reference-board.js'
@@ -166,6 +169,9 @@ async function main() {
   // ==================== Embedded Provider Clients ====================
 
   const { providers } = config.marketData
+  const executor = getSDKExecutor()
+  const compatibilityProvider = (provider: string) =>
+    provider === TRADINGVIEW_PROVIDER_ID ? 'yfinance' : provider
 
   let equityClient: EquityClientLike
   let cryptoClient: CryptoClientLike
@@ -177,16 +183,15 @@ async function main() {
   let economyClient: EconomyClientLike
 
   {
-    const executor = getSDKExecutor()
     const routeMap = buildRouteMap()
     const credentials = buildSDKCredentials(config.marketData.providerKeys, config.marketData.hub)
-    equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
-    cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
-    currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
-    commodityClient = new SDKCommodityClient(executor, 'commodity', providers.commodity, credentials, routeMap)
-    etfClient = new SDKEtfClient(executor, 'etf', providers.equity, credentials, routeMap)
-    indexClient = new SDKIndexClient(executor, 'index', providers.equity, credentials, routeMap)
-    derivativesClient = new SDKDerivativesClient(executor, 'derivatives', providers.equity, credentials, routeMap)
+    equityClient = new SDKEquityClient(executor, 'equity', compatibilityProvider(providers.equity), credentials, routeMap)
+    cryptoClient = new SDKCryptoClient(executor, 'crypto', compatibilityProvider(providers.crypto), credentials, routeMap)
+    currencyClient = new SDKCurrencyClient(executor, 'currency', compatibilityProvider(providers.currency), credentials, routeMap)
+    commodityClient = new SDKCommodityClient(executor, 'commodity', compatibilityProvider(providers.commodity), credentials, routeMap)
+    etfClient = new SDKEtfClient(executor, 'etf', compatibilityProvider(providers.equity), credentials, routeMap)
+    indexClient = new SDKIndexClient(executor, 'index', compatibilityProvider(providers.equity), credentials, routeMap)
+    derivativesClient = new SDKDerivativesClient(executor, 'derivatives', compatibilityProvider(providers.equity), credentials, routeMap)
     economyClient = new SDKEconomyClient(executor, 'economy', 'federal_reserve', credentials, routeMap)
   }
 
@@ -205,12 +210,32 @@ async function main() {
   // resolver re-reads per request — is live on the next search, no restart.
   const getEquityVendors = async () => {
     const md = await readMarketDataConfig()
-    return [...new Set([md.providers.equity, ...md.extraVendors])]
+    const configured = md.providers.equity === TRADINGVIEW_PROVIDER_ID
+      ? ['yfinance', ...md.extraVendors]
+      : [md.providers.equity, ...md.extraVendors]
+    const compatible = [...new Set(configured)]
+      .filter((provider) => provider !== TRADINGVIEW_PROVIDER_ID)
+    return compatible.length > 0 ? compatible : ['yfinance']
+  }
+  const getAssetProviders = async () => {
+    const md = await readMarketDataConfig()
+    return Object.fromEntries(
+      Object.entries(md.providers).map(([assetClass, provider]) => [
+        assetClass,
+        compatibilityProvider(provider),
+      ]),
+    ) as typeof md.providers
   }
 
-  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, equityClient, cryptoClient, currencyClient, commodityCatalog }
+  const tradingViewAdapter = createTradingViewBarAdapter({
+    client: createTradingViewClient(),
+    enabledAssetClasses: async () => tradingViewAssetClasses(await readMarketDataConfig()),
+  })
+  const nativeMarketVendors = [tradingViewAdapter.vendor]
 
-  // Federated bar layer — embedded vendor adapters + broker (UTA) OHLCV behind one
+  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, assetProviders: getAssetProviders, equityClient, cryptoClient, currencyClient, commodityCatalog }
+
+  // Federated bar layer — native/compatibility vendor adapters + broker (UTA) OHLCV behind one
   // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
   const barService = createBarService({
     marketSearch,
@@ -220,6 +245,7 @@ async function main() {
     commodityClient,
     utaManager,
     vendorProviders: config.marketData.providers,
+    vendorBarAdapters: { [tradingViewAdapter.id]: tradingViewAdapter },
   })
 
   // Hub-first calendars: tools, CLI and boards all inherit through the
@@ -233,7 +259,7 @@ async function main() {
     economyClient,
     derivativesClient,
     indexClient,
-    equityProvider: config.marketData.providers.equity,
+    equityProvider: compatibilityProvider(config.marketData.providers.equity),
     hub: config.marketData.hub,
   })
 
@@ -251,7 +277,7 @@ async function main() {
   )
 
   toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
-  toolCenter.register(createVendorTools(getSDKExecutor()), 'market-vendors')
+  toolCenter.register(createVendorTools(getSDKExecutor(), nativeMarketVendors), 'market-vendors')
   toolCenter.register(createReferenceBoardTools(reference), 'market-board')
   toolCenter.register(createEquityTools(equityClient), 'equity')
   if (etfClient) {
@@ -266,6 +292,7 @@ async function main() {
   toolCenter.register(createQuantTools({ barService }), 'quant')
   toolCenter.register(createSnapshotTools(barService), 'snapshot')
   toolCenter.register(createSimulateTools(barService), 'simulate')
+  toolCenter.register(createTechnicalAnalysisTools({ barService }), 'technical-analysis')
   toolCenter.register(createSectorRotationTools(equityClient, config.marketData.hub), 'sector-rotation')
   if (derivativesClient) {
     toolCenter.register(createDerivativesTools(derivativesClient), 'derivatives')
@@ -396,6 +423,7 @@ async function main() {
     marketSearch,
     equityClient,
     barService,
+    marketVendors: nativeMarketVendors,
     reference,
     utaManager,
     tradingModePolicy: currentTradingModePolicy,
