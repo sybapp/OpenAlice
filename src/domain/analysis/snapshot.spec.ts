@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { getSnapshot } from './snapshot.js'
 import type { BarService } from '@/domain/market-data/bars/index'
 import type { OhlcvBar, BarMeta } from '@/domain/market-data/bars/types'
@@ -66,5 +66,51 @@ describe('getSnapshot', () => {
     expect(snap.bars).toHaveLength(0)
     expect(snap.latest).toBeNull()
     expect(snap.levels).toBeNull()
+  })
+})
+
+describe('getSnapshot — intraday day range', () => {
+  const meta = (bars: OhlcvBar[]) => ({
+    symbol: 'XLE', from: bars[0]?.date ?? '', to: bars[bars.length - 1]?.date ?? '',
+    bars: bars.length, source: 'uta', barId: 'alpaca|XLE', barCapability: 'realtime',
+    asOf: bars[bars.length - 1]?.date ?? '', isLatestActual: true, staleTradingDays: 0,
+  })
+
+  it('skips the session re-fetch when the window already covers the last day', async () => {
+    const bars: OhlcvBar[] = [
+      { date: '2026-04-24 15:00:00', open: 9, high: 11, low: 8, close: 10, volume: 100 },
+      { date: '2026-04-25 09:00:00', open: 10, high: 12, low: 9, close: 11, volume: 100 },
+      { date: '2026-04-25 10:00:00', open: 11, high: 13, low: 10, close: 12, volume: 100 },
+    ]
+    const getBars = vi.fn(async () => ({ bars, meta: meta(bars) }))
+    const svc = { getBars } as unknown as BarService
+
+    const snap = await getSnapshot(svc, { barId: 'alpaca|XLE' } as never, { interval: '1h' })
+
+    // The window starts a day earlier, so it already holds every bar of 04-25.
+    // A second provider round-trip would return the identical range.
+    expect(getBars).toHaveBeenCalledTimes(1)
+    expect(snap.latest).toMatchObject({ dayHigh: 13, dayLow: 9 })
+  })
+
+  it('re-fetches the session when the whole window sits inside the last day', async () => {
+    const windowBars: OhlcvBar[] = [
+      { date: '2026-04-25 14:00:00', open: 11, high: 13, low: 10, close: 12, volume: 100 },
+      { date: '2026-04-25 15:00:00', open: 12, high: 14, low: 11, close: 13, volume: 100 },
+    ]
+    const sessionBars: OhlcvBar[] = [
+      { date: '2026-04-25 09:00:00', open: 8, high: 9, low: 6, close: 9, volume: 100 },
+      ...windowBars,
+    ]
+    const getBars = vi.fn()
+      .mockResolvedValueOnce({ bars: windowBars, meta: meta(windowBars) })
+      .mockResolvedValueOnce({ bars: sessionBars, meta: meta(sessionBars) })
+    const svc = { getBars } as unknown as BarService
+
+    const snap = await getSnapshot(svc, { barId: 'alpaca|XLE' } as never, { interval: '1h', count: 2 })
+
+    expect(getBars).toHaveBeenCalledTimes(2)
+    // The clipped window would have reported dayLow 10; the session slice is honest.
+    expect(snap.latest).toMatchObject({ dayHigh: 14, dayLow: 6 })
   })
 })
