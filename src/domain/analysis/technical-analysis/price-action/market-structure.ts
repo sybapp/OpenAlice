@@ -96,16 +96,6 @@ function compressConsecutiveExtremes(points: { highs: SwingPoint[]; lows: SwingP
   }
 }
 
-function swingPointsForMode(swingPoints: SwingPointLevels, mode: MarketStructureMode): SwingPointLevels {
-  if (mode === 'pivot') return swingPoints
-
-  return {
-    internal: compressConsecutiveExtremes(swingPoints.internal),
-    swing: compressConsecutiveExtremes(swingPoints.swing),
-    external: compressConsecutiveExtremes(swingPoints.external),
-  }
-}
-
 function swingId(level: StructureLevel, point: SwingPoint): string {
   return `${level}-${point.type}-${point.index}`
 }
@@ -208,7 +198,8 @@ function detectStructureBreaksAtLevel(
   swingHighs: SwingPoint[],
   swingLows: SwingPoint[],
   level: StructureLevel,
-  lookback: number
+  lookback: number,
+  mode: MarketStructureMode,
 ): StructureBreaksAtLevel {
   const bos: BreakOfStructure[] = []
   const choch: ChangeOfCharacter[] = []
@@ -227,16 +218,29 @@ function detectStructureBreaksAtLevel(
   let lastConfirmedHigh: SwingPoint | undefined
   let lastConfirmedLow: SwingPoint | undefined
 
+  const consumedHighs = new Set<number>()
+  const consumedLows = new Set<number>()
   const confirmSwings = (barIndex: number) => {
+    const previousCount = nextHighIndex + nextLowIndex
     while (nextHighIndex < highs.length && highs[nextHighIndex].index + lookback <= barIndex) {
       lastConfirmedHigh = highs[nextHighIndex]
-      confirmedHighs.unshift(lastConfirmedHigh)
+      if (mode === 'pivot') confirmedHighs.unshift(lastConfirmedHigh)
       nextHighIndex++
     }
     while (nextLowIndex < lows.length && lows[nextLowIndex].index + lookback <= barIndex) {
       lastConfirmedLow = lows[nextLowIndex]
-      confirmedLows.unshift(lastConfirmedLow)
+      if (mode === 'pivot') confirmedLows.unshift(lastConfirmedLow)
       nextLowIndex++
+    }
+    if (mode === 'extreme' && previousCount !== nextHighIndex + nextLowIndex) {
+      // Compress only swings known at this instant. Consumed anchors remain
+      // consumed even when a later extreme replaces them in the display range.
+      const known = compressConsecutiveExtremes({
+        highs: highs.slice(0, nextHighIndex),
+        lows: lows.slice(0, nextLowIndex),
+      })
+      confirmedHighs.splice(0, confirmedHighs.length, ...known.highs.filter((point) => !consumedHighs.has(point.index)).reverse())
+      confirmedLows.splice(0, confirmedLows.length, ...known.lows.filter((point) => !consumedLows.has(point.index)).reverse())
     }
   }
 
@@ -274,6 +278,7 @@ function detectStructureBreaksAtLevel(
         lastBreak = event
       }
       trend = 1
+      for (const point of highs.slice(0, nextHighIndex)) consumedHighs.add(point.index)
       confirmedHighs.length = 0
     }
 
@@ -304,6 +309,7 @@ function detectStructureBreaksAtLevel(
         lastBreak = event
       }
       trend = -1
+      for (const point of lows.slice(0, nextLowIndex)) consumedLows.add(point.index)
       confirmedLows.length = 0
     }
   }
@@ -335,31 +341,38 @@ export function analyzeMarketStructure(params: MarketStructureParams): MarketStr
     externalLookback = DEFAULT_EXTERNAL_LOOKBACK,
     marketStructureMode = 'pivot',
   } = params
-  const swingPoints = swingPointsForMode(rawSwingPoints, marketStructureMode)
+  const swingPoints = marketStructureMode === 'pivot' ? rawSwingPoints : {
+    internal: compressConsecutiveExtremes(rawSwingPoints.internal),
+    swing: compressConsecutiveExtremes(rawSwingPoints.swing),
+    external: compressConsecutiveExtremes(rawSwingPoints.external),
+  }
 
   // 检测三个层级的结构突破（传入各自的lookback）
   const internalBreaks = detectStructureBreaksAtLevel(
     bars,
-    swingPoints.internal.highs,
-    swingPoints.internal.lows,
+    rawSwingPoints.internal.highs,
+    rawSwingPoints.internal.lows,
     'internal',
-    internalLookback
+    internalLookback,
+    marketStructureMode
   )
 
   const swingBreaks = detectStructureBreaksAtLevel(
     bars,
-    swingPoints.swing.highs,
-    swingPoints.swing.lows,
+    rawSwingPoints.swing.highs,
+    rawSwingPoints.swing.lows,
     'swing',
-    swingLookback
+    swingLookback,
+    marketStructureMode
   )
 
   const externalBreaks = detectStructureBreaksAtLevel(
     bars,
-    swingPoints.external.highs,
-    swingPoints.external.lows,
+    rawSwingPoints.external.highs,
+    rawSwingPoints.external.lows,
     'external',
-    externalLookback
+    externalLookback,
+    marketStructureMode
   )
 
   const stateByLevel = {
