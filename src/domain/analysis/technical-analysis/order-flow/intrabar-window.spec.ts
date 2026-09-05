@@ -48,7 +48,7 @@ describe('loadIntrabarWindow', () => {
     expect(getBars).toHaveBeenNthCalledWith(2, { barId: 'tradingview|AAPL', assetClass: 'equity' }, {
       interval: '1d',
       start: '2024-01-01',
-      end: '2024-01-02',
+      end: '2024-01-08',
     })
     expect(result.plan.truncated).toBe(true)
     expect(result.targetBars).toHaveLength(1)
@@ -78,7 +78,7 @@ describe('loadIntrabarWindow', () => {
     expect(getBars).toHaveBeenCalledWith({ symbol: 'AAPL', assetClass: 'equity' }, {
       interval: '1d',
       start: '2024-01-04',
-      end: '2024-05-02',
+      end: '2024-06-12',
     })
   })
 

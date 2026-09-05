@@ -108,6 +108,22 @@ New K-line sources should implement the bar/provider contract and appear in bar
 source discovery. They should not require a new OpenBB-style asset-class client
 or a copied OpenBB route hierarchy.
 
+## Technical Analysis Windows
+
+Technical analysis keeps the requested Price Action window separate from the
+longer loaded indicator history. Calendar VWAP anchors use that history only
+when it reaches the UTC session/week/month/year boundary (or includes a prior
+period). Incomplete anchors are omitted from numeric evidence and confluence,
+listed in `incompleteAnchors`, and explained in warnings; an explicitly selected
+incomplete anchor returns `relation: unavailable`. Rolling and structure VWAP
+remain scoped to their own requested-window anchors. No additional provider
+fetch is required solely to fill a calendar anchor.
+
+Intrabar requests cover the final target bar's full duration, including weekly
+bars, then filter the provider response to the exact target time window.
+Extreme structure evaluates only pivots confirmed at each historical instant;
+compressing the current display range must not erase previously emitted breaks.
+
 ## Embedded Compatibility Package
 
 `packages/opentypebb/` is private to this monorepo. It still supplies useful

@@ -1,5 +1,6 @@
 import type { OhlcvBar } from '@/domain/market-data/bars/types.js'
 import { z } from 'zod'
+import { parseBarDateUTC } from './order-flow/interval-time.js'
 import { calculatePriceActionVolatility } from '@/domain/analysis/technical-analysis/price-action/indicators.js'
 import type {
   MarketStructureAnalysis,
@@ -86,6 +87,8 @@ export interface TechnicalAnalysisVwapContext {
   value?: number
   anchor?: TechnicalAnalysisVwapAnchor
   relation: TechnicalAnalysisVwapRelation
+  /** Calendar anchors omitted because the loaded history does not reach their boundary. */
+  incompleteAnchors?: TechnicalAnalysisVwapAnchor[]
   /** All computable anchors for comparison; value/anchor remain the selected primary. */
   anchors?: Partial<Record<TechnicalAnalysisVwapAnchor, { value: number; relation: TechnicalAnalysisVwapRelation }>>
 }
@@ -274,7 +277,7 @@ function inferEmaBias(
 }
 
 function dateFor(bar: OhlcvBar): Date | undefined {
-  const timestamp = Date.parse(bar.date)
+  const timestamp = parseBarDateUTC(bar.date).getTime()
   return Number.isFinite(timestamp) ? new Date(timestamp) : undefined
 }
 
@@ -338,10 +341,14 @@ function anchoredByKey(
   bars: OhlcvBar[],
   index: number,
   keyFor: (date: string) => string,
+  boundary: number,
 ): number {
   const key = keyFor(bars[index]!.date)
   let start = index
   while (start > 0 && keyFor(bars[start - 1]!.date) === key) start -= 1
+  // A preceding period or a bar at the boundary proves that count did not
+  // clip the anchor. Otherwise this is a window VWAP, not an anchored VWAP.
+  if (start === 0 && parseBarDateUTC(bars[0]!.date).getTime() > boundary) return Number.NaN
   return anchoredVwap(bars, start, index)
 }
 
@@ -374,6 +381,7 @@ function selectVwap(
   index: number,
   config: TechnicalAnalysisIndicatorConfiguration['vwap'],
   events: StructureBreakEvent[],
+  history: OhlcvBar[],
 ): TechnicalAnalysisVwapContext {
   const bar = bars[index]!
   const provided = (bar as { vwap?: unknown }).vwap
@@ -387,10 +395,21 @@ function selectVwap(
   }
 
   const rolling = rollingVwap(bars, index, config.volumeLookback)
-  const session = anchoredByKey(bars, index, sessionKey)
-  const week = anchoredByKey(bars, index, weekKey)
-  const month = anchoredByKey(bars, index, monthKey)
-  const year = anchoredByKey(bars, index, yearKey)
+  const date = parseBarDateUTC(bar.date)
+  const dayStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  const boundaries = {
+    session: dayStart,
+    week: dayStart - ((date.getUTCDay() + 6) % 7) * 86_400_000,
+    month: Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1),
+    year: Date.UTC(date.getUTCFullYear(), 0, 1),
+  }
+  const historyIndex = history.length - 1
+  const session = anchoredByKey(history, historyIndex, sessionKey, boundaries.session)
+  const week = anchoredByKey(history, historyIndex, weekKey, boundaries.week)
+  const month = anchoredByKey(history, historyIndex, monthKey, boundaries.month)
+  const year = anchoredByKey(history, historyIndex, yearKey, boundaries.year)
+  const incompleteAnchors = (Object.keys(boundaries) as Array<keyof typeof boundaries>)
+    .filter((anchor) => parseBarDateUTC(history[0]!.date).getTime() > boundaries[anchor])
   const structure = structureVwap(bars, index, events)
   const values: Record<TechnicalAnalysisVwapAnchor, number> = {
     rolling,
@@ -420,10 +439,11 @@ function selectVwap(
         anchor,
         relation: vwapRelation(bar.close, value),
         anchors,
+        incompleteAnchors,
       }
     }
   }
-  return { relation: 'unavailable', anchors }
+  return { relation: 'unavailable', anchors, incompleteAnchors }
 }
 
 function latestStructureEvent(marketStructure: MarketStructureAnalysis): StructureBreakEvent | undefined {
@@ -590,7 +610,7 @@ export function buildTechnicalAnalysisIndicators(
   bars: OhlcvBar[],
   marketStructure: MarketStructureAnalysis,
   options: TechnicalAnalysisIndicatorOptions = {},
-  volatilityBars: OhlcvBar[] = bars,
+  historyBars: OhlcvBar[] = bars,
 ): TechnicalAnalysisIndicatorResult {
   const configuration = normalizeOptions(options)
   const warnings: string[] = []
@@ -607,8 +627,12 @@ export function buildTechnicalAnalysisIndicators(
     bias: inferEmaBias(latestClose ?? Number.NaN, fast, slow, long),
   }
   const vwap = configuration.vwap.enabled && bars.length > 0
-    ? selectVwap(bars, bars.length - 1, configuration.vwap, events)
+    ? selectVwap(bars, bars.length - 1, configuration.vwap, events,
+      historyBars.length >= bars.length && historyBars.at(-1)?.date === bars.at(-1)?.date ? historyBars : bars)
     : undefined
+  if (vwap?.incompleteAnchors?.length) {
+    warnings.push(`VWAP anchors unavailable because loaded history does not reach their boundary: ${vwap.incompleteAnchors.join(', ')}`)
+  }
   if (configuration.vwap.enabled && !bars.some(hasUsableVolume)) {
     warnings.push('VWAP unavailable because the requested bars contain no positive volume')
   }
@@ -617,7 +641,7 @@ export function buildTechnicalAnalysisIndicators(
     warnings.push('Fibonacci retracement unavailable because no usable structure leg was detected')
   }
   const confluence = buildConfluence(bars, ema, vwap)
-  const confluenceZones = buildConfluenceZones(bars, fibRetracements, confluence, configuration, volatilityBars)
+  const confluenceZones = buildConfluenceZones(bars, fibRetracements, confluence, configuration, historyBars)
 
   return {
     configuration,
