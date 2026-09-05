@@ -57,18 +57,16 @@ export async function loadIntrabarWindow(params: {
 
   const firstBar = loaded.bars[0]!
   const lastBar = loaded.bars[loaded.bars.length - 1]!
+  const start = parseBarDateUTC(firstBar.date).getTime()
+  const end = parseBarDateUTC(lastBar.date).getTime() + intervalToMinutesOrDefault(params.targetInterval, 60) * 60_000
   let intrabarResult: BarsResult
   try {
     intrabarResult = await params.barService.getBars(params.ref, {
       interval: plan.intrabarInterval,
       start: firstBar.date.slice(0, 10),
-      // Upper bound is the day AFTER the last target bar. Compatibility vendors
-      // and TradingView read `end` as an inclusive calendar day, but a broker
-      // (UTA) source converts it to a midnight-UTC timestamp — a same-day `end`
-      // silently drops every intrabar of the final session there. The next day
-      // covers the last session on all three; the timestamp filter below trims
-      // the over-fetch.
-      end: nextDayUTC(lastBar.date),
+      // Round the target period's exclusive end up to midnight so both
+      // inclusive-day vendors and midnight-timestamp brokers cover it fully.
+      end: new Date(Math.ceil(end / 86_400_000) * 86_400_000).toISOString().slice(0, 10),
     })
   } catch (error) {
     // Order flow is an enrichment, not a precondition. A failed lower-timeframe
@@ -87,8 +85,6 @@ export async function loadIntrabarWindow(params: {
       targetIndexOffset: loaded.indexOffset,
     }
   }
-  const start = parseBarDateUTC(firstBar.date).getTime()
-  const end = parseBarDateUTC(lastBar.date).getTime() + intervalToMinutesOrDefault(params.targetInterval, 60) * 60_000
   const intrabars = intrabarResult.bars.filter((bar) => {
     const time = parseBarDateUTC(bar.date).getTime()
     return time >= start && time < end
@@ -102,13 +98,6 @@ export async function loadIntrabarWindow(params: {
     targetMeta: loaded.meta,
     targetIndexOffset: loaded.indexOffset,
   }
-}
-
-/** Calendar day after `date`, in UTC. Date-only so every bar source accepts it. */
-function nextDayUTC(date: string): string {
-  return new Date(parseBarDateUTC(date.slice(0, 10)).getTime() + 86_400_000)
-    .toISOString()
-    .slice(0, 10)
 }
 
 function withDegradationReason(plan: IntrabarPlan, reason: string): IntrabarPlan {

@@ -296,6 +296,7 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
     minGapAtrMultiplier,
     formationVolatilityByIndex,
     minBodyRatio,
+    includeResolved: true,
     overlapPolicy,
     volumeConfirmations: gapVolumeConfirmation ? volumeConfirmations : undefined,
   })
