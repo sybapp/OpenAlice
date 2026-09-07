@@ -70,6 +70,15 @@ selector uses the configured Project context/default. Explicit Project selection
 clears inherited Workspace/Session scope. Workspace collaboration commands need
 Workspace context.
 
+**Technical / quantitative analysis** lives in its own surface — `alice analysis
+search-bars` (find a K-line barId) then `alice analysis quant` (custom scalar
+calculations) or `alice analysis technical-analysis` (one coherent descriptive
+read: Price Action structure, Delta Proxy order-flow context, EMA/VWAP/Fibonacci
+indicators, and confluence zones). It's a
+small scripting language with a full function catalog, multi-timeframe panels,
+and source selection. **See the `alice-analysis` skill** for the manual; don't
+hand-roll indicators here.
+
 ## Collaboration and durable assets
 
 The same `alice` CLI also owns `peer`, `conversation`, `inbox`, `issue`,
