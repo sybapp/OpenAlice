@@ -76,7 +76,10 @@ has it — it'll ask to install if needed). Say what's missing rather than
 quietly returning thin.
 
 **Technical / quantitative analysis** lives in its own surface — `alice analysis
-search-bars` (find a K-line barId) then `alice analysis quant` (compute). It's a
+search-bars` (find a K-line barId) then `alice analysis quant` (custom scalar
+calculations) or `alice analysis technical-analysis` (one coherent descriptive
+read: Price Action structure, Delta Proxy order-flow context, EMA/VWAP/Fibonacci
+indicators, and confluence zones). It's a
 small scripting language with a full function catalog, multi-timeframe panels,
 and source selection. **See the `alice-analysis` skill** for the manual; don't
 hand-roll indicators here.

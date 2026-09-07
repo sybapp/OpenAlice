@@ -35,7 +35,7 @@ low-frequency/reference research
   -> typed local fallback when supported
 
 K-lines and quantitative work
-  -> alice analysis search-bars/snapshot/quant/simulate
+  -> alice analysis search-bars/snapshot/quant/simulate/technical-analysis
   -> BarService
   -> vendor source or UTA broker source selected by barId
 ```
@@ -109,6 +109,18 @@ source discovery. They should not require a new OpenBB-style asset-class client
 or a copied OpenBB route hierarchy.
 
 ## Technical Analysis Windows
+
+The single agent-facing seam is `analyzeTechnicalAnalysis`
+(`alice analysis technical-analysis`); `analyzeOrderFlowContext` is an internal
+deep module that shares its intrabar load with Price Action and is not a
+separate public tool. Modes select the response shape: `context` (default)
+returns the summary without raw delta/profile views and leaves Price Action
+volume confirmation off; `execution` enables volume confirmation and retains
+the latest five delta bars; `debug` returns the full raw delta bars and profile
+bins. Multi-interval reads (`interval` or sequential `intervals[]`, max 8)
+report top-level bias, alignment, conflicts, and confluences. Order-flow
+detector defaults stay internal; `indicators` and `priceAction` accept optional
+tuning with per-mode defaults.
 
 Technical analysis keeps the requested Price Action window separate from the
 longer loaded indicator history. Calendar VWAP anchors use that history only
