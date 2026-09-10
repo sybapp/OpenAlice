@@ -91,6 +91,7 @@ the durable truth after it changes. Git history is the archive.
   top-down tilemap; Harness=functional neighborhood, Workspace=furniture pod,
   `resumeId`=employee. Scene graph, top-down placeholders, game chrome, camera,
   and browser acceptance remain active.
+- [[plans/issue-watch-monitor.md]] — Issue-native conditional monitoring (`watch`): deterministic Alice check (price/indicator/structure whitelist, closed-bar default, latched hit) gates the existing harness dispatch; trade proposals reuse the single `allowAiTrading` approval switch. On `feat/issue-watch-monitor`, no PR until accepted.
 - [[plans/issue-comment-prompt.md]] — Optional per-Issue `commentPrompt`
   template for comment-reply Input Prompts. Omission keeps the historical
   wrapper; chat desks seed `{comment}`.
