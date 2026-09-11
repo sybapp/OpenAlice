@@ -1,6 +1,6 @@
 # Plan: Issue-native conditional monitoring (`watch`)
 
-**Status:** active — increment 4 in progress (1–3 landed; UI + pause switch open)
+**Status:** active — increments 1–4 landed; only open-market paper legs + acceptance remain
 **Owner guides:** [[docs/workspace-issues-and-scheduling.md]], [[docs/market-data-architecture.md]], [[docs/project-structure.md]]
 **Delivery:** feature-branch iteration on `feat/issue-watch-monitor` (based on `feat/technical-analysis-suite`, not `dev`). No PR until maintainer accepts.
 **Related code:** `src/workspaces/schedule/scanner.ts`, `src/workspaces/issues/declaration.ts`, `src/workspaces/issues/mutate.ts`, `src/workspaces/schedule/marker-store.ts`, `src/domain/analysis/technical-analysis/interval-analysis.ts`, `src/domain/analysis/technical-analysis/indicators.ts`, `src/domain/analysis/technical-analysis/price-action/`, `src/domain/market-data/bars/bar-service.ts`, `src/tool/trading.ts`, `services/uta/src/http/routes-trading.ts`

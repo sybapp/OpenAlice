@@ -315,7 +315,6 @@ describe('tradingPush — AI-trading gate (#95)', () => {
     // any suggestion; the push gate cannot distinguish origin and must not
     // need to — OFF refuses, ON executes, for monitor proposals exactly as
     // for ordinary ones.
-    const staged: string[] = []
     const uta = {
       id: 'binance-demo',
       status: async () => ({ pendingMessage: 'watch-hit: buy NVDA', staged: [], pendingHash: 'hw1' }),
@@ -328,7 +327,6 @@ describe('tradingPush — AI-trading gate (#95)', () => {
       results: Array<{ source: string }>
     }
     expect(on.results[0].source).toBe('binance-demo')
-    expect(staged).toEqual([])
   })
 
   it('fails closed — no flag getter defaults to disabled (no push)', async () => {

@@ -2300,6 +2300,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     join(config.launcherRoot, 'state', 'watch-state.json'),
     launcherLogger.child({ scope: 'watch-state' }),
   );
+  const barService = opts.barService
   const scheduleScanner = new ScheduleScanner({
     canRetryIssueRun: (workspaceId, issueId, runId) => {
       const latest = headlessTasks.list({ issue: { workspaceId, issueId } })[0];
@@ -2379,7 +2380,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     markers: scheduleMarkers,
     watchStates,
     rewritePrompt: (taskId, prompt) => headlessTasks.setPrompt(taskId, prompt),
-    ...(opts.barService ? { watchChecker: { check: (watch, nowMs) => checkWatch({ barService: opts.barService! }, watch, nowMs) } } : {}),
+    ...(barService ? { watchChecker: { check: (watch, nowMs) => checkWatch({ barService }, watch, nowMs) } } : {}),
     logger: launcherLogger.child({ scope: 'schedule' }),
     ...(opts.scheduleScannerIntervalMs !== undefined
       ? { intervalMs: opts.scheduleScannerIntervalMs }
