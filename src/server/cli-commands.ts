@@ -55,11 +55,7 @@ const BASE_EXPORTS: Record<string, CliExport> = {
         quant: 'calculateQuant',
         // Dated as-of read with a freshness contract for retrospective analysis.
         snapshot: 'marketSnapshot',
-        simulate: 'simulate',
         'technical-analysis': 'analyzeTechnicalAnalysis',
-      },
-      think: {
-        calc: 'calculate',
       },
     },
   },
