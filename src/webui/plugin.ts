@@ -287,6 +287,7 @@ export class WebPlugin implements Plugin {
         ? { scheduleScannerIntervalMs: this.config.scheduleScannerIntervalMs }
         : {}),
       inboxStore: ctx.inboxStore,
+      barService: ctx.barService,
     })
     await prepareProjectWorkspaces(this.workspaceService, {
       onProgress: (workspace, error) => {

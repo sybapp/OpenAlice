@@ -57,6 +57,15 @@ export interface IssueAutomationHealthInput {
   status: IssueStatus
   nowMs: number
   nextDueAtMs: number | null
+  /** Armed watch plan + live check memory. Present ⇒ waiting/unavailable
+   * reads as monitoring progress, never as scheduler failure. */
+  watch?: {
+    armed: boolean
+    lastCheckedAt?: number
+    lastTriggeredAt?: number
+    lastStatus?: 'hit' | 'miss' | 'unavailable'
+    lastReason?: string
+  }
   ownerState: IssueAutomationOwnerState
   /** Effective runtime after resolving exact Session, Issue override, then Workspace default. */
   runtime?: { agent: string; displayName: string; installed: boolean }
@@ -80,6 +89,23 @@ export function issueAutomationRuntime(input: {
     displayName: input.displayNameFor(agent) ?? agent,
     installed: input.availability[agent]?.installed ?? false,
   }
+}
+
+/** Monitoring progress for a due-but-gated watch: normal waiting and stale
+ * data are `healthy` with a telling message (never `failed`/`blocked`), so
+ * the board does not cry failure while Alice is correctly standing by. A
+ * fresh unlatched hit that has not dispatched yet still reads `due`. */
+function watchDueHealth(watch: NonNullable<IssueAutomationHealthInput['watch']>): IssueAutomationHealth {
+  if (watch.lastStatus === 'unavailable') {
+    return {
+      state: 'healthy',
+      message: `Monitoring: market data unavailable (${watch.lastReason ?? 'waiting for fresh bars'}). Standing by.`,
+    }
+  }
+  if (watch.lastTriggeredAt !== undefined) {
+    return { state: 'healthy', message: 'Monitoring: condition hit and dispatched; waiting for the harness verdict.' }
+  }
+  return { state: 'healthy', message: 'Monitoring: condition not met yet; standing by for the next check.' }
 }
 
 /** Derive one scheduler-health answer from authoritative stores. Ordering is
@@ -141,6 +167,9 @@ export function issueAutomationHealth(input: IssueAutomationHealthInput): IssueA
     return withLatest({ state: 'blocked', message: 'Schedule has no future fire. Check its expression and timestamp.' })
   }
   if (input.nextDueAtMs !== null && input.nextDueAtMs <= input.nowMs) {
+    if (input.watch?.armed) {
+      return withLatest(watchDueHealth(input.watch))
+    }
     return withLatest({ state: 'due', message: 'The schedule is due and waiting to dispatch.' })
   }
   if (latest?.status === 'done') {

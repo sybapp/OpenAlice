@@ -132,4 +132,36 @@ describe('issueAutomationHealth', () => {
   it('makes terminal Issue status the schedule switch', () => {
     expect(issueAutomationHealth({ ...base, status: 'done', nextDueAtMs: base.nowMs }).state).toBe('inactive')
   })
+
+  it('reads a due-but-gated watch as monitoring progress, never failure', () => {
+    const due = { ...base, nextDueAtMs: base.nowMs }
+    // Never checked: standing by.
+    expect(issueAutomationHealth({ ...due, watch: { armed: true } })).toMatchObject({
+      state: 'healthy',
+      message: expect.stringMatching(/not met yet/),
+    })
+    // Miss: standing by.
+    expect(issueAutomationHealth({ ...due, watch: { armed: true, lastStatus: 'miss' } })).toMatchObject({
+      state: 'healthy',
+      message: expect.stringMatching(/not met yet/),
+    })
+    // Unavailable: standing by with the cause, not failed/blocked.
+    expect(issueAutomationHealth({
+      ...due,
+      watch: { armed: true, lastStatus: 'unavailable', lastReason: 'bars are 3 trading day(s) behind' },
+    })).toMatchObject({
+      state: 'healthy',
+      message: expect.stringMatching(/unavailable.*3 trading day/),
+    })
+    // Triggered: dispatched, waiting for the harness verdict.
+    expect(issueAutomationHealth({
+      ...due,
+      watch: { armed: true, lastStatus: 'hit', lastTriggeredAt: base.nowMs },
+    })).toMatchObject({
+      state: 'healthy',
+      message: expect.stringMatching(/dispatched/),
+    })
+    // Unwatched issues keep the legacy due reading.
+    expect(issueAutomationHealth(due)).toMatchObject({ state: 'due' })
+  })
 })

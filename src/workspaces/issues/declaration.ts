@@ -279,6 +279,14 @@ type IssueFrontmatterFile = z.infer<typeof issueFrontmatterSchema>
 export type IssueFrontmatter = Omit<IssueFrontmatterFile, 'what' | 'execution'>
 export type { IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 
+/** A scheduled Issue whose monitoring plan is armed: `when` is due-gated and
+ * `watch` is condemned to a deterministic verdict before any dispatch. */
+export function isWatchedIssue(
+  issue: IssueRecord,
+): issue is IssueRecord & { when: Schedule; watch: IssueWatch } {
+  return issue.when !== undefined && issue.watch !== undefined
+}
+
 /** A fully read issue: validated frontmatter + filename id + markdown What. */
 export interface IssueRecord extends IssueFrontmatter {
   /** Filename stem (kebab-case slug) — stable; keys the scanner's marker. */

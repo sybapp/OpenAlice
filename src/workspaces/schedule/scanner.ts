@@ -48,6 +48,9 @@ import {
   findConnectorDesks,
 } from '../issues/connector-desk.js'
 
+import type { WatchCheckVerdict } from '../../domain/analysis/technical-analysis/watch/check.js'
+import { isWatchedIssue } from '../issues/declaration.js'
+import type { IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 import {
   fireBase,
   snapshotScheduledIssue,
@@ -55,6 +58,7 @@ import {
   type ScheduleSnapshotTask,
   type ScheduleSnapshotWorkspace,
 } from './declaration.js'
+import type { WatchRuntimeState } from './watch-state.js'
 
 export const DEFAULT_INTERVAL_MS = 60_000
 
@@ -75,6 +79,21 @@ export class ScheduledIssueRunNowError extends Error {
     super(message)
     this.name = 'ScheduledIssueRunNowError'
   }
+}
+
+/** One deterministic watch judgement, keyed for per-tick sharing. The
+ * fetcher is injected so tests (and the scanner's per-tick cache) supply
+ * the verdict without touching the network. */
+export interface WatchChecker {
+  check(watch: IssueWatch, nowMs: number): Promise<WatchCheckVerdict>
+}
+
+/** The slice of WatchRuntimeStore the scanner needs (structural, for testing). */
+export interface WatchStateStore {
+  key(wsId: string, issueId: string): string
+  get(wsId: string, issueId: string): WatchRuntimeState | undefined
+  set(wsId: string, issueId: string, state: WatchRuntimeState): Promise<void>
+  prune(seenKeys: Set<string>): Promise<void>
 }
 
 /** The slice of ScheduleMarkerStore the scanner needs (structural, for testing). */
@@ -121,6 +140,12 @@ export interface ScheduleScannerDeps {
   }) => Promise<void>
   /** Observe direct Issue file edits during the scanner's normal live read. */
   observeIssues?: (workspace: WorkspaceMeta, issues: readonly IssueRecord[]) => Promise<void>
+  /** Deterministic watch checker (increment 2). Omitted ⇒ watch issues
+   * behave as plain scheduled issues (checker not wired, e.g. unit tests
+   * for the legacy path or a barService-less runtime). */
+  watchChecker?: WatchChecker
+  /** Watch latch/check memory. Required iff `watchChecker` is set. */
+  watchStates?: WatchStateStore
   markers: MarkerStore
   logger: Logger
   /** Injectable clock for tests. */
@@ -136,6 +161,12 @@ export class ScheduleScanner {
   /** Close the tiny manual-retry vs schedule-tick race for one Issue. This is
    * only a dispatch-start lock, not a per-Workspace execution lock. */
   private readonly dispatchingIssues = new Set<string>()
+  /** Watch-state keys seen this scan — pruned alongside the fire markers.
+   * Null until the first scanWorkspace call of a scan (reset per scan). */
+  private watchSeen: Set<string> | null = null
+  private watchKey(wsId: string, issueId: string): string {
+    return this.deps.watchStates?.key(wsId, issueId) ?? `${wsId} ${issueId}`
+  }
   /** Snapshot built as a side-effect of each scan; null until the first scan. */
   private lastSnapshot: ScheduleSnapshot | null = null
   private readonly now: () => number
@@ -255,6 +286,10 @@ export class ScheduleScanner {
     this.scanning = true
     const nowMs = this.now()
     const seen = new Set<string>()
+    // Shared across workspaces in one scan: identical watches judge once.
+    const watchVerdicts = new Map<string, Promise<WatchCheckVerdict>>()
+    const watchSeen = new Set<string>()
+    this.watchSeen = watchSeen
     try {
       // registry.list() order is preserved by Promise.all → stable display order.
       const extraDesks = extraConnectorDeskKeys(
@@ -263,12 +298,14 @@ export class ScheduleScanner {
         ),
       )
       const workspaces = await Promise.all(
-        this.deps.registry.list().map((ws) => this.scanWorkspace(ws, nowMs, seen, extraDesks)),
+        this.deps.registry.list().map((ws) => this.scanWorkspace(ws, nowMs, seen, extraDesks, watchVerdicts)),
       )
       await this.deps.markers.prune(seen)
+      await this.deps.watchStates?.prune(watchSeen)
       this.lastSnapshot = { workspaces }
     } finally {
       this.scanning = false
+      this.watchSeen = null
     }
   }
 
@@ -282,6 +319,7 @@ export class ScheduleScanner {
     nowMs: number,
     seen: Set<string>,
     extraDesks: ReadonlySet<string>,
+    watchVerdicts: Map<string, Promise<WatchCheckVerdict>>,
   ): Promise<ScheduleSnapshotWorkspace> {
     let res
     try {
@@ -312,25 +350,31 @@ export class ScheduleScanner {
       if (!when) continue
       if (isConnectorDeskIssue(issue) && extraDesks.has(`${ws.id}:${issue.id}`)) continue
       seen.add(this.deps.markers.key(ws.id, issue.id))
+      if (issue.watch) this.watchSeen?.add(this.watchKey(ws.id, issue.id))
       if (isFireable(issue) && this.isDue(ws.id, issue.id, when, nowMs)) {
-        await this.fire(
-          ws,
-          issue.id,
-          when,
-          issueFirePrompt(issue),
-          issue.agent,
-          issueRunOverrides(issue),
-          issueAssigneeResumeId(issue.assignee) ?? undefined,
-          issueAssigneeClaimsFirstSession(issue.assignee),
-          issueTimeoutMs(issue.timeout),
-          issue.connectorDesk,
-          nowMs,
-        )
+        if (isWatchedIssue(issue) && this.deps.watchChecker && this.deps.watchStates) {
+          await this.fireWatched(ws, issue, nowMs, watchVerdicts)
+        } else {
+          await this.fire(
+            ws,
+            issue.id,
+            when,
+            issueFirePrompt(issue),
+            issue.agent,
+            issueRunOverrides(issue),
+            issueAssigneeResumeId(issue.assignee) ?? undefined,
+            issueAssigneeClaimsFirstSession(issue.assignee),
+            issueTimeoutMs(issue.timeout),
+            issue.connectorDesk,
+            nowMs,
+          )
+        }
       }
       // Read the marker AFTER any fire so last/next reflect a just-fired run.
       const last = this.deps.markers.get(ws.id, issue.id) ?? null
       const held = this.deps.markers.getHeld(ws.id, issue.id) ?? null
-      tasks.push(snapshotScheduledIssue(issue, when, last, nowMs, this.intervalMs, held))
+      const watchState = issue.watch ? (this.deps.watchStates?.get(ws.id, issue.id) ?? undefined) : undefined
+      tasks.push(snapshotScheduledIssue(issue, when, last, nowMs, this.intervalMs, held, watchState))
     }
     return { wsId: ws.id, tag: ws.tag, status: 'ok', tasks }
   }
@@ -385,6 +429,153 @@ export class ScheduleScanner {
         reason: err instanceof Error ? err.message : String(err),
       })
     }
+  }
+
+  /** Due + watched fire: judge first, dispatch only on a fresh (unlatched)
+   * hit. `miss` / `unavailable` / latched-hit record check memory and never
+   * touch the dispatch path — zero LLM calls. A dispatch throw (capacity /
+   * busy) leaves the hit unconsumed so the next due tick re-judges and
+   * retries; only a successful dispatch latches + advances the schedule
+   * marker. A per-issue check throw is isolated like an invalid file: the
+   * issue keeps waiting with a visible reason instead of breaking the scan. */
+  private async fireWatched(
+    ws: WorkspaceMeta,
+    issue: IssueRecord & { when: Schedule; watch: NonNullable<IssueRecord['watch']> },
+    nowMs: number,
+    shared: Map<string, Promise<WatchCheckVerdict>>,
+  ): Promise<void> {
+    const states = this.deps.watchStates!
+    const checker = this.deps.watchChecker!
+    const issueId = issue.id
+    const previous = states.get(ws.id, issueId)
+    // A re-armed plan (version bump) starts a fresh latch; otherwise the
+    // previous trigger/consumption memory carries over.
+    const rearmed = previous !== undefined && previous.watchVersion !== issue.watch.version
+    const base: WatchRuntimeState = previous && !rearmed
+      ? previous
+      : { watchVersion: issue.watch.version, lastCheckedAt: previous?.lastCheckedAt ?? nowMs }
+
+    let verdict: WatchCheckVerdict
+    try {
+      verdict = await this.sharedWatchVerdict(shared, issue.watch, nowMs, checker)
+    } catch (err) {
+      await states.set(ws.id, issueId, {
+        ...base,
+        watchVersion: issue.watch.version,
+        lastCheckedAt: nowMs,
+        lastStatus: 'unavailable',
+        lastReason: `watch check failed: ${err instanceof Error ? err.message : String(err)}`,
+      })
+      this.deps.logger.warn('schedule.watch_check_failed', { wsId: ws.id, taskId: issueId, err })
+      return
+    }
+
+    if (verdict.status !== 'hit') {
+      await states.set(ws.id, issueId, {
+        ...base,
+        watchVersion: issue.watch.version,
+        lastCheckedAt: nowMs,
+        lastStatus: verdict.status,
+        ...(verdict.reason ? { lastReason: verdict.reason } : { lastReason: undefined }),
+        lastEvidence: verdictEvidence(verdict),
+      })
+      this.deps.logger.info('schedule.watch_no_fire', {
+        wsId: ws.id,
+        taskId: issueId,
+        status: verdict.status,
+        ...(verdict.reason ? { reason: verdict.reason } : {}),
+      })
+      return
+    }
+
+    // Hit: latch on (version + consumed signal ids). A sustained hit with
+    // no new signals and no re-arm stays silent — exactly-once per arming.
+    // Signal-less hits (pure price/indicator leaves) latch on the version:
+    // they fire once per arming and wait for the harness to re-arm.
+    const freshSignals = verdict.signalIds.filter(
+      (id) => !(base.consumedSignalIds ?? []).includes(id),
+    )
+    const latchable = verdict.signalIds.length === 0
+      ? base.lastTriggeredAt === undefined
+      : freshSignals.length > 0
+    if (!latchable) {
+      await states.set(ws.id, issueId, {
+        ...base,
+        watchVersion: issue.watch.version,
+        lastCheckedAt: nowMs,
+        lastStatus: 'hit',
+        lastEvidence: verdictEvidence(verdict),
+      })
+      this.deps.logger.info('schedule.watch_latched', { wsId: ws.id, taskId: issueId })
+      return
+    }
+
+    const consumed = verdict.signalIds.length === 0
+      ? (base.consumedSignalIds ?? [])
+      : [...(base.consumedSignalIds ?? []), ...freshSignals]
+    try {
+      const { taskId: runId } = await this.dispatchIssue(
+        ws,
+        issueId,
+        issueFirePrompt(issue),
+        issue.agent,
+        issueRunOverrides(issue),
+        issueAssigneeResumeId(issue.assignee) ?? undefined,
+        issueAssigneeClaimsFirstSession(issue.assignee),
+        issueTimeoutMs(issue.timeout),
+        issue.connectorDesk,
+      )
+      await this.deps.markers.set(ws.id, issueId, nowMs)
+      await states.set(ws.id, issueId, {
+        watchVersion: issue.watch.version,
+        lastCheckedAt: nowMs,
+        lastTriggeredAt: nowMs,
+        lastStatus: 'hit',
+        lastEvidence: verdictEvidence(verdict),
+        consumedSignalIds: consumed,
+        lastRunId: runId,
+      })
+      this.deps.logger.info('schedule.watch_fired', {
+        wsId: ws.id,
+        taskId: issueId,
+        runId,
+        signals: verdict.signalIds,
+      })
+    } catch (err) {
+      // Admission skip: record the check but consume nothing — the hit
+      // stays live and the next due tick re-judges (fresh data) and retries.
+      await states.set(ws.id, issueId, {
+        ...base,
+        watchVersion: issue.watch.version,
+        lastCheckedAt: nowMs,
+        lastStatus: 'hit',
+        lastReason: `dispatch skipped (${err instanceof Error ? err.message : String(err)}); hit unconsumed`,
+        lastEvidence: verdictEvidence(verdict),
+      })
+      await this.noteCronMiss(ws.id, issueId, issue.when, nowMs)
+      this.deps.logger.info('schedule.watch_fire_skipped', {
+        wsId: ws.id,
+        taskId: issueId,
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  /** One judgement per identical watch per scan. Concurrent issues share the
+   * in-flight promise; a rejection is cached too so every holder records the
+   * same `unavailable` instead of stampeding the source. */
+  private sharedWatchVerdict(
+    shared: Map<string, Promise<WatchCheckVerdict>>,
+    watch: NonNullable<IssueRecord['watch']>,
+    nowMs: number,
+    checker: WatchChecker,
+  ): Promise<WatchCheckVerdict> {
+    const key = JSON.stringify(watch)
+    const cached = shared.get(key)
+    if (cached) return cached
+    const pending = checker.check(watch, nowMs)
+    shared.set(key, pending)
+    return pending
   }
 
   private async noteCronMiss(
@@ -587,6 +778,23 @@ export class ScheduleScanner {
 
   private resolveResumeWorkspace(resumeId: string): WorkspaceMeta | undefined {
     return this.deps.resolveResumeWorkspace?.(resumeId)
+  }
+}
+
+/** Compact evidence for watch state + display: actuals per leaf, the data
+ * window, and the arming version. Signal ids live beside it, not inside. */
+function verdictEvidence(verdict: WatchCheckVerdict): Record<string, unknown> {
+  return {
+    status: verdict.status,
+    leaves: verdict.leaves.map((leaf) => ({
+      index: leaf.index,
+      status: leaf.status,
+      ...(leaf.actual !== undefined ? { actual: leaf.actual } : {}),
+      ...(leaf.expected !== undefined ? { expected: leaf.expected } : {}),
+      ...(leaf.reason ? { reason: leaf.reason } : {}),
+    })),
+    evidence: verdict.evidence,
+    ...(verdict.reason ? { reason: verdict.reason } : {}),
   }
 }
 

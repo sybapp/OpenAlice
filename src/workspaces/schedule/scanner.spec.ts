@@ -9,7 +9,9 @@ import type { CliAdapter } from '../cli-adapter.js'
 import type { Logger } from '../logger.js'
 import type { WorkspaceMeta, WorkspaceRegistry } from '../workspace-registry.js'
 
-import { ScheduleScanner, type MarkerStore, type ScheduleScannerDeps } from './scanner.js'
+import type { WatchCheckVerdict } from '../../domain/analysis/technical-analysis/watch/check.js'
+import { ScheduleScanner, type MarkerStore, type ScheduleScannerDeps, type WatchChecker, type WatchStateStore } from './scanner.js'
+import type { WatchRuntimeState } from './watch-state.js'
 
 const NOW = 1_700_000_000_000 // realistic epoch ms — `every` is relative-from-0, so first-sight needs a large clock
 
@@ -85,6 +87,7 @@ interface IssueSpec {
   timeout?: string
   assignee?: string
   connectorDesk?: string
+  watch?: unknown
   body?: string
 }
 
@@ -101,6 +104,7 @@ function issueMd(spec: IssueSpec): string {
   if (spec.effort) lines.push(`effort: ${spec.effort}`)
   if (spec.timeout) lines.push(`timeout: ${spec.timeout}`)
   if (spec.connectorDesk) lines.push(`connectorDesk: ${spec.connectorDesk}`)
+  if (spec.watch !== undefined) lines.push(`watch: ${JSON.stringify(spec.watch)}`)
   // Scanner tests exercise dispatch policy, not declaration defaults. Keep the
   // historical fresh-every-fire fixture explicit now that omitted scheduled
   // ownership means recruit once (`@new-then-resume`).
@@ -129,11 +133,47 @@ async function makeWs(id: string, issues: IssueSpec[]): Promise<WorkspaceMeta> {
   return { id, tag: id, dir, createdAt: new Date(NOW).toISOString() }
 }
 
+class FakeWatchStates implements WatchStateStore {
+  private m = new Map<string, WatchRuntimeState>()
+  pruned: Set<string> | null = null
+  key(w: string, t: string): string {
+    return `${w} ${t}`
+  }
+  get(w: string, t: string): WatchRuntimeState | undefined {
+    return this.m.get(this.key(w, t))
+  }
+  async set(w: string, t: string, state: WatchRuntimeState): Promise<void> {
+    this.m.set(this.key(w, t), state)
+  }
+  async prune(seen: Set<string>): Promise<void> {
+    this.pruned = seen
+    for (const k of [...this.m.keys()]) if (!seen.has(k)) this.m.delete(k)
+  }
+}
+
+function hitVerdict(over: Partial<WatchCheckVerdict> = {}): WatchCheckVerdict {
+  return {
+    status: 'hit',
+    leaves: [{ index: 0, status: 'hit', actual: 195, expected: 190, signalIds: [] }],
+    signalIds: [],
+    evidence: { close: 195, barCount: 120, watchVersion: 1 },
+    ...over,
+  }
+}
+
+const WATCH = {
+  version: 1,
+  source: { barId: 'vendor|NVDA', interval: '1h' },
+  rule: { type: 'price_above', price: 190 },
+} as const
+
 function scannerFor(
   workspaces: WorkspaceMeta[],
   opts: {
     dispatch?: ScheduleScannerDeps['dispatch']
     markers?: MarkerStore
+    watchStates?: WatchStateStore
+    watchChecker?: WatchChecker
     now?: number
     adapter?: CliAdapter
     resolveAdapter?: ScheduleScannerDeps['resolveAdapter']
@@ -158,6 +198,12 @@ function scannerFor(
     dispatch,
     claimFreshSession: opts.claimFreshSession,
     observeIssues: opts.observeIssues,
+    ...(opts.watchChecker || opts.watchStates
+      ? {
+        watchChecker: opts.watchChecker ?? { check: async () => hitVerdict() },
+        watchStates: opts.watchStates ?? new FakeWatchStates(),
+      }
+      : {}),
     markers,
     logger: noopLogger,
     now: () => opts.now ?? NOW,
@@ -786,6 +832,183 @@ describe('ScheduleScanner', () => {
     expect(markers.get('w1', 'removed')).toBeUndefined()
   })
 })
+
+describe('ScheduleScanner watch gating', () => {
+  it('miss records check memory and never dispatches (zero LLM calls)', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '15m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => ({
+      status: 'miss' as const,
+      leaves: [{ index: 0, status: 'miss' as const, actual: 180, expected: 190, signalIds: [] }],
+      signalIds: [],
+      evidence: { close: 180, barCount: 120, watchVersion: 1 },
+    }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check } })
+    await scanner.scan()
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')).toMatchObject({
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastStatus: 'miss',
+    })
+    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBeUndefined()
+  })
+
+  it('unavailable records its reason and never dispatches', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '15m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => ({
+      status: 'unavailable' as const,
+      leaves: [],
+      signalIds: [],
+      evidence: { barCount: 0, watchVersion: 1 },
+      reason: 'bars are 3 trading day(s) behind the anchor (max 0)',
+    }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check } })
+    await scanner.scan()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')).toMatchObject({
+      lastStatus: 'unavailable',
+      lastReason: 'bars are 3 trading day(s) behind the anchor (max 0)',
+    })
+  })
+
+  it('hit dispatches once per arming; a sustained hit stays latched', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['BOS|swing|bullish|d2|d1|190|192'] }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
+    await scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(watchStates.get('w1', 'watch-1')).toMatchObject({
+      watchVersion: 1,
+      lastTriggeredAt: NOW,
+      consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'],
+      lastRunId: 'run-1',
+    })
+    // Same signals, next due tick: re-judged, still a hit, but latched — no second dispatch.
+    const { scanner: second, dispatch: dispatch2 } = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check },
+      now: NOW + 61_000,
+    })
+    await second.scan()
+    expect(check).toHaveBeenCalledTimes(2)
+    expect(dispatch2).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW)
+  })
+
+  it('signal-less hit fires once per arming until the version bumps', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => hitVerdict())
+    const first = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
+    await first.scanner.scan()
+    expect(first.dispatch).toHaveBeenCalledTimes(1)
+    const second = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
+    await second.scanner.scan()
+    expect(second.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('restart dedups: reloaded latch does not re-dispatch the consumed hit', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW,
+      lastStatus: 'hit',
+      consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'],
+      lastRunId: 'run-1',
+    })
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['BOS|swing|bullish|d2|d1|190|192'] }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
+    await scanner.scan()
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('a new signal id on the same version dispatches again', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW,
+      lastStatus: 'hit',
+      consumedSignalIds: ['old-signal'],
+      lastRunId: 'run-1',
+    })
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['new-signal'] }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
+    await scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(watchStates.get('w1', 'watch-1')?.consumedSignalIds).toEqual(['old-signal', 'new-signal'])
+  })
+
+  it('capacity skip consumes nothing: the hit stays live for the next tick', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const dispatch = vi.fn(async () => { throw new Error('headless capacity reached') })
+    const first = scannerFor([ws], { dispatch, watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW })
+    await first.scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    const state = watchStates.get('w1', 'watch-1')!
+    expect(state.lastTriggeredAt).toBeUndefined()
+    expect(state.lastReason).toMatch(/unconsumed/)
+    const retry = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    await retry.scanner.scan()
+    expect(retry.dispatch).toHaveBeenCalledTimes(1)
+    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW + 61_000)
+  })
+
+  it('check failure isolates: visible reason, no dispatch, scan continues', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => { throw new Error('compute blew up') })
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check } })
+    await scanner.scan()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')).toMatchObject({
+      lastStatus: 'unavailable',
+      lastReason: 'watch check failed: compute blew up',
+    })
+  })
+
+  it('shares one judgement across identical watches in a tick', async () => {
+    const ws = await makeWs('w1', [
+      { id: 'a', title: 'a', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH },
+      { id: 'b', title: 'b', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH },
+    ])
+    const check = vi.fn(async () => hitVerdict())
+    const { scanner, dispatch } = scannerFor([ws], { watchStates: new FakeWatchStates(), watchChecker: { check } })
+    await scanner.scan()
+    // One shared judgement, but each issue dispatches its own run.
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(dispatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('plain scheduled issues keep the legacy path when no checker is wired', async () => {
+    const ws = await makeWs('w1', [{ id: 't1', title: 'i1', when: { kind: 'every', every: '30m' }, what: 'go' }])
+    const { scanner, dispatch } = scannerFor([ws])
+    await scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
 
 describe('comment owner handoff', () => {
   it('uses the Issue runtime, claims once, and preserves the schedule marker', async () => {

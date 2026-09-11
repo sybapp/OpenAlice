@@ -102,13 +102,12 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 
 ### 2. Background trigger
 
-- Scanner gating: `when`-due + `watch` verdict; `miss`/`unavailable` update `lastCheckedAt` + reason, zero LLM calls.
-- `watch-state.json`: `{ watchVersion, lastCheckedAt, lastTriggeredAt, consumedSignalIds, lastEvidence, lastRunId }`, atomic write, prune, restart-dedup.
-- Latch: one dispatch per arming; capacity failure does not consume the hit.
-- Snapshot/health projection: waiting vs approved-waiting vs stale-data distinguishable; normal waiting is not failure.
-- [ ] Miss → no dispatch (assert dispatch not called).
-- [ ] Sustained hit + restart → single dispatch.
-- [ ] Failure/restart visibility specs.
+- [x] Scanner gating (`schedule/scanner.ts:fireWatched`): `when`-due + `watch` verdict; `miss`/`unavailable`/latched-hit record check memory, zero dispatch (zero LLM). Checker + state are optional deps — unwired tests keep the legacy always-fire path.
+- [x] `watch-state.json` (`schedule/watch-state.ts`): `{ watchVersion, lastCheckedAt, lastTriggeredAt, lastStatus, lastReason, lastEvidence, consumedSignalIds, lastRunId }`, atomic write, per-scan prune, restart reload dedups.
+- [x] Latch: signal hits dedup on consumed ids (new id on same version re-fires); signal-less hits fire once per arming until the version bumps. Capacity/busy skip consumes nothing (hit stays live). Check throw isolates per-issue as `unavailable`.
+- [x] Per-tick sharing: identical watches judge once per scan (shared in-flight promise, incl. rejections); each issue still dispatches its own run.
+- [x] Wiring: `WatchRuntimeStore` loaded in `service.ts`, `checkWatch({barService})` injected as the scanner's checker via `WebPlugin(ctx.barService)`; board/detail/schedule snapshots carry `watch` + `watchState`; `automation-health` reads due-but-gated as `healthy` (waiting / stale-data / dispatched), never failure.
+- [x] Specs: miss/unavailable → no dispatch; sustained hit + restart → single dispatch; new signal re-fires; capacity retry; failure isolation; sharing; health readings (`scanner.spec.ts` watch block, `watch-state.spec.ts`, health spec).
 
 ### 3. Analysis + approval close-loop
 

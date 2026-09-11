@@ -23,7 +23,9 @@ import {
   readWorkspaceIssues,
   type IssueRecord,
   type IssueTimeout,
+  type IssueWatch,
 } from '../issues/declaration.js'
+import type { WatchRuntimeState } from './watch-state.js'
 
 export {
   isFireable,
@@ -56,6 +58,10 @@ export interface ScheduleSnapshotTask {
   model?: string
   effort?: ModelReasoningEffort
   timeout?: IssueTimeout
+  /** The armed monitoring plan, when the issue carries one. */
+  watch?: IssueWatch
+  /** Live check/trigger memory for a watched issue; absent ⇒ never checked. */
+  watchState?: WatchRuntimeState
   /** False once the owning issue reaches a terminal status (done/canceled). */
   enabled: boolean
   /** When the scanner last fired this issue (epoch ms), null if never. */
@@ -102,7 +108,9 @@ export function fireBase(
 
 /** Build a dashboard row for a SCHEDULED issue: its `when` + last-fired marker +
  *  computed next-due (same base-seed as the scanner's due-ness, so the dashboard
- *  matches real firing). Caller must pass an issue that has a `when`. */
+ *  matches real firing). Caller must pass an issue that has a `when`. Pass the
+ *  live watch state when the issue is watched so waiting / stale-data /
+ *  triggered reads distinctly from plain schedule health. */
 export function snapshotScheduledIssue(
   issue: IssueRecord,
   when: Schedule,
@@ -110,6 +118,7 @@ export function snapshotScheduledIssue(
   nowMs: number,
   lookbackMs: number,
   heldAtMs: number | null = null,
+  watchState?: WatchRuntimeState,
 ): ScheduleSnapshotTask {
   const next = computeNextRun(when, fireBase(when, lastFiredAtMs, nowMs, lookbackMs, heldAtMs))
   return {
@@ -124,6 +133,8 @@ export function snapshotScheduledIssue(
     ...(issue.model ? { model: issue.model } : {}),
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.watch ? { watch: issue.watch } : {}),
+    ...(watchState ? { watchState } : {}),
     enabled: !isTerminalStatus(issue.status),
     lastFiredAtMs,
     // An overdue computed time clamps to now: a due-now task reads "due now",

@@ -78,6 +78,8 @@ import {
   type AgentRuntimeReadinessSource,
 } from './agent-runtime-readiness.js';
 import { ScheduleMarkerStore } from './schedule/marker-store.js';
+import { checkWatch } from '../domain/analysis/technical-analysis/watch/check.js';
+import { WatchRuntimeStore } from './schedule/watch-state.js';
 import {
   ScheduleScanner,
   ScheduledIssueRunNowError,
@@ -673,6 +675,10 @@ export interface CreateWorkspaceServiceOptions {
    *  every surface (HTTP / CLI / MCP) gets the join, not just the route.
    *  Optional: when absent, `issueDetail` returns `inboxReports: []`. */
   readonly inboxStore?: IInboxStore;
+  /** Federated K-line layer for deterministic watch checks. Supplied by the
+   *  composition root (WebPlugin passes `ctx.barService`); absent in unit
+   *  tests, where watched issues keep the legacy always-fire path. */
+  readonly barService?: Pick<import('../domain/market-data/bars/index.js').BarService, 'getBars'>;
 }
 
 /**
@@ -2287,6 +2293,13 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     join(config.launcherRoot, 'state', 'schedule-markers.json'),
     launcherLogger.child({ scope: 'schedule-markers' }),
   );
+  // Watch latch/check memory: which armed condition was last checked /
+  // triggered and which signals the latch consumed. Owned by the scanner;
+  // the Issue file owns the plan. No migration: absent file starts clean.
+  const watchStates = await WatchRuntimeStore.load(
+    join(config.launcherRoot, 'state', 'watch-state.json'),
+    launcherLogger.child({ scope: 'watch-state' }),
+  );
   const scheduleScanner = new ScheduleScanner({
     canRetryIssueRun: (workspaceId, issueId, runId) => {
       const latest = headlessTasks.list({ issue: { workspaceId, issueId } })[0];
@@ -2364,6 +2377,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     },
     observeIssues: (workspace, issues) => observeIssueRecords(workspace, issues),
     markers: scheduleMarkers,
+    watchStates,
+    ...(opts.barService ? { watchChecker: { check: (watch, nowMs) => checkWatch({ barService: opts.barService! }, watch, nowMs) } } : {}),
     logger: launcherLogger.child({ scope: 'schedule' }),
     ...(opts.scheduleScannerIntervalMs !== undefined
       ? { intervalMs: opts.scheduleScannerIntervalMs }
@@ -2405,6 +2420,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
               nowMs,
               DEFAULT_INTERVAL_MS,
               scheduleMarkers.getHeld(ws.id, issue.id) ?? null,
+              issue.watch ? (watchStates.get(ws.id, issue.id) ?? undefined) : undefined,
             ),
           );
         }
@@ -2453,6 +2469,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           if (!issue.when) return snapshotBoardIssue(issue, null);
           // Scheduled ⇒ reuse the schedule snapshot's math so the board's
           // last/next match the Schedules dashboard exactly.
+          const watchState = issue.watch ? (watchStates.get(ws.id, issue.id) ?? undefined) : undefined;
           const fired = snapshotScheduledIssue(
             issue,
             issue.when,
@@ -2460,6 +2477,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
             nowMs,
             DEFAULT_INTERVAL_MS,
             scheduleMarkers.getHeld(ws.id, issue.id) ?? null,
+            watchState,
           );
           const latestRun = headlessTasks.list({ issue: { workspaceId: ws.id, issueId: issue.id } })[0];
           const assigneeSession = resolveIssueAssigneeSession(issue.assignee);
@@ -2472,6 +2490,17 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
                 status: issue.status,
                 nowMs,
                 nextDueAtMs: fired.nextDueAtMs,
+                ...(issue.watch
+                  ? {
+                    watch: {
+                      armed: true,
+                      ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
+                      ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
+                      ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),
+                      ...(watchState?.lastReason ? { lastReason: watchState.lastReason } : {}),
+                    },
+                  }
+                  : {}),
                 ownerState: issueAutomationOwnerState(issue.assignee, assigneeSession),
                 runtime: issueRuntimeAvailability(issue, defaultIssueAgent, availability),
                 ...(latestRun ? { latestRun: automationLatestRun(latestRun) } : {}),
@@ -2519,6 +2548,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     }
     let scheduledSnapshot: ScheduleSnapshotTask | null = null;
     if (issue.when) {
+      const watchState = issue.watch ? (watchStates.get(ws.id, issue.id) ?? undefined) : undefined;
       const fired = snapshotScheduledIssue(
         issue,
         issue.when,
@@ -2526,6 +2556,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         Date.now(),
         DEFAULT_INTERVAL_MS,
         scheduleMarkers.getHeld(ws.id, issue.id) ?? null,
+        watchState,
       );
       scheduledSnapshot = fired;
     }
@@ -2534,6 +2565,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       const identity = resumeRegistry.get(task.resumeId);
       return issueRunRecord(task, identity?.lifecycle !== 'retired' && Boolean(identity?.agentSessionId));
     });
+    const watchState = issue.watch ? (watchStates.get(ws.id, issue.id) ?? undefined) : undefined;
     const markers: IssueFiringMarkers | null = scheduledSnapshot ? {
       lastFiredAtMs: scheduledSnapshot.lastFiredAtMs,
       nextDueAtMs: scheduledSnapshot.nextDueAtMs,
@@ -2541,6 +2573,17 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         status: issue.status,
         nowMs: Date.now(),
         nextDueAtMs: scheduledSnapshot.nextDueAtMs,
+        ...(issue.watch
+          ? {
+            watch: {
+              armed: true,
+              ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
+              ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
+              ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),
+              ...(watchState?.lastReason ? { lastReason: watchState.lastReason } : {}),
+            },
+          }
+          : {}),
         ownerState: issueAutomationOwnerState(issue.assignee, assigneeSession),
         runtime: runtimeAvailability,
         ...(runs[0] ? {
