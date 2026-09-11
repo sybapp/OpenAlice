@@ -244,10 +244,11 @@ export function createBarService(deps: BarServiceDeps): BarService {
     }
     // Upper bound: the provider compatibility models apply end_date;
     // we also post-filter defensively in case a provider ignores it.
-    // asOf is a count anchor only — it never reaches the vendor as end_date
-    // (upstream 91166627 separated record freshness from fetch time; the
-    // freshness contract in computeFreshness is what makes a stale `to` loud).
-    const end_date = opts.end
+    // asOf doubles as the vendor end_date here (pre-91166627 semantic that
+    // the raw-bar contract spec pins: a vendor ignoring end_date must still
+    // see the asOf bound). Freshness (computeFreshness/describeBarFreshness)
+    // is the separate read-side contract for whether data REACHES the anchor.
+    const end_date = opts.end ?? opts.asOf
     // Only providers that declare server-side count support receive this field;
     // several compatibility fetchers map params directly to vendor APIs.
     const countParam = vendorMetadata(provider)?.supportsCount && opts.count != null ? { count: opts.count } : {}
