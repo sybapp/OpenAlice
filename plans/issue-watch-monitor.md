@@ -98,7 +98,7 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 - [x] Stale / missing / in-progress fixtures → `unavailable`, never hit (`watch/freshness.spec.ts`, `watch/check.spec.ts`: fetch throw, trading-day + minute staleness, closed-bar drop).
 - [x] Unknown `type` / bad params → invalid issue, loud (`issues/watch.spec.ts`: schema + create/update/clear/round-trip + stale-version guard).
 - [x] `checkWatch` orchestration: one `getBars` → freshness/closed-bar gate → `analyzePriceActionBars` + indicators (fib/confluence off) → `evaluateWatch`; fetch throw → `unavailable`.
-- [ ] Insufficient-history / unconfirmed-structure replay (covered at eval level by `unavailable` leaves; end-to-end short-window case still open).
+- [x] Insufficient-history / unconfirmed-structure replay end-to-end (`check.spec.ts`: single-bar cross → `unavailable` (needs two closes); volume-less window VWAP → `unavailable`; flat short window structure → `miss` with no phantom signals).
 
 ### 2. Background trigger
 

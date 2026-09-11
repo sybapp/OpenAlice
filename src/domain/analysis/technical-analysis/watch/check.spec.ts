@@ -84,6 +84,63 @@ describe('checkWatch', () => {
     expect(out.reason).toMatch(/trading day\(s\) behind/)
   })
 
+  it('reports unavailable for a cross on a single-bar window (needs two closes)', async () => {
+    const bars = [bar('2024-01-02', 101)]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[0]!.date, bars: 1, staleTradingDays: 0 },
+      })),
+    }
+    const out = await checkWatch(
+      { barService },
+      watch({ type: 'price_cross_above', price: 100 }),
+      Date.parse('2024-01-03T00:00:00Z'),
+    )
+    expect(out.status).toBe('unavailable')
+    expect(out.leaves[0]?.status).toBe('unavailable')
+    expect(out.leaves[0]?.reason).toMatch(/two closed bars/)
+  })
+
+  it('reports unavailable when volume is absent and VWAP cannot judge', async () => {
+    const bars = [
+      { ...bar('2024-01-01', 100), volume: null },
+      { ...bar('2024-01-02', 101), volume: null },
+      { ...bar('2024-01-03', 102), volume: null },
+    ]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[2]!.date, bars: 3, staleTradingDays: 0 },
+      })),
+    }
+    const out = await checkWatch(
+      { barService },
+      watch({ type: 'price_vs_vwap', relation: 'above' }),
+      Date.parse('2024-01-04T00:00:00Z'),
+    )
+    expect(out.status).toBe('unavailable')
+    expect(out.leaves[0]?.status).toBe('unavailable')
+    expect(out.leaves[0]?.reason).toMatch(/VWAP/)
+  })
+
+  it('reads no confirmed structure on a flat short window (miss, not a phantom hit)', async () => {
+    const bars = [bar('2024-01-01', 100), bar('2024-01-02', 100), bar('2024-01-03', 100)]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[2]!.date, bars: 3, staleTradingDays: 0 },
+      })),
+    }
+    const out = await checkWatch(
+      { barService },
+      watch({ type: 'structure_break', kind: 'any' }),
+      Date.parse('2024-01-04T00:00:00Z'),
+    )
+    expect(out.status).toBe('miss')
+    expect(out.signalIds).toEqual([])
+  })
+
   it('drops the in-progress intraday bar before judging', async () => {
     const bars = [bar('2024-01-02 09:00', 100), bar('2024-01-02 10:00', 50)]
     const barService = {
