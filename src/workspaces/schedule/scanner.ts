@@ -49,7 +49,7 @@ import {
 } from '../issues/connector-desk.js'
 
 import type { WatchCheckVerdict } from '../../domain/analysis/technical-analysis/watch/check.js'
-import { isWatchedIssue } from '../issues/declaration.js'
+import { issueWatchVerdictBlock, isWatchedIssue } from '../issues/declaration.js'
 import type { IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 import {
   fireBase,
@@ -140,6 +140,12 @@ export interface ScheduleScannerDeps {
   }) => Promise<void>
   /** Observe direct Issue file edits during the scanner's normal live read. */
   observeIssues?: (workspace: WorkspaceMeta, issues: readonly IssueRecord[]) => Promise<void>
+  /** Rewrite a just-dispatched run's stored prompt (verdict prepend). The
+   * child has not spawned yet: dispatchIssue resolves only after the record
+   * exists but the spawn happens in the background afterwards, and the whole
+   * fire holds the per-issue dispatch lock. Optional so legacy tests keep
+   * working without it. */
+  rewritePrompt?: (taskId: string, prompt: string) => Promise<void>
   /** Deterministic watch checker (increment 2). Omitted ⇒ watch issues
    * behave as plain scheduled issues (checker not wired, e.g. unit tests
    * for the legacy path or a barService-less runtime). */
@@ -513,6 +519,12 @@ export class ScheduleScanner {
     const consumed = verdict.signalIds.length === 0
       ? (base.consumedSignalIds ?? [])
       : [...(base.consumedSignalIds ?? []), ...freshSignals]
+    // The dispatched prompt opens with the exact judgement that armed it:
+    // verdict block + What. The block carries the dispatch's own run id,
+    // which is known only after dispatch mints it — so dispatch What alone,
+    // then rewrite the stored prompt with the block prepended (see
+    // dispatchPromptWithVerdict below). What stays the executable
+    // instruction; the block is provenance.
     try {
       const { taskId: runId } = await this.dispatchIssue(
         ws,
@@ -525,6 +537,15 @@ export class ScheduleScanner {
         issueTimeoutMs(issue.timeout),
         issue.connectorDesk,
       )
+      const verdictBlock = issueWatchVerdictBlock({
+        watchVersion: issue.watch.version,
+        status: 'hit',
+        leaves: verdict.leaves,
+        evidence: { ...verdict.evidence },
+        signalIds: verdict.signalIds,
+        runId,
+      })
+      await this.deps.rewritePrompt?.(runId, `${verdictBlock}\n\n${issueFirePrompt(issue)}`)
       await this.deps.markers.set(ws.id, issueId, nowMs)
       await states.set(ws.id, issueId, {
         watchVersion: issue.watch.version,

@@ -322,6 +322,51 @@ describe('issue_update', () => {
     )
   })
 
+  it('re-arms a watch with a version bump and refuses a stale version', async () => {
+    const watchV1 = {
+      version: 1,
+      source: { barId: 'vendor|NVDA', interval: '1h' },
+      rule: { type: 'price_above', price: 190 },
+    }
+    await run(issueCreateFactory.build(ctx()), {
+      id: 'watched',
+      title: 'Watched',
+      when: { kind: 'every', every: '15m' },
+      assignee: '@new-each-run',
+      watch: watchV1,
+    })
+    expect(await readBack('watched')).toMatchObject({ watch: { version: 1 } })
+    // Fresh re-arm: version bump with the live version expected.
+    const watchV2 = { ...watchV1, version: 2, rule: { type: 'price_above', price: 200 } }
+    const ok = await run(issueUpdateFactory.build(ctx()), {
+      id: 'watched',
+      watch: watchV2,
+      expectedWatchVersion: 1,
+    })
+    expect(ok.ok).toBe(true)
+    expect(await readBack('watched')).toMatchObject({ watch: { version: 2 } })
+    // Stale verdict: the harness computed against v1 after v2 landed.
+    const stale = await run(issueUpdateFactory.build(ctx()), {
+      id: 'watched',
+      watch: { ...watchV1, rule: { type: 'price_above', price: 180 } },
+      expectedWatchVersion: 1,
+    })
+    expect(stale.ok).toBe(false)
+    expect(stale.error).toMatch(/stale watch version/)
+    expect(await readBack('watched')).toMatchObject({ watch: { version: 2 } })
+  })
+
+  it('rejects an invalid watch update without touching the file', async () => {
+    await run(issueCreateFactory.build(ctx()), { id: 'w', title: 'W' })
+    const res = await run(issueUpdateFactory.build(ctx()), {
+      id: 'w',
+      watch: { version: 1, source: { barId: 'x', interval: '1h' }, rule: { type: 'rsi_above', rsi: 70 } },
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/invalid watch/)
+    expect(await readBack('w')).toMatchObject({ title: 'W' })
+  })
+
   it('errors with no fields to update', async () => {
     await run(issueCreateFactory.build(ctx()), { id: 'x', title: 'x' })
     const res = await run(issueUpdateFactory.build(ctx()), { id: 'x' })

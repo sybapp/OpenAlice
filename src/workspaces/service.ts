@@ -2378,6 +2378,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     observeIssues: (workspace, issues) => observeIssueRecords(workspace, issues),
     markers: scheduleMarkers,
     watchStates,
+    rewritePrompt: (taskId, prompt) => headlessTasks.setPrompt(taskId, prompt),
     ...(opts.barService ? { watchChecker: { check: (watch, nowMs) => checkWatch({ barService: opts.barService! }, watch, nowMs) } } : {}),
     logger: launcherLogger.child({ scope: 'schedule' }),
     ...(opts.scheduleScannerIntervalMs !== undefined

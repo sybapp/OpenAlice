@@ -111,12 +111,11 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 
 ### 3. Analysis + approval close-loop
 
-- Harness exits via validated tools only (never NL-sniffing): re-arm with new `watch` + reason, stage/commit trade proposal, or close issue.
-- Stale-version verdict rejected (`expectedWatchVersion` conflict path).
-- Trade proposals use the existing Trading-as-Git + Inbox trail; approval follows the single existing switch (decision 3). Paper-account acceptance covers entry / exit / stop-move.
-- [ ] Old-version update rejected.
-- [ ] Switch ON + OFF behavior verified (monitor == normal suggestions).
-- [ ] Paper sweep green, account left flat.
+- [x] Harness exits via validated tools only (never NL-sniffing): re-arm (`issue update --watch … --expected-watch-version <live>` + reason comment), stage/commit trade proposal, or close (`--status done|canceled`). Skill documents the three exits (`self-scheduling/SKILL.md`).
+- [x] Verdict block (`issueWatchVerdictBlock`): dispatched prompt opens with version, per-leaf actuals, bar window, signal ids, and the dispatch's own run id; stored prompt rewritten post-dispatch via `HeadlessTaskRegistry.setPrompt` (scanner `rewritePrompt` dep, wired in `service.ts`). Stale turns detect themselves via `watchVersion`.
+- [x] Stale-version verdict rejected: `expectedWatchVersion` mismatch → `invalid` (`mutate.ts`), covered at tool + HTTP layers (`issue-tools.spec.ts`, `routes/issues.spec.ts`).
+- [x] Switch ON + OFF verified: monitor-staged proposals use the identical `tradingPush` gate, no origin bypass (`trading.spec.ts`: OFF refuses, ON executes).
+- [ ] Paper sweep green, account left flat — REQUIRES a funded paper/demo account + `OPENALICE_UTA_LIVE_PAPER=1`; no configured account in this environment (only keyless `binance-readonly`), so this stays a recorded residual risk until a live-paper run per [[docs/uta-live-testing.md]] (entry / exit / stop-move).
 
 ### 4. Operation UI
 

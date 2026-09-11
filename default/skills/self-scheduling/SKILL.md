@@ -205,6 +205,24 @@ plain tracked item; add a `when` and it starts firing.
   whole structure. Tokens: `{comment}`, `{title}`, `{id}`, `{workspaceId}`,
   `{author}`, `{what}`. Must include `{comment}`. Chat-style Issues use
   `{comment}` alone.
+- **`watch`** *(optional — monitoring Issues only)* — the machine-checkable
+  condition set the scanner judges deterministically before any dispatch.
+  Shape: `{ version, source: { barId, interval, assetClass? }, quote?,
+  freshness?, indicators?, rule }` where `rule` is one leaf or one
+  `{ all: [...] }` / `{ any: [...] }` group (1–8 leaves, no nesting).
+  Leaf whitelist: `price_above` / `price_below` / `price_in_range` /
+  `price_out_of_range` / `price_cross_above` / `price_cross_below`
+  (close only), `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
+  `structure_break` (BOS/CHoCH), `zone_touch` (FVG/OB). Judgement uses
+  closed bars only; unknown types are invalid files, never silent misses.
+  A hit dispatches ONCE per arming — your turn opens with a
+  `<watch-verdict>` block (version, per-leaf actuals, bar window, signal
+  ids, run id). Your three valid exits: **re-arm** (write a new `watch`
+  with a bumped `version` + reason via `issue update --watch …
+  --expected-watch-version <live>`; a stale version is refused, re-read
+  first), **propose a trade** (stage/commit; approval follows the same
+  switch as any suggestion), or **close** (`--status done|canceled`).
+  Never invent a fourth exit and never guess hidden state from prose.
 
 `agent`, `credential`/`credentialSource`, `model`, and `effort` are one Session-creation tuple.
 They are valid only for `@new-then-resume` / `@new-each-run`; an exact `@resumeId` Session owns
@@ -276,9 +294,12 @@ reply is delivered. Put an Inbox push in What when a separate notification or
 report is part of completion, and avoid duplicating a reply that already serves
 that purpose. Inbox is a human delivery record, not storage for every run result.
 
-Put **conditions inside `what`**, not in the schedule — there is no condition
-field. For "ping me only if X", write: "check X; if it holds, push an alert;
-otherwise do nothing and exit."
+Put **conditions inside `what`**, not in the schedule — unless the Issue is a
+monitoring Issue with a `watch` field. For "ping me only if X", write:
+"check X; if it holds, push an alert; otherwise do nothing and exit."
+For a `watch` Issue, the scanner already judged the machine condition — your
+turn opens with its `<watch-verdict>`, so analyze (don't re-judge), then
+take exactly one of the three exits above.
 
 > **Commit the file.** The scanner reads your working tree, so an uncommitted
 > `.alice/issues/<id>.md` still takes effect — but commit it so the issue (and

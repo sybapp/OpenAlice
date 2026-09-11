@@ -278,6 +278,17 @@ export class HeadlessTaskRegistry {
     await this.flush()
   }
 
+  /** Rewrite the stored prompt of a just-created run (watch-verdict prepend).
+   * The child has not spawned yet when the scanner calls this (same tick,
+   * same per-issue dispatch lock); the record is the durable trail the
+   * harness re-reads. No-op when the task is gone. */
+  async setPrompt(taskId: string, prompt: string): Promise<void> {
+    const rec = this.tasks.find((t) => t.taskId === taskId)
+    if (!rec) return
+    (rec as { prompt: string }).prompt = prompt
+    await this.flush()
+  }
+
   /** Record the agent's own session id, captured from stdout while running. */
   async setAgentSessionId(taskId: string, agentSessionId: string): Promise<void> {
     const rec = this.tasks.find((t) => t.taskId === taskId)

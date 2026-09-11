@@ -174,6 +174,7 @@ function scannerFor(
     markers?: MarkerStore
     watchStates?: WatchStateStore
     watchChecker?: WatchChecker
+    rewritePrompt?: ScheduleScannerDeps['rewritePrompt']
     now?: number
     adapter?: CliAdapter
     resolveAdapter?: ScheduleScannerDeps['resolveAdapter']
@@ -198,12 +199,13 @@ function scannerFor(
     dispatch,
     claimFreshSession: opts.claimFreshSession,
     observeIssues: opts.observeIssues,
-    ...(opts.watchChecker || opts.watchStates
+    ...(opts.watchChecker || opts.watchStates || opts.rewritePrompt
       ? {
         watchChecker: opts.watchChecker ?? { check: async () => hitVerdict() },
         watchStates: opts.watchStates ?? new FakeWatchStates(),
       }
       : {}),
+    ...(opts.rewritePrompt ? { rewritePrompt: opts.rewritePrompt } : {}),
     markers,
     logger: noopLogger,
     now: () => opts.now ?? NOW,
@@ -1002,6 +1004,31 @@ describe('ScheduleScanner watch gating', () => {
     // One shared judgement, but each issue dispatches its own run.
     expect(check).toHaveBeenCalledTimes(1)
     expect(dispatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('hit prepends the verdict block (with the real run id) to the dispatched prompt', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go trade it', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-1'] }))
+    const rewritePrompt = vi.fn(async () => undefined)
+    const dispatch = vi.fn(async () => ({ taskId: 'run-abc', resumeId: 'resume-new-worker-a1b2c3' }))
+    const { scanner } = scannerFor([ws], { dispatch, watchStates, watchChecker: { check }, rewritePrompt })
+    await scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    // Dispatch itself carries What alone (id unknown pre-dispatch).
+    expect((dispatch.mock.calls[0] as unknown[])[2]).toBe('go trade it')
+    // The stored prompt is rewritten with the verdict block first.
+    expect(rewritePrompt).toHaveBeenCalledTimes(1)
+    const [taskId, prompt] = rewritePrompt.mock.calls[0] as unknown as [string, string]
+    expect(taskId).toBe('run-abc')
+    expect(prompt).toContain('<watch-verdict>')
+    expect(prompt).toContain('watchVersion: 1')
+    expect(prompt).toContain('runId: run-abc')
+    expect(prompt).toContain('sig-1')
+    expect(prompt.endsWith('go trade it')).toBe(true)
+    expect(watchStates.get('w1', 'watch-1')?.lastRunId).toBe('run-abc')
   })
 
   it('plain scheduled issues keep the legacy path when no checker is wired', async () => {

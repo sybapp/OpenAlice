@@ -274,6 +274,17 @@ describe('HeadlessTaskRegistry', () => {
     expect(reloaded.get(a.taskId)?.agentSessionId).toBe('414d6b8c-95b4-4e01-8ffc-4b6332da17d4')
   })
 
+  it('setPrompt rewrites the stored prompt mid-run (watch-verdict prepend)', async () => {
+    const reg = await HeadlessTaskRegistry.load(path, noopLogger)
+    const a = await createTask(reg, { wsId: 'w1', agent: 'claude', prompt: 'go trade it', startedAt: 1 })
+    await reg.setPrompt(a.taskId, '<watch-verdict>\nrunId: ' + a.taskId + '\n</watch-verdict>\n\ngo trade it')
+    expect(reg.get(a.taskId)?.prompt).toContain('<watch-verdict>')
+    expect(reg.get(a.taskId)?.prompt.endsWith('go trade it')).toBe(true)
+    const reloaded = await HeadlessTaskRegistry.load(path, noopLogger)
+    expect(reloaded.get(a.taskId)?.prompt).toContain(a.taskId)
+    await reg.setPrompt('run-missing', 'x') // no-op, never throws
+  })
+
   it('keeps records and logs beyond the former 200-run retention cap', async () => {
     const logsDir = join(dir, 'logs')
     await mkdir(logsDir, { recursive: true })

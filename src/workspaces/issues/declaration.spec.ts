@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { issueAssigneeResumeId, issueFirePrompt, issueTimeoutMs, isFireable, readWorkspaceIssues } from './declaration.js'
+import { issueAssigneeResumeId, issueFirePrompt, issueTimeoutMs, isFireable, issueWatchVerdictBlock, readWorkspaceIssues } from './declaration.js'
 
 let dir: string
 beforeEach(async () => {
@@ -410,6 +410,25 @@ describe('isFireable / issueFirePrompt', () => {
       expect(issueFirePrompt(byId['no-what'])).toBe('with detail')
       expect(issueFirePrompt(byId['bare'])).toBe('Just a title')
     }
+  })
+
+  it('renders the watch verdict block with version, leaves, evidence, signals, and run id', () => {
+    const block = issueWatchVerdictBlock({
+      watchVersion: 3,
+      status: 'hit',
+      leaves: [{ index: 0, status: 'hit', actual: 195, expected: 190 }],
+      evidence: { close: 195, barCount: 120, watchVersion: 3 },
+      signalIds: ['BOS|swing|bullish|d2|d1|190|192'],
+      runId: 'run-abc',
+    })
+    expect(block).toContain('<watch-verdict>')
+    expect(block).toContain('watchVersion: 3')
+    expect(block).toContain('leaf[0]: hit')
+    expect(block).toContain('actual=195')
+    expect(block).toContain('runId: run-abc')
+    expect(block).toContain('BOS|swing|bullish|d2|d1|190|192')
+    expect(block).toContain('stale')
+    expect(block).toContain('</watch-verdict>')
   })
 
   it('keeps legacy inline comments out of canonical What', async () => {

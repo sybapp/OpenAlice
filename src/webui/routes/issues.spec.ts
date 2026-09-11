@@ -268,6 +268,44 @@ describe('PATCH /api/issues/:wsId/:id', () => {
     expect(re.ok && re.issues[0].agent).toBeUndefined()
   })
 
+  it('sets, re-arms, and stale-guards a watch', async () => {
+    const watchV1 = {
+      version: 1,
+      source: { barId: 'vendor|NVDA', interval: '1h' },
+      rule: { type: 'price_above', price: 190 },
+    }
+    await createIssue(wsDir, { id: 'i1', title: 'T' })
+    const { app } = build()
+    const set = await req(app, 'PATCH', '/ws-1/i1', { watch: watchV1 })
+    expect(set.status).toBe(200)
+    expect(set.body.issue.watch).toMatchObject({ version: 1 })
+    const watchV2 = { ...watchV1, version: 2, rule: { type: 'price_above', price: 200 } }
+    const rearm = await req(app, 'PATCH', '/ws-1/i1', { watch: watchV2, expectedWatchVersion: 1 })
+    expect(rearm.status).toBe(200)
+    expect(rearm.body.issue.watch).toMatchObject({ version: 2 })
+    const stale = await req(app, 'PATCH', '/ws-1/i1', {
+      watch: watchV1,
+      expectedWatchVersion: 1,
+    })
+    expect(stale.status).toBe(422)
+    expect(stale.body.message).toMatch(/stale watch version/)
+    const bad = await req(app, 'PATCH', '/ws-1/i1', {
+      watch: { version: 9, source: { barId: 'x', interval: '1h' }, rule: { type: 'nope' } },
+    })
+    expect(bad.status).toBe(422)
+    const cleared = await req(app, 'PATCH', '/ws-1/i1', { watch: null })
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.issue.watch).toBeUndefined()
+  })
+
+  it('400 invalid_watch_version for a non-integer expected version', async () => {
+    await createIssue(wsDir, { id: 'i1', title: 'T' })
+    const { app } = build()
+    const r = await req(app, 'PATCH', '/ws-1/i1', { watch: null, expectedWatchVersion: 'x' })
+    expect(r.status).toBe(400)
+    expect(r.body.error).toBe('invalid_watch_version')
+  })
+
   it('sets and clears an optional scheduled-run timeout', async () => {
     await createIssue(wsDir, { id: 'i1', title: 'T', when: { kind: 'every', every: '30m' } })
     const { app } = build()

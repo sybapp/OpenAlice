@@ -310,6 +310,27 @@ describe('tradingPush — AI-trading gate (#95)', () => {
     expect(res.results[0].source).toBe('binance-demo')
   })
 
+  it('monitor-staged proposals use the identical gate (no monitor bypass)', async () => {
+    // A watch-hit harness stages through the same placeOrder/commit path as
+    // any suggestion; the push gate cannot distinguish origin and must not
+    // need to — OFF refuses, ON executes, for monitor proposals exactly as
+    // for ordinary ones.
+    const staged: string[] = []
+    const uta = {
+      id: 'binance-demo',
+      status: async () => ({ pendingMessage: 'watch-hit: buy NVDA', staged: [], pendingHash: 'hw1' }),
+      push: async () => ({ hash: 'hw1', message: 'sent', operationCount: 1, submitted: [{}], rejected: [] }),
+    }
+    const manager = { resolve: async () => [uta] } as never
+    const off = await run(createTradingTools(manager, () => false).tradingPush, {}) as { message: string }
+    expect(off.message).toMatch(/manual approval|disabled/i)
+    const on = await run(createTradingTools(manager, () => true).tradingPush, {}) as {
+      results: Array<{ source: string }>
+    }
+    expect(on.results[0].source).toBe('binance-demo')
+    expect(staged).toEqual([])
+  })
+
   it('fails closed — no flag getter defaults to disabled (no push)', async () => {
     const { manager, pushed } = pushFixture()
     const tools = createTradingTools(manager)

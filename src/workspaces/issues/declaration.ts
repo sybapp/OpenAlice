@@ -346,9 +346,60 @@ export function extraTelegramConnectorIssueIds(issues: readonly IssueRecord[]): 
 
 /** The prompt a scheduled fire hands to the headless run. `what` is already the
  * canonical, human-visible markdown work definition; there is no second hidden
- * prompt field for it to disagree with. */
+ * prompt field for it to disagree with.
+ *
+ * Watched issues (increment 3): the harness turn opens with a machine-readable
+ * verdict block — the exact judgement that armed this dispatch (watch version,
+ * per-leaf hit/miss, observed actuals, bar window, consumed signal ids, and
+ * the dispatch's run id). The block is provenance, not a second prompt: the
+ * harness still executes `what`, and its three valid exits (re-arm with a new
+ * `watch` + reason, stage/commit a trade proposal, close the issue) go through
+ * validated tools, never NL-sniffing of this block. */
 export function issueFirePrompt(issue: IssueRecord): string {
   return issue.what
+}
+
+/** Machine-readable verdict block prepended to a watched-issue dispatch.
+ * Rendered from the scanner's latched judgement so the harness can see WHAT
+ * fired without re-judging, and so a stale turn (re-armed since) can detect
+ * its own staleness by comparing `watchVersion` against the live file. */
+export function issueWatchVerdictBlock(input: {
+  watchVersion: number
+  status: 'hit'
+  leaves: ReadonlyArray<{
+    index: number
+    status: string
+    actual?: number | string
+    expected?: number | string
+    reason?: string
+  }>
+  evidence: Record<string, unknown>
+  signalIds: readonly string[]
+  runId: string
+}): string {
+  const leaves = input.leaves
+    .map((leaf) => {
+      const actual = leaf.actual !== undefined ? ` actual=${JSON.stringify(leaf.actual)}` : ''
+      const expected = leaf.expected !== undefined ? ` expected=${JSON.stringify(leaf.expected)}` : ''
+      const reason = leaf.reason ? ` reason=${JSON.stringify(leaf.reason)}` : ''
+      return `- leaf[${leaf.index}]: ${leaf.status}${actual}${expected}${reason}`
+    })
+    .join('\n')
+  const signals = input.signalIds.length > 0
+    ? input.signalIds.map((id) => `\n- ${id}`).join('')
+    : '\n- (none: price/indicator verdict latches on the watch version)'
+  return [
+    '<watch-verdict>',
+    `watchVersion: ${input.watchVersion}`,
+    `status: ${input.status}`,
+    `runId: ${input.runId}`,
+    'leaves:',
+    leaves,
+    `evidence: ${JSON.stringify(input.evidence)}`,
+    `signals:${signals}`,
+    'If this watchVersion no longer matches the live Issue file, your verdict is stale: re-read the Issue before acting.',
+    '</watch-verdict>',
+  ].join('\n')
 }
 
 /**
