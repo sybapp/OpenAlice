@@ -34,6 +34,8 @@ export interface IssueAuditSnapshot {
   effort?: string
   timeout?: string
   commentPrompt?: string
+  /** Canonical watch JSON (versioned rule set); absent ⇒ no monitoring. */
+  watch?: string
   whatHash: string
 }
 
@@ -64,6 +66,7 @@ export function issueAuditSnapshot(issue: IssueRecord): IssueAuditSnapshot {
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
+    ...(issue.watch ? { watch: JSON.stringify(issue.watch) } : {}),
     whatHash: digest(issue.what),
   }
 }
@@ -99,6 +102,7 @@ export function issueMutation(
   valueField('effort', left.effort, right.effort)
   valueField('timeout', left.timeout, right.timeout)
   valueField('commentPrompt', left.commentPrompt, right.commentPrompt)
+  valueField('watch', left.watch, right.watch)
   if (left.whatHash !== right.whatHash) fields.push({ field: 'what' })
   return fields.length > 0 ? { fields } : null
 }

@@ -222,6 +222,7 @@ function rowOf(issue: IssueRecord) {
     ...(issue.model ? { model: issue.model } : {}),
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.watch ? { watch: issue.watch } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
     scheduled: issue.when !== undefined,
   }
@@ -315,13 +316,15 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
         "Update one of THIS workspace's issues — its board fields.",
         '',
         'Patch any subset of `status`, `priority`, `assignee`, `agent`, `credential`, `credentialSource`, `model`,',
-        '`effort`, `timeout`, `what`, or `commentPrompt`; omitted fields are',
+        '`effort`, `timeout`, `what`, `watch`, or `commentPrompt`; omitted fields are',
         'left untouched. `assignee:"@me"` binds this current product',
         'Session; `@new-then-resume` recruits once and assigns that first Session permanently;',
         'pass an exact `@resumeId` to assign another known Session. What is the',
         'canonical markdown work definition and exact scheduled prompt. `commentPrompt` is the',
         'template for the comment-reply Input Prompt (`{comment}` required; null restores the',
-        'default wrapper). `timeout` is an optional',
+        'default wrapper). `watch` is the machine-checkable monitoring rule set (v1 whitelist in',
+        'watch/spec.ts; null removes it; `expectedWatchVersion` guards stale-plan overwrites).',
+        '`timeout` is an optional',
         'scheduled-run watchdog (`15m`/`30m`/`45m`/`60m`); omit or null means no limit. Other',
         'schedule timing (`when`) is preserved — edit it by writing the file directly',
         '(`.alice/issues/<id>.md`).',
@@ -343,9 +346,11 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
         effort: z.enum(MODEL_REASONING_EFFORTS).nullable().optional().describe('One-run reasoning effort; null inherits the Workspace/runtime default.'),
         timeout: z.enum(ISSUE_TIMEOUTS).nullable().optional().describe('Optional scheduled-run watchdog; null removes the limit so the agent may run until it exits.'),
         what: z.string().min(1).optional().describe('Canonical markdown work definition; exact scheduled prompt.'),
+        watch: z.unknown().optional().describe('Monitoring rule set (v1 whitelist); null removes it. Omitted fields are left untouched.'),
+        expectedWatchVersion: z.number().int().min(1).optional().describe('Refuse the watch update when the live watch version differs (stale-plan protection).'),
         commentPrompt: z.string().nullable().optional().describe('Comment-reply Input Prompt template. Must include {comment}. Null restores the default wrapper.'),
       }),
-      execute: async ({ id, status, priority, assignee, agent, credential, credentialSource, model, effort, timeout, what, commentPrompt }) => {
+      execute: async ({ id, status, priority, assignee, agent, credential, credentialSource, model, effort, timeout, what, watch, expectedWatchVersion, commentPrompt }) => {
         const dir = selfDir(ctx)
         if (!dir.ok) return { ok: false as const, error: dir.error }
         const resolvedAssignee = resolveIssueAssignee(ctx, assignee)
@@ -361,11 +366,13 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
           effort === undefined &&
           timeout === undefined &&
           what === undefined &&
+          watch === undefined &&
+          expectedWatchVersion === undefined &&
           commentPrompt === undefined
         ) {
           return {
             ok: false as const,
-            error: 'no fields to update (pass status/priority/assignee/agent/credential/credentialSource/model/effort/timeout/what/commentPrompt)',
+            error: 'no fields to update (pass status/priority/assignee/agent/credential/credentialSource/model/effort/timeout/what/watch/expectedWatchVersion/commentPrompt)',
           }
         }
         const res = await updateIssueFields(dir.dir, id, {
@@ -379,6 +386,8 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
           effort,
           timeout,
           what,
+          ...(watch !== undefined ? { watch } : {}),
+          ...(expectedWatchVersion !== undefined ? { expectedWatchVersion } : {}),
           commentPrompt,
         })
         if (res.ok) {
@@ -530,9 +539,10 @@ export const issueCreateFactory: WorkspaceToolFactory = {
         model: z.string().min(1).optional().describe('Native model id for the selected credential/runtime source.'),
         effort: z.enum(MODEL_REASONING_EFFORTS).optional().describe('Reasoning effort for one scheduled run.'),
         timeout: z.enum(ISSUE_TIMEOUTS).optional().describe('Optional scheduled-run watchdog (15m/30m/45m/60m). Omit for no limit.'),
+        watch: z.unknown().optional().describe('Monitoring rule set (v1 whitelist in watch/spec.ts). Omit for no monitoring.'),
         commentPrompt: z.string().min(1).optional().describe('Comment-reply Input Prompt template. Must include {comment}. Omit for the default wrapper.'),
       }),
-      execute: async ({ title, id, status, priority, assignee, when, what, agent, credential, credentialSource, model, effort, timeout, commentPrompt }) => {
+      execute: async ({ title, id, status, priority, assignee, when, what, agent, credential, credentialSource, model, effort, timeout, watch, commentPrompt }) => {
         const dir = selfDir(ctx)
         if (!dir.ok) return { ok: false as const, error: dir.error }
         // Structured creation is attributable: "who creates it owns it". A
@@ -555,6 +565,7 @@ export const issueCreateFactory: WorkspaceToolFactory = {
           model,
           effort,
           timeout,
+          ...(watch !== undefined ? { watch } : {}),
           commentPrompt,
         })
         if (res.ok) {

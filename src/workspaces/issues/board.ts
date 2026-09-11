@@ -27,7 +27,7 @@ import type {
   HeadlessTaskRecord,
   HeadlessTaskStatus,
 } from '../headless-task-registry.js'
-import type { IssuePriority, IssueRecord, IssueStatus, IssueTimeout } from './declaration.js'
+import type { IssuePriority, IssueRecord, IssueStatus, IssueTimeout, IssueWatch } from './declaration.js'
 import type { IssueComment } from './comments.js'
 import type { IssueAutomationHealth } from './automation-health.js'
 import { issueRunFailure, type IssueRunFailure } from './run-failure.js'
@@ -51,6 +51,8 @@ export interface IssuesSnapshotIssue {
   effort?: ModelReasoningEffort
   /** Optional scheduled-run watchdog; omit for no limit. */
   timeout?: IssueTimeout
+  /** Machine-checkable monitoring subset (v1 whitelist); absent ⇒ no monitoring. */
+  watch?: IssueWatch
   /** Present iff the issue self-schedules. */
   when?: Schedule
   /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
@@ -256,6 +258,8 @@ export interface IssueDetailIssue {
   model?: string
   effort?: ModelReasoningEffort
   timeout?: IssueTimeout
+  /** Machine-checkable monitoring subset (v1 whitelist); absent ⇒ no monitoring. */
+  watch?: IssueWatch
   /** Optional comment-reply Input Prompt template. Omission keeps the default wrapper. */
   commentPrompt?: string
   /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
@@ -470,6 +474,7 @@ export function detailIssue(
     ...(issue.model ? { model: issue.model } : {}),
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.watch ? { watch: issue.watch } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
     ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
     ...(markers ? {
@@ -499,6 +504,7 @@ export function snapshotBoardIssue(
     ...(issue.model ? { model: issue.model } : {}),
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.watch ? { watch: issue.watch } : {}),
     ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
     ...(issue.when ? { when: issue.when } : {}),
     ...(markers ? {

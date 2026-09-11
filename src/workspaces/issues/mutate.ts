@@ -44,6 +44,7 @@ import {
   type IssueTimeout,
 } from './declaration.js'
 import { parseIssueCommentPrompt } from './comment-prompt.js'
+import { issueWatchSchema, type IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 export { appendIssueComment } from './comments.js'
 
 /** Fields a human/agent may patch on an existing issue. Most scheduling
@@ -70,6 +71,11 @@ export interface IssueFieldPatch {
   what?: string
   /** Comment-reply Input Prompt template; null restores the default wrapper. */
   commentPrompt?: string | null
+  /** Monitoring rule set (validated against the v1 whitelist); null removes it. */
+  watch?: unknown
+  /** Expected watch version for stale-plan protection; refuses when the live
+   * version differs (old analysis must not overwrite a newer plan). */
+  expectedWatchVersion?: number
   /** Cron missed-fire policy; only valid when the Issue already has a cron `when`. */
   catchUp?: boolean
   /** Settings-only cadence edit for the phone desk. */
@@ -98,6 +104,8 @@ export interface CreateIssueInput {
   timeout?: IssueTimeout
   /** Comment-reply Input Prompt template. Omission keeps the default wrapper. */
   commentPrompt?: string
+  /** Monitoring rule set (validated against the v1 whitelist). */
+  watch?: unknown
   /** @deprecated Compatibility alias for callers written before What became the
    * sole markdown document. New callers must use `what`. */
   body?: string
@@ -283,6 +291,33 @@ export async function updateIssueFields(
       data.commentPrompt = parsed.template
     }
   }
+  if (patch.watch !== undefined) {
+    if (patch.watch === null) {
+      delete data.watch
+    } else {
+      const parsed = issueWatchSchema.safeParse(patch.watch)
+      if (!parsed.success) {
+        return {
+          ok: false,
+          reason: 'invalid',
+          error: `invalid watch: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+        }
+      }
+      if (patch.expectedWatchVersion !== undefined) {
+        const live = (current.issue as { watch?: IssueWatch }).watch?.version
+        if (live !== patch.expectedWatchVersion) {
+          return {
+            ok: false,
+            reason: 'invalid',
+            error: `stale watch version: expected ${patch.expectedWatchVersion} but live is ${live ?? 'none'}; re-read the Issue before updating`,
+          }
+        }
+      }
+      data.watch = parsed.data
+    }
+  } else if (patch.expectedWatchVersion !== undefined) {
+    return { ok: false, reason: 'invalid', error: 'expectedWatchVersion needs a watch update' }
+  }
   if (patch.connectorDesk !== undefined || patch.telegramConnector !== undefined) {
     if (!options?.allowConnectorDesk && !options?.allowTelegramConnector) {
       return {
@@ -392,6 +427,17 @@ export async function createIssue(
     const parsed = parseIssueCommentPrompt(input.commentPrompt)
     if (!parsed.ok) return { ok: false, reason: 'invalid', error: parsed.error }
     data.commentPrompt = parsed.template
+  }
+  if (input.watch !== undefined) {
+    const parsed = issueWatchSchema.safeParse(input.watch)
+    if (!parsed.success) {
+      return {
+        ok: false,
+        reason: 'invalid',
+        error: `invalid watch: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      }
+    }
+    data.watch = parsed.data
   }
   const requestedDesk = input.connectorDesk ?? (input.telegramConnector === true ? 'telegram' : undefined)
   if (requestedDesk) {

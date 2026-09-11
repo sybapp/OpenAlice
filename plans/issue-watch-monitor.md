@@ -1,6 +1,6 @@
 # Plan: Issue-native conditional monitoring (`watch`)
 
-**Status:** active — increment 0 (contract only, no code yet)
+**Status:** active — increment 1 in progress (contract done, evaluator done, declaration wiring done; scanner gating open)
 **Owner guides:** [[docs/workspace-issues-and-scheduling.md]], [[docs/market-data-architecture.md]], [[docs/project-structure.md]]
 **Delivery:** feature-branch iteration on `feat/issue-watch-monitor` (based on `feat/technical-analysis-suite`, not `dev`). No PR until maintainer accepts.
 **Related code:** `src/workspaces/schedule/scanner.ts`, `src/workspaces/issues/declaration.ts`, `src/workspaces/issues/mutate.ts`, `src/workspaces/schedule/marker-store.ts`, `src/domain/analysis/technical-analysis/interval-analysis.ts`, `src/domain/analysis/technical-analysis/indicators.ts`, `src/domain/analysis/technical-analysis/price-action/`, `src/domain/market-data/bars/bar-service.ts`, `src/tool/trading.ts`, `services/uta/src/http/routes-trading.ts`
@@ -94,9 +94,11 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 - Pure `evaluateWatch` for all v1 leaf types + one-level `all`/`any`, with evidence shape.
 - Freshness extension: closed-bar gate + minute-level staleness alongside `staleTradingDays`.
 - Structure identity helper (stable id from confirmed event, not index).
-- [ ] Fixed-bar replay specs: every leaf + combos deterministic.
-- [ ] Stale / missing / unconfirmed / insufficient-history fixtures → `unavailable`, never hit.
-- [ ] Unknown `type` / bad params → invalid issue, loud.
+- [x] Fixed-bar replay specs: every leaf + combos deterministic (`watch/eval.spec.ts`, 17 cases).
+- [x] Stale / missing / in-progress fixtures → `unavailable`, never hit (`watch/freshness.spec.ts`, `watch/check.spec.ts`: fetch throw, trading-day + minute staleness, closed-bar drop).
+- [x] Unknown `type` / bad params → invalid issue, loud (`issues/watch.spec.ts`: schema + create/update/clear/round-trip + stale-version guard).
+- [x] `checkWatch` orchestration: one `getBars` → freshness/closed-bar gate → `analyzePriceActionBars` + indicators (fib/confluence off) → `evaluateWatch`; fetch throw → `unavailable`.
+- [ ] Insufficient-history / unconfirmed-structure replay (covered at eval level by `unavailable` leaves; end-to-end short-window case still open).
 
 ### 2. Background trigger
 

@@ -62,6 +62,7 @@ import {
   resumeIdFromSignature,
 } from '../session-signature.js'
 import { parseIssueCommentPrompt } from './comment-prompt.js'
+import { issueWatchSchema, type IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 
 /** Directory of per-issue markdown files, relative to a workspace's `dir`. */
 export const ISSUES_DIR_REL = join('.alice', 'issues')
@@ -193,6 +194,10 @@ const issueFrontmatterObjectSchema = z.object({
   /** Adapter id of the connector that owns this phone-desk Issue.
    *  Omission is a normal Issue. At most one live desk per connector. */
   connectorDesk: z.string().regex(/^[a-z][a-z0-9-]*$/, 'connectorDesk must be a connector id').max(64).optional(),
+  /** Machine-checkable monitoring subset of a monitoring Issue. Human intent
+   * stays in the markdown What; unknown leaf types or extra keys are invalid
+   * (loud), never a silent miss. See `watch/spec.ts` for the v1 whitelist. */
+  watch: issueWatchSchema.optional(),
   /** Dual-read of the 0.89.4-beta Telegram-only flag. Transformed to connectorDesk. */
   telegramConnector: z.literal(true).optional(),
   /** The former parallel ownership field is outside the baseline. Keeping a
@@ -272,6 +277,7 @@ export const issueFrontmatterSchema = issueFrontmatterObjectSchema
   })
 type IssueFrontmatterFile = z.infer<typeof issueFrontmatterSchema>
 export type IssueFrontmatter = Omit<IssueFrontmatterFile, 'what' | 'execution'>
+export type { IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 
 /** A fully read issue: validated frontmatter + filename id + markdown What. */
 export interface IssueRecord extends IssueFrontmatter {

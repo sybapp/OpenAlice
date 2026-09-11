@@ -186,6 +186,8 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
       effort?: ModelReasoningEffort | null
       timeout?: IssueTimeout | null
       what?: string
+      watch?: unknown
+      expectedWatchVersion?: number
       commentPrompt?: string | null
       catchUp?: boolean
     } = {}
@@ -332,6 +334,23 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
         patch.commentPrompt = raw
       }
     }
+    if ('watch' in fields) {
+      const raw = fields['watch']
+      if (raw === null) {
+        patch.watch = null
+      } else if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return c.json({ error: 'invalid_watch', message: 'watch must be a monitoring rule object or null' }, 400)
+      } else {
+        patch.watch = raw
+      }
+    }
+    if ('expectedWatchVersion' in fields) {
+      const raw = fields['expectedWatchVersion']
+      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) {
+        return c.json({ error: 'invalid_watch_version', message: 'expectedWatchVersion must be a positive integer' }, 400)
+      }
+      patch.expectedWatchVersion = raw
+    }
     if ('catchUp' in fields) {
       if (typeof fields['catchUp'] !== 'boolean') {
         return c.json({ error: 'invalid_catch_up', message: 'catchUp must be true or false' }, 400)
@@ -341,7 +360,7 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
     if (Object.keys(patch).length === 0) {
       return c.json({
         error: 'no_fields',
-        message: 'provide at least one of status, priority, assignee, agent, credential, model, effort, timeout, what, commentPrompt, catchUp',
+        message: 'provide at least one of status, priority, assignee, agent, credential, model, effort, timeout, what, watch, expectedWatchVersion, commentPrompt, catchUp',
       }, 400)
     }
 
