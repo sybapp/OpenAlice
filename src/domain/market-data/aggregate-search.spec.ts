@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { aggregateSymbolSearch, type MarketSearchDeps } from './aggregate-search.js'
 
-function deps(over: Partial<MarketSearchDeps> = {}): MarketSearchDeps {
+function deps(): MarketSearchDeps {
   return {
     symbolIndex: {
       search: vi.fn(() => [
@@ -12,7 +12,6 @@ function deps(over: Partial<MarketSearchDeps> = {}): MarketSearchDeps {
       ]),
     } as never,
     equityVendors: ['yfinance'],
-    assetProviders: { crypto: 'yfinance', currency: 'yfinance' },
     equityClient: { search: vi.fn(async () => []) } as never,
     cryptoClient: { search: vi.fn(async () => []) } as never,
     currencyClient: {
@@ -22,7 +21,6 @@ function deps(over: Partial<MarketSearchDeps> = {}): MarketSearchDeps {
       ]),
     } as never,
     commodityCatalog: { search: vi.fn(() => []) } as never,
-    ...over,
   }
 }
 
@@ -38,34 +36,10 @@ describe('aggregateSymbolSearch limits', () => {
   })
 })
 
-it('retains cross-currency pairs when the provider is not yfinance', async () => {
-  // Upstream c4614e6d removed the unconditional XXXUSD gate (crosses vanished
-  // from discovery); we restore its coverage conditionally — the gate only
-  // applies to the yfinance fallback provider.
-  const d = deps({ assetProviders: { crypto: 'fmp', currency: 'fmp' } })
+
+it('retains USD-base and cross-currency pairs in discovery', async () => {
+  const d = deps()
   vi.mocked(d.currencyClient.search).mockResolvedValue([{ symbol: 'USDJPY' }, { symbol: 'EURGBP' }])
   const results = await aggregateSymbolSearch(d, 'USDJPY', 20)
   expect(results.filter(r => r.assetClass === 'currency').map(r => r.symbol)).toEqual(['USDJPY', 'EURGBP'])
-  expect(results.filter(r => r.assetClass === 'currency').every(r => r.sourceId === 'fmp')).toBe(true)
-})
-
-describe('aggregateSymbolSearch', () => {
-  it('uses configured crypto and currency providers and preserves sourceId', async () => {
-    const cryptoSearch = vi.fn(async () => [{ symbol: 'BINANCE:BTCUSDT', name: 'Bitcoin / TetherUS' }])
-    const currencySearch = vi.fn(async () => [{ symbol: 'FX:USDJPY', name: 'U.S. Dollar / Japanese Yen' }])
-
-    const out = await aggregateSymbolSearch(deps({
-      symbolIndex: { search: () => [] } as never,
-      assetProviders: { crypto: 'fmp', currency: 'fmp' },
-      cryptoClient: { search: cryptoSearch } as never,
-      currencyClient: { search: currencySearch } as never,
-    }), 'USD')
-
-    expect(cryptoSearch).toHaveBeenCalledWith({ query: 'USD', provider: 'fmp' })
-    expect(currencySearch).toHaveBeenCalledWith({ query: 'USD', provider: 'fmp' })
-    expect(out).toEqual([
-      expect.objectContaining({ symbol: 'BINANCE:BTCUSDT', assetClass: 'crypto', sourceId: 'fmp' }),
-      expect.objectContaining({ symbol: 'FX:USDJPY', assetClass: 'currency', sourceId: 'fmp' }),
-    ])
-  })
 })

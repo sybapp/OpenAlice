@@ -174,8 +174,6 @@ async function main() {
 
   const { providers } = config.marketData
   const executor = getSDKExecutor()
-  const compatibilityProvider = (provider: string) =>
-    provider === TRADINGVIEW_PROVIDER_ID ? 'yfinance' : provider
 
   let equityClient: EquityClientLike
   let cryptoClient: CryptoClientLike
@@ -189,13 +187,13 @@ async function main() {
   {
     const routeMap = buildRouteMap()
     const credentials = buildSDKCredentials(config.marketData.providerKeys, config.marketData.hub)
-    equityClient = new SDKEquityClient(executor, 'equity', compatibilityProvider(providers.equity), credentials, routeMap)
-    cryptoClient = new SDKCryptoClient(executor, 'crypto', compatibilityProvider(providers.crypto), credentials, routeMap)
-    currencyClient = new SDKCurrencyClient(executor, 'currency', compatibilityProvider(providers.currency), credentials, routeMap)
-    commodityClient = new SDKCommodityClient(executor, 'commodity', compatibilityProvider(providers.commodity), credentials, routeMap)
-    etfClient = new SDKEtfClient(executor, 'etf', compatibilityProvider(providers.equity), credentials, routeMap)
-    indexClient = new SDKIndexClient(executor, 'index', compatibilityProvider(providers.equity), credentials, routeMap)
-    derivativesClient = new SDKDerivativesClient(executor, 'derivatives', compatibilityProvider(providers.equity), credentials, routeMap)
+    equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
+    cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
+    currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
+    commodityClient = new SDKCommodityClient(executor, 'commodity', providers.commodity, credentials, routeMap)
+    etfClient = new SDKEtfClient(executor, 'etf', providers.equity, credentials, routeMap)
+    indexClient = new SDKIndexClient(executor, 'index', providers.equity, credentials, routeMap)
+    derivativesClient = new SDKDerivativesClient(executor, 'derivatives', providers.equity, credentials, routeMap)
     economyClient = new SDKEconomyClient(executor, 'economy', 'federal_reserve', credentials, routeMap)
   }
 
@@ -214,21 +212,7 @@ async function main() {
   // resolver re-reads per request — is live on the next search, no restart.
   const getEquityVendors = async () => {
     const md = await readMarketDataConfig()
-    const configured = md.providers.equity === TRADINGVIEW_PROVIDER_ID
-      ? ['yfinance', ...md.extraVendors]
-      : [md.providers.equity, ...md.extraVendors]
-    const compatible = [...new Set(configured)]
-      .filter((provider) => provider !== TRADINGVIEW_PROVIDER_ID)
-    return compatible.length > 0 ? compatible : ['yfinance']
-  }
-  const getAssetProviders = async () => {
-    const md = await readMarketDataConfig()
-    return Object.fromEntries(
-      Object.entries(md.providers).map(([assetClass, provider]) => [
-        assetClass,
-        compatibilityProvider(provider),
-      ]),
-    ) as typeof md.providers
+    return [...new Set([md.providers.equity, ...md.extraVendors])]
   }
 
   const tradingViewAdapter = createTradingViewBarAdapter({
@@ -237,7 +221,7 @@ async function main() {
   })
   const nativeMarketVendors = [tradingViewAdapter.vendor]
 
-  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, assetProviders: getAssetProviders, equityClient, cryptoClient, currencyClient, commodityCatalog }
+  const marketSearch = { symbolIndex, equityVendors: getEquityVendors, equityClient, cryptoClient, currencyClient, commodityCatalog }
 
   // Federated bar layer — native/compatibility vendor adapters + broker (UTA) OHLCV behind one
   // barId-keyed interface. Vendor branch live now; UTA branch lands with Phase 1.
@@ -263,7 +247,7 @@ async function main() {
     economyClient,
     derivativesClient,
     indexClient,
-    equityProvider: compatibilityProvider(config.marketData.providers.equity),
+    equityProvider: config.marketData.providers.equity,
     hub: config.marketData.hub,
   })
 
