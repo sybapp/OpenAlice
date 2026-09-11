@@ -126,7 +126,7 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 - [x] Board `paused` badge on watched+paused rows only; no sort change.
 - [x] i18n `issues.watch.*` + `issues.detail.monitoring` + `mutationField.watch/watchPaused` in en/zh/ja/zh-Hant; Activity renders pause/condition changes via the generic mutation path.
 - [x] Demo: `thesis-watch` carries `watch` + `watchState` on issues + schedule fixtures; demo PATCH accepts `watchPaused` (400 otherwise).
-- [ ] Real browser route walk (`pnpm -F open-alice-ui dev:demo`: Issues → `thesis-watch` detail; pause/resume; board badge).
+- [x] Real browser route walk (`pnpm -F open-alice-ui dev:demo`, headless Chrome 1440px, zero page errors): Issues → `thesis-watch` detail shows Monitoring (conditions / last check+status / last trigger / next step + `demo-run-thesis-2` link); pause → `Monitoring paused` + Resume button; board row shows `paused` badge beside Healthy while paused; resume → verdict message restored. Screenshots in run notes (not committed).
 
 ## Verification
 
