@@ -223,6 +223,7 @@ function rowOf(issue: IssueRecord) {
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
     ...(issue.watch ? { watch: issue.watch } : {}),
+    ...(issue.watchPaused ? { watchPaused: true as const } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
     scheduled: issue.when !== undefined,
   }
@@ -348,9 +349,10 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
         what: z.string().min(1).optional().describe('Canonical markdown work definition; exact scheduled prompt.'),
         watch: z.unknown().optional().describe('Monitoring rule set (v1 whitelist); null removes it. Omitted fields are left untouched.'),
         expectedWatchVersion: z.number().int().min(1).optional().describe('Refuse the watch update when the live watch version differs (stale-plan protection).'),
+        watchPaused: z.boolean().nullable().optional().describe('Pause/resume watched dispatch (independent switch); null/false clears to live.'),
         commentPrompt: z.string().nullable().optional().describe('Comment-reply Input Prompt template. Must include {comment}. Null restores the default wrapper.'),
       }),
-      execute: async ({ id, status, priority, assignee, agent, credential, credentialSource, model, effort, timeout, what, watch, expectedWatchVersion, commentPrompt }) => {
+      execute: async ({ id, status, priority, assignee, agent, credential, credentialSource, model, effort, timeout, what, watch, expectedWatchVersion, watchPaused, commentPrompt }) => {
         const dir = selfDir(ctx)
         if (!dir.ok) return { ok: false as const, error: dir.error }
         const resolvedAssignee = resolveIssueAssignee(ctx, assignee)
@@ -368,11 +370,12 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
           what === undefined &&
           watch === undefined &&
           expectedWatchVersion === undefined &&
+          watchPaused === undefined &&
           commentPrompt === undefined
         ) {
           return {
             ok: false as const,
-            error: 'no fields to update (pass status/priority/assignee/agent/credential/credentialSource/model/effort/timeout/what/watch/expectedWatchVersion/commentPrompt)',
+            error: 'no fields to update (pass status/priority/assignee/agent/credential/credentialSource/model/effort/timeout/what/watch/expectedWatchVersion/watchPaused/commentPrompt)',
           }
         }
         const res = await updateIssueFields(dir.dir, id, {
@@ -388,6 +391,7 @@ export const issueUpdateFactory: WorkspaceToolFactory = {
           what,
           ...(watch !== undefined ? { watch } : {}),
           ...(expectedWatchVersion !== undefined ? { expectedWatchVersion } : {}),
+          ...(watchPaused !== undefined ? { watchPaused } : {}),
           commentPrompt,
         })
         if (res.ok) {

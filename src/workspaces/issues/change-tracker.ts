@@ -36,6 +36,8 @@ export interface IssueAuditSnapshot {
   commentPrompt?: string
   /** Canonical watch JSON (versioned rule set); absent ⇒ no monitoring. */
   watch?: string
+  /** Pause switch text (`true` only when paused); absent ⇒ live. */
+  watchPaused?: string
   whatHash: string
 }
 
@@ -67,6 +69,7 @@ export function issueAuditSnapshot(issue: IssueRecord): IssueAuditSnapshot {
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
     ...(issue.watch ? { watch: JSON.stringify(issue.watch) } : {}),
+    ...(issue.watchPaused ? { watchPaused: 'true' } : {}),
     whatHash: digest(issue.what),
   }
 }
@@ -103,6 +106,7 @@ export function issueMutation(
   valueField('timeout', left.timeout, right.timeout)
   valueField('commentPrompt', left.commentPrompt, right.commentPrompt)
   valueField('watch', left.watch, right.watch)
+  valueField('watchPaused', left.watchPaused, right.watchPaused)
   if (left.whatHash !== right.whatHash) fields.push({ field: 'what' })
   return fields.length > 0 ? { fields } : null
 }

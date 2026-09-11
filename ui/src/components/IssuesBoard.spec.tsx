@@ -267,3 +267,40 @@ describe('IssuesBoard', () => {
     })
   })
 })
+
+describe('IssuesBoard watch badge', () => {
+  it('shows a paused badge on a paused watched issue and none otherwise', () => {
+    mocks.useIssues.mockReturnValue({
+      data: snapshot([
+        issue({
+          id: 'nvda-watch',
+          title: 'NVDA breakout watch',
+          when: { kind: 'every', every: '15m' },
+          watch: {
+            version: 1,
+            source: { barId: 'tradingview|NVDA', interval: '1h' },
+            rule: { type: 'price_above', price: 190.5 },
+          },
+          watchPaused: true,
+          automationHealth: { state: 'healthy', message: 'Monitoring paused; the plan is kept. Resume to keep watching.' },
+        }),
+        issue({
+          id: 'live-watch',
+          title: 'Live watch',
+          when: { kind: 'every', every: '15m' },
+          watch: {
+            version: 1,
+            source: { barId: 'tradingview|NVDA', interval: '1h' },
+            rule: { type: 'price_above', price: 190.5 },
+          },
+          automationHealth: { state: 'healthy', message: 'Monitoring: condition not met yet; standing by for the next check.' },
+        }),
+      ]),
+      error: null,
+      loading: false,
+    })
+    render(<IssuesBoard />)
+    expect(screen.getByLabelText('Monitoring paused')).toBeTruthy()
+    expect(screen.getByText('paused')).toBeTruthy()
+  })
+})

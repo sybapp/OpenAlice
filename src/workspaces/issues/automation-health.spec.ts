@@ -161,6 +161,14 @@ describe('issueAutomationHealth', () => {
       state: 'healthy',
       message: expect.stringMatching(/dispatched/),
     })
+    // Paused: plan kept, no failure.
+    expect(issueAutomationHealth({
+      ...due,
+      watch: { armed: true, paused: true, lastStatus: 'hit', lastTriggeredAt: base.nowMs },
+    })).toMatchObject({
+      state: 'healthy',
+      message: expect.stringMatching(/paused/i),
+    })
     // Unwatched issues keep the legacy due reading.
     expect(issueAutomationHealth(due)).toMatchObject({ state: 'due' })
   })

@@ -357,8 +357,13 @@ export class ScheduleScanner {
       if (isConnectorDeskIssue(issue) && extraDesks.has(`${ws.id}:${issue.id}`)) continue
       seen.add(this.deps.markers.key(ws.id, issue.id))
       if (issue.watch) this.watchSeen?.add(this.watchKey(ws.id, issue.id))
+      // Paused monitoring still records its key (prune-safe) but never
+      // judges or dispatches. Plan and latch memory are preserved, so
+      // resume continues the same arming — no re-fire of consumed hits.
       if (isFireable(issue) && this.isDue(ws.id, issue.id, when, nowMs)) {
-        if (isWatchedIssue(issue) && this.deps.watchChecker && this.deps.watchStates) {
+        if (isWatchedIssue(issue) && issue.watchPaused) {
+          await this.noteWatchPaused(ws, issue, nowMs)
+        } else if (isWatchedIssue(issue) && this.deps.watchChecker && this.deps.watchStates) {
           await this.fireWatched(ws, issue, nowMs, watchVerdicts)
         } else {
           await this.fire(
@@ -435,6 +440,33 @@ export class ScheduleScanner {
         reason: err instanceof Error ? err.message : String(err),
       })
     }
+  }
+
+  /** Paused watch: advance the check clock so "last checked" stays truthful,
+   * keep every latch field untouched, never judge, never dispatch. */
+  private async noteWatchPaused(
+    ws: WorkspaceMeta,
+    issue: IssueRecord & { when: Schedule; watch: NonNullable<IssueRecord['watch']> },
+    nowMs: number,
+  ): Promise<void> {
+    const states = this.deps.watchStates
+    if (!states) return
+    const previous = states.get(ws.id, issue.id)
+    await states.set(ws.id, issue.id, {
+      watchVersion: issue.watch.version,
+      lastCheckedAt: nowMs,
+      ...(previous && previous.watchVersion === issue.watch.version
+        ? {
+          ...(previous.lastTriggeredAt !== undefined ? { lastTriggeredAt: previous.lastTriggeredAt } : {}),
+          ...(previous.lastStatus ? { lastStatus: previous.lastStatus } : {}),
+          ...(previous.lastReason ? { lastReason: previous.lastReason } : {}),
+          ...(previous.lastEvidence ? { lastEvidence: previous.lastEvidence } : {}),
+          ...(previous.consumedSignalIds ? { consumedSignalIds: previous.consumedSignalIds } : {}),
+          ...(previous.lastRunId ? { lastRunId: previous.lastRunId } : {}),
+        }
+        : {}),
+    })
+    this.deps.logger.info('schedule.watch_paused_skip', { wsId: ws.id, taskId: issue.id })
   }
 
   /** Due + watched fire: judge first, dispatch only on a fresh (unlatched)

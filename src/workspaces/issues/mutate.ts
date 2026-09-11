@@ -73,6 +73,8 @@ export interface IssueFieldPatch {
   commentPrompt?: string | null
   /** Monitoring rule set (validated against the v1 whitelist); null removes it. */
   watch?: unknown
+  /** Pause/resume watched dispatch (independent switch); null clears to live. */
+  watchPaused?: boolean | null
   /** Expected watch version for stale-plan protection; refuses when the live
    * version differs (old analysis must not overwrite a newer plan). */
   expectedWatchVersion?: number
@@ -289,6 +291,13 @@ export async function updateIssueFields(
       const parsed = parseIssueCommentPrompt(patch.commentPrompt)
       if (!parsed.ok) return { ok: false, reason: 'invalid', error: parsed.error }
       data.commentPrompt = parsed.template
+    }
+  }
+  if (patch.watchPaused !== undefined) {
+    if (patch.watchPaused === null || patch.watchPaused === false) {
+      delete data.watchPaused
+    } else {
+      data.watchPaused = true
     }
   }
   if (patch.watch !== undefined) {

@@ -143,6 +143,12 @@ export interface IssueListItem {
   effort?: ModelReasoningEffort
   /** Optional scheduled-run watchdog; omit for no limit. */
   timeout?: IssueTimeout
+  /** Armed monitoring plan; absent ⇒ no monitoring. */
+  watch?: IssueWatch
+  /** Independent monitoring pause switch; present-and-true ⇒ paused. */
+  watchPaused?: true
+  /** Live check/trigger memory; absent ⇒ never checked. */
+  watchState?: WatchRuntimeState
   /** Present iff the issue is scheduled (shares the core Schedule union). */
   when?: ScheduleWhen
   /** Scanner last-fired marker (epoch ms) — scheduled issues only. */
@@ -269,6 +275,12 @@ export interface IssueDetailIssue {
   effort?: ModelReasoningEffort
   /** Optional scheduled-run watchdog (frontmatter `timeout`), if set. */
   timeout?: IssueTimeout
+  /** Armed monitoring plan; absent ⇒ no monitoring. */
+  watch?: IssueWatch
+  /** Independent monitoring pause switch; present-and-true ⇒ paused. */
+  watchPaused?: true
+  /** Live check/trigger memory; absent ⇒ never checked. */
+  watchState?: WatchRuntimeState
   /** Optional comment-reply Input Prompt template. Omission keeps the default wrapper. */
   commentPrompt?: string
   /** Scanner last-fired marker (epoch ms) — scheduled issues only. */
@@ -321,6 +333,38 @@ export interface IssueDetail {
   activity?: IssueActivityRecord[]
 }
 
+/** Monitoring plan (v1 whitelist). Mirrors the server `IssueWatch` shape;
+ * the UI renders it read-only via `watch-summary.ts` and never edits it. */
+export interface IssueWatchRule
+  extends Record<string, unknown> {
+  type?: string
+  all?: IssueWatchRule[]
+  any?: IssueWatchRule[]
+}
+
+export interface IssueWatch {
+  version: number
+  source: { barId: string; interval: string; assetClass?: string }
+  quote?: { kind: string }
+  freshness?: { maxStaleTradingDays?: number; maxStaleMinutes?: number }
+  indicators?: Record<string, unknown>
+  rule: IssueWatchRule
+}
+
+export type WatchCheckStatus = 'hit' | 'miss' | 'unavailable'
+
+/** Live check/trigger memory for a watched issue; absent ⇒ never checked. */
+export interface WatchRuntimeState {
+  watchVersion: number
+  lastCheckedAt: number
+  lastTriggeredAt?: number
+  lastStatus?: WatchCheckStatus
+  lastReason?: string
+  lastEvidence?: Record<string, unknown>
+  consumedSignalIds?: string[]
+  lastRunId?: string
+}
+
 export interface IssuePatch {
   status?: IssueStatus
   priority?: IssuePriority
@@ -334,6 +378,10 @@ export interface IssuePatch {
   what?: string
   commentPrompt?: string | null
   catchUp?: boolean
+  watch?: unknown
+  expectedWatchVersion?: number
+  /** Pause/resume watched dispatch (independent switch); null/false clears to live. */
+  watchPaused?: boolean | null
 }
 
 export const issuesApi = {

@@ -27,6 +27,23 @@ export const demoScheduleSnapshot: ScheduleSnapshot = {
           when: { kind: 'every', every: '1h' },
           what: 'Re-check the thesis vs the latest quote; alert only if the invalidation level broke, otherwise exit.',
           agent: 'codex',
+          watch: {
+            version: 2,
+            source: { barId: 'tradingview|NVDA', interval: '1h' },
+            rule: {
+              all: [
+                { type: 'price_above', price: 190.5 },
+                { type: 'ema_alignment', direction: 'bullish' },
+              ],
+            },
+          },
+          watchState: {
+            watchVersion: 2,
+            lastCheckedAt: now - 5 * 60_1000,
+            lastTriggeredAt: now - HOUR / 2,
+            lastStatus: 'hit',
+            lastRunId: 'demo-run-thesis-2',
+          },
           enabled: true,
           lastFiredAtMs: now - HOUR / 2,
           nextDueAtMs: now + HOUR / 2,

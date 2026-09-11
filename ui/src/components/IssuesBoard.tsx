@@ -378,15 +378,27 @@ function BoardHealth({ issue }: { issue: IssueListItem }) {
   if (!health) return null
   const active = health.state === 'running' || health.state === 'due'
   const lastRun = issue.lastFiredAtMs ? formatRelativeTime(issue.lastFiredAtMs) : ''
+  const paused = issue.watch !== undefined && issue.watchPaused === true
 
   return (
-    <span
-      title={health.message}
-      className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${BOARD_HEALTH_CLASS[health.state]}`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full bg-current ${active ? 'animate-pulse' : ''}`} aria-hidden />
-      {t(`issues.health.${health.state}`)}
-      {lastRun && <span className="font-normal text-muted-foreground/80">· {lastRun}</span>}
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span
+        title={health.message}
+        className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${BOARD_HEALTH_CLASS[health.state]}`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full bg-current ${active ? 'animate-pulse' : ''}`} aria-hidden />
+        {t(`issues.health.${health.state}`)}
+        {lastRun && <span className="font-normal text-muted-foreground/80">· {lastRun}</span>}
+      </span>
+      {paused && (
+        <span
+          title={t('issues.watch.pausedHint')}
+          aria-label={t('issues.watch.paused')}
+          className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+        >
+          {t('issues.watch.pausedShort')}
+        </span>
+      )}
     </span>
   )
 }

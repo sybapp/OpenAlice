@@ -308,6 +308,14 @@ describe('issue_update', () => {
     expect((await readBack('budget-fields'))?.timeout).toBeUndefined()
   })
 
+  it('pauses and resumes a watch without touching the plan', async () => {
+    await run(issueCreateFactory.build(ctx()), { id: 'w', title: 'W' })
+    await run(issueUpdateFactory.build(ctx()), { id: 'w', watchPaused: true })
+    expect(await readBack('w')).toMatchObject({ watchPaused: true })
+    await run(issueUpdateFactory.build(ctx()), { id: 'w', watchPaused: null })
+    expect((await readBack('w'))?.watchPaused).toBeUndefined()
+  })
+
   it('records successful mutations but not rejected ones', async () => {
     const append = vi.fn(async (input) => ({ id: 'p-1', ...input }))
     const context = ctx({ provenanceStore: { append, list: vi.fn(), latest: vi.fn() } })

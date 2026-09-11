@@ -160,4 +160,20 @@ describe('watch frontmatter round-trip', () => {
     if (res.ok) return
     expect(res.reason).toBe('invalid')
   })
+
+  it('pauses and resumes without touching the plan or latch version', async () => {
+    await createIssue(dir, { id: 'w', title: 'W', watch: baseWatch })
+    const paused = await updateIssueFields(dir, 'w', { watchPaused: true })
+    expect(paused.ok).toBe(true)
+    if (!paused.ok) return
+    expect(paused.issue.watchPaused).toBe(true)
+    expect(paused.issue.watch).toMatchObject({ version: 1 })
+    const resumed = await updateIssueFields(dir, 'w', { watchPaused: null })
+    expect(resumed.ok).toBe(true)
+    if (!resumed.ok) return
+    expect(resumed.issue.watchPaused).toBeUndefined()
+    expect(resumed.issue.watch).toMatchObject({ version: 1 })
+    const resumedFalse = await updateIssueFields(dir, 'w', { watchPaused: false })
+    expect(resumedFalse.ok).toBe(true)
+  })
 })

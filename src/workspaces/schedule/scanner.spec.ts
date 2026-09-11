@@ -88,6 +88,7 @@ interface IssueSpec {
   assignee?: string
   connectorDesk?: string
   watch?: unknown
+  watchPaused?: boolean
   body?: string
 }
 
@@ -105,6 +106,7 @@ function issueMd(spec: IssueSpec): string {
   if (spec.timeout) lines.push(`timeout: ${spec.timeout}`)
   if (spec.connectorDesk) lines.push(`connectorDesk: ${spec.connectorDesk}`)
   if (spec.watch !== undefined) lines.push(`watch: ${JSON.stringify(spec.watch)}`)
+  if (spec.watchPaused) lines.push(`watchPaused: true`)
   // Scanner tests exercise dispatch policy, not declaration defaults. Keep the
   // historical fresh-every-fire fixture explicit now that omitted scheduled
   // ownership means recruit once (`@new-then-resume`).
@@ -1029,6 +1031,53 @@ describe('ScheduleScanner watch gating', () => {
     expect(prompt).toContain('sig-1')
     expect(prompt.endsWith('go trade it')).toBe(true)
     expect(watchStates.get('w1', 'watch-1')?.lastRunId).toBe('run-abc')
+  })
+
+  it('paused watch never judges or dispatches, but advances the check clock and preserves the latch', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH, watchPaused: true,
+    }])
+    const watchStates = new FakeWatchStates()
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW - 60_000,
+      lastTriggeredAt: NOW - 60_000,
+      lastStatus: 'hit',
+      consumedSignalIds: ['sig-old'],
+      lastRunId: 'run-old',
+    })
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-old'] }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
+    await scanner.scan()
+    expect(check).not.toHaveBeenCalled()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')).toMatchObject({
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW - 60_000,
+      consumedSignalIds: ['sig-old'],
+      lastRunId: 'run-old',
+    })
+  })
+
+  it('resume after pause continues the same arming without re-firing consumed hits', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW,
+      lastStatus: 'hit',
+      consumedSignalIds: ['sig-old'],
+      lastRunId: 'run-old',
+    })
+    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-old'] }))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
+    await scanner.scan()
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(dispatch).not.toHaveBeenCalled()
   })
 
   it('plain scheduled issues keep the legacy path when no checker is wired', async () => {

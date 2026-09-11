@@ -80,6 +80,7 @@ export const issuesHandlers = [
       timeout?: unknown
       what?: unknown
       commentPrompt?: unknown
+      watchPaused?: unknown
     } | null
     if (!body || typeof body !== 'object') {
       return HttpResponse.json({ error: 'invalid_body' }, { status: 400 })
@@ -97,6 +98,7 @@ export const issuesHandlers = [
       timeout?: IssueTimeout | null
       what?: string
       commentPrompt?: string | null
+      watchPaused?: boolean | null
     } = {}
     if (body.status !== undefined) {
       if (!ISSUE_STATUSES.includes(body.status as IssueStatus)) {
@@ -189,6 +191,15 @@ export const issuesHandlers = [
         patch.commentPrompt = body.commentPrompt
       }
     }
+    if (body.watchPaused !== undefined) {
+      if (body.watchPaused === null || body.watchPaused === false) {
+        patch.watchPaused = null
+      } else if (body.watchPaused === true) {
+        patch.watchPaused = true
+      } else {
+        return HttpResponse.json({ error: 'invalid_watch_paused' }, { status: 400 })
+      }
+    }
     if (
       patch.status === undefined &&
       patch.priority === undefined &&
@@ -201,6 +212,7 @@ export const issuesHandlers = [
       && patch.timeout === undefined
       && patch.what === undefined
       && patch.commentPrompt === undefined
+      && patch.watchPaused === undefined
     ) {
       return HttpResponse.json({ error: 'no_fields' }, { status: 400 })
     }

@@ -1,6 +1,6 @@
 # Plan: Issue-native conditional monitoring (`watch`)
 
-**Status:** active — increment 1 in progress (contract done, evaluator done, declaration wiring done; scanner gating open)
+**Status:** active — increment 4 in progress (1–3 landed; UI + pause switch open)
 **Owner guides:** [[docs/workspace-issues-and-scheduling.md]], [[docs/market-data-architecture.md]], [[docs/project-structure.md]]
 **Delivery:** feature-branch iteration on `feat/issue-watch-monitor` (based on `feat/technical-analysis-suite`, not `dev`). No PR until maintainer accepts.
 **Related code:** `src/workspaces/schedule/scanner.ts`, `src/workspaces/issues/declaration.ts`, `src/workspaces/issues/mutate.ts`, `src/workspaces/schedule/marker-store.ts`, `src/domain/analysis/technical-analysis/interval-analysis.ts`, `src/domain/analysis/technical-analysis/indicators.ts`, `src/domain/analysis/technical-analysis/price-action/`, `src/domain/market-data/bars/bar-service.ts`, `src/tool/trading.ts`, `services/uta/src/http/routes-trading.ts`
@@ -117,11 +117,15 @@ One `source + interval + params` fetch/compute is shared per scan tick. The chec
 - [x] Switch ON + OFF verified: monitor-staged proposals use the identical `tradingPush` gate, no origin bypass (`trading.spec.ts`: OFF refuses, ON executes).
 - [ ] Paper sweep green, account left flat — REQUIRES a funded paper/demo account + `OPENALICE_UTA_LIVE_PAPER=1`; no configured account in this environment (only keyless `binance-readonly`), so this stays a recorded residual risk until a live-paper run per [[docs/uta-live-testing.md]] (entry / exit / stop-move).
 
-### 4. Operation UI
+### 4. Operation UI (decisions AA: independent pause switch + read-only detail section)
 
-- Issue detail shows `watch` (human-readable), last check, evidence, analysis + approval state; pause/resume control.
-- User can answer "why waiting / why triggered / who is next".
-- [ ] Real browser route walk + demo handlers if `/api/*` changes.
+- [x] `watchPaused` frontmatter switch: plan + latch preserved, dispatch suppressed, resume continues the same arming (declaration/mutate/change-tracker/tool/route; scanner `noteWatchPaused`; health reads paused as healthy).
+- [x] `watchState` projected on board/detail/schedule markers (`IssueFiringMarkers.watchState` → `detailIssue`/`snapshotBoardIssue`/`ScheduleSnapshotTask`); UI `IssueWatch`/`WatchRuntimeState` types on `api/issues.ts` + `api/schedule.ts`.
+- [x] Detail `WatchSection` (read-only): human-readable conditions (`watch-summary.ts`, shared with the board badge), last check + status/reason, last trigger, next step (health message), analysis-run link (`lastRunId` → open run; waiting note when the run record is absent); pause/resume button via `PATCH {watchPaused}` + re-arm hint, no rule editor.
+- [x] Board `paused` badge on watched+paused rows only; no sort change.
+- [x] i18n `issues.watch.*` + `issues.detail.monitoring` + `mutationField.watch/watchPaused` in en/zh/ja/zh-Hant; Activity renders pause/condition changes via the generic mutation path.
+- [x] Demo: `thesis-watch` carries `watch` + `watchState` on issues + schedule fixtures; demo PATCH accepts `watchPaused` (400 otherwise).
+- [ ] Real browser route walk (`pnpm -F open-alice-ui dev:demo`: Issues → `thesis-watch` detail; pause/resume; board badge).
 
 ## Verification
 

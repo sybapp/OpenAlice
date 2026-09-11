@@ -51,6 +51,7 @@ import { useWikilinkHandler } from '../live/wikilink'
 import { useWorkspace } from '../tabs/store'
 import { ConfirmDialog } from './ConfirmDialog'
 import { AutomationHealthPill, CadencePill, CadenceSummary, PriorityIndicator } from './IssuesBoard'
+import { watchSummary } from './watch-summary'
 import { IssueSectionNavigation } from './IssueSectionNavigation'
 import { STATUS_META } from './issue-status-meta'
 import { MarkdownContent } from './MarkdownContent'
@@ -837,6 +838,117 @@ function SchedulePolicyEditor({
   )
 }
 
+function WatchSection({
+  issue,
+  runs,
+  saving,
+  onPatch,
+  onOpenRun,
+}: {
+  issue: IssueDetailIssue
+  runs: IssueRunRecord[]
+  saving: boolean
+  onPatch: (patch: IssuePatch) => Promise<boolean>
+  onOpenRun: (run: IssueRunRecord) => void
+}) {
+  const { t } = useTranslation()
+  const [toggling, setToggling] = useState(false)
+  const paused = issue.watchPaused === true
+  const state = issue.watchState
+  const analysisRun = state?.lastRunId ? runs.find((run) => run.taskId === state.lastRunId) : undefined
+
+  if (!issue.watch) return null
+
+  const statusKey = state?.lastStatus === 'hit'
+    ? 'issues.watch.statusHit'
+    : state?.lastStatus === 'unavailable'
+      ? 'issues.watch.statusUnavailable'
+      : state?.lastStatus === 'miss'
+        ? 'issues.watch.statusMiss'
+        : null
+
+  const toggle = async () => {
+    if (toggling) return
+    setToggling(true)
+    try {
+      await onPatch(paused ? { watchPaused: null } : { watchPaused: true })
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <InspectorSection title={t('issues.detail.monitoring')}>
+      <dl className="space-y-3">
+        <div>
+          <dt className="text-[11px] font-medium leading-[15px] text-muted-foreground">{t('issues.watch.conditions')}</dt>
+          <dd className="mt-1 text-sm leading-snug text-foreground">{watchSummary(issue.watch)}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs">
+          <dt className="text-muted-foreground">{t('issues.watch.lastCheck')}</dt>
+          <dd className="text-right tabular-nums text-foreground">
+            {state ? (
+              <>
+                <span title={new Date(state.lastCheckedAt).toLocaleString()}>{formatRelativeTime(state.lastCheckedAt)}</span>
+                {statusKey && <span className="ml-1.5 text-muted-foreground">· {t(statusKey)}</span>}
+              </>
+            ) : t('issues.watch.neverChecked')}
+          </dd>
+        </div>
+        {state?.lastReason && (
+          <dd className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">{state.lastReason}</dd>
+        )}
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs">
+          <dt className="text-muted-foreground">{t('issues.watch.lastTrigger')}</dt>
+          <dd className="text-right tabular-nums text-foreground">
+            {state?.lastTriggeredAt
+              ? formatRelativeTime(state.lastTriggeredAt)
+              : t('issues.watch.noTriggerYet')}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs">
+          <dt className="text-muted-foreground">{t('issues.watch.nextStep')}</dt>
+          <dd className="max-w-[60%] text-right leading-snug text-foreground">
+            {paused
+              ? t('issues.watch.paused')
+              : (issue.automationHealth?.message ?? t('issues.detail.healthMessage.not_started'))}
+          </dd>
+        </div>
+      </dl>
+      {analysisRun && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onOpenRun(analysisRun)}
+          className="mt-2 h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {t('issues.watch.openAnalysisRun', { runId: analysisRun.taskId })}
+        </Button>
+      )}
+      {!analysisRun && state?.lastRunId && (
+        <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+          {t('issues.watch.waitingForAnalysis', { runId: state.lastRunId })}
+        </p>
+      )}
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">{t('issues.watch.rearmHint')}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={saving || toggling}
+          aria-label={paused ? t('issues.watch.resume') : t('issues.watch.pause')}
+          onClick={() => void toggle()}
+          className="h-8 shrink-0 px-2.5 text-xs"
+        >
+          {toggling ? (paused ? t('issues.watch.resuming') : t('issues.watch.pausing')) : paused ? t('issues.watch.resume') : t('issues.watch.pause')}
+        </Button>
+      </div>
+    </InspectorSection>
+  )
+}
+
 function CommentBehaviorEditor({
   value,
   disabled,
@@ -987,6 +1099,8 @@ function PropertiesRail({
   onConfigureAgent,
   onRefreshSessions,
   sessionsLoaded,
+  runs,
+  onOpenRun,
 }: {
   wsId: string
   issue: IssueDetailIssue
@@ -1008,6 +1122,8 @@ function PropertiesRail({
   onConfigureAgent: (agent: AgentId) => void
   onRefreshSessions: () => Promise<void>
   sessionsLoaded: boolean
+  runs: IssueRunRecord[]
+  onOpenRun: (run: IssueRunRecord) => void
 }) {
   const { t } = useTranslation()
   const [confirmAction, setConfirmAction] = useState<'run' | 'retry' | null>(null)
@@ -1229,6 +1345,16 @@ function PropertiesRail({
               <SchedulePolicyEditor issue={issue} saving={saving} onPatch={onPatch} />
             </div>
           </InspectorSection>
+        )}
+
+        {issue.watch && (
+          <WatchSection
+            issue={issue}
+            runs={runs}
+            saving={saving}
+            onPatch={onPatch}
+            onOpenRun={onOpenRun}
+          />
         )}
 
         <InspectorSection title={t('issues.detail.agent')}>
@@ -1630,6 +1756,8 @@ function mutationFieldLabel(field: string, t: TFunction): string {
     case 'effort': return t('issues.detail.mutationField.effort')
     case 'timeout': return t('issues.detail.mutationField.timeout')
     case 'what': return t('issues.detail.mutationField.what')
+    case 'watch': return t('issues.detail.mutationField.watch')
+    case 'watchPaused': return t('issues.detail.mutationField.watchPaused')
     case 'commentPrompt': return t('issues.detail.mutationField.commentPrompt')
     default: return field
   }
@@ -2316,6 +2444,13 @@ export function IssueDetail({
           onConfigureAgent={(agent) => openAgentConfig(wsId, agent)}
           onRefreshSessions={refreshSessions}
           sessionsLoaded={sessionsLoaded}
+          runs={runs}
+          onOpenRun={(run) => {
+            setSidebar('chat')
+            void openHeadlessRun(run.wsId, run.resumeId, {
+              title: `${issue.title}, ${run.agent}`,
+            })
+          }}
         />
         <div className="min-w-0 lg:col-start-1 lg:row-start-2">
           <WhatEditor

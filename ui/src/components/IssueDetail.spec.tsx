@@ -982,3 +982,95 @@ describe('IssueDetail comment behavior', () => {
     expect(screen.getByRole('button', { name: commentBehavior }).textContent).toContain(customLabel)
   })
 })
+
+describe('IssueDetail watch section', () => {
+  const watchedIssue = (): void => {
+    scheduledIssue.issue.watch = {
+      version: 2,
+      source: { barId: 'tradingview|NVDA', interval: '1h' },
+      rule: {
+        all: [
+          { type: 'price_above', price: 190.5 },
+          { type: 'ema_alignment', direction: 'bullish' },
+        ],
+      },
+    }
+    scheduledIssue.issue.watchState = {
+      watchVersion: 2,
+      lastCheckedAt: Date.now() - 60_000,
+      lastTriggeredAt: Date.now() - 3_600_000,
+      lastStatus: 'hit',
+      lastRunId: 'run-watch-1',
+    }
+    scheduledIssue.runs = [{
+      taskId: 'run-watch-1',
+      resumeId: 'resume-watch-1',
+      resumable: false,
+      wsId: 'demo-ws-auto-quant',
+      issueId: 'morning-scan',
+      agent: 'codex',
+      prompt: 'watch',
+      status: 'done',
+      startedAt: Date.now() - 3_600_000,
+    }]
+  }
+
+  it('renders conditions, last check, trigger evidence, and next step for a watched issue', () => {
+    watchedIssue()
+    render(<IssueDetail wsId="demo-ws-auto-quant" id="morning-scan" />)
+    expect(screen.getByText('Monitoring')).toBeTruthy()
+    expect(screen.getByText('tradingview|NVDA · 1h: close > 190.5 + EMA bullish alignment')).toBeTruthy()
+    expect(screen.getByText('Last check')).toBeTruthy()
+    expect(screen.getByText(/Condition met/)).toBeTruthy()
+    expect(screen.getByText('Last trigger')).toBeTruthy()
+    expect(screen.getByText('Next step')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open analysis run run-watch-1' })).toBeTruthy()
+  })
+
+  it('pauses and resumes monitoring through the patch path', async () => {
+    watchedIssue()
+    mocks.updateIssue.mockImplementation(async (_wsId: string, _id: string, patch: Record<string, unknown>) => {
+      if (patch['watchPaused'] === true) scheduledIssue.issue.watchPaused = true
+      else delete scheduledIssue.issue.watchPaused
+      return scheduledIssue
+    })
+    render(<IssueDetail wsId="demo-ws-auto-quant" id="morning-scan" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Pause monitoring' }))
+    await waitFor(() => expect(mocks.updateIssue).toHaveBeenCalledWith(
+      'demo-ws-auto-quant', 'morning-scan', { watchPaused: true },
+    ))
+    fireEvent.click(screen.getByRole('button', { name: 'Resume monitoring' }))
+    await waitFor(() => expect(mocks.updateIssue).toHaveBeenCalledWith(
+      'demo-ws-auto-quant', 'morning-scan', { watchPaused: null },
+    ))
+  })
+
+  it('shows the waiting state when never checked and hides the section without a watch', () => {
+    delete scheduledIssue.issue.watch
+    delete scheduledIssue.issue.watchState
+    delete scheduledIssue.issue.watchPaused
+    render(<IssueDetail wsId="demo-ws-auto-quant" id="morning-scan" />)
+    expect(screen.queryByText('Monitoring')).toBeNull()
+  })
+
+  it('shows paused state and stale-data reason distinctly', () => {
+    scheduledIssue.issue.watch = {
+      version: 1,
+      source: { barId: 'tradingview|NVDA', interval: '1h' },
+      rule: { type: 'price_below', price: 50 },
+    }
+    scheduledIssue.issue.watchPaused = true
+    scheduledIssue.issue.watchState = {
+      watchVersion: 1,
+      lastCheckedAt: Date.now() - 120_000,
+      lastStatus: 'unavailable',
+      lastReason: 'bars are 3 trading day(s) behind the anchor (max 0)',
+    }
+    scheduledIssue.runs = []
+    render(<IssueDetail wsId="demo-ws-auto-quant" id="morning-scan" />)
+    expect(screen.getByText('Monitoring paused')).toBeTruthy()
+    expect(screen.getByText(/Data unavailable/)).toBeTruthy()
+    expect(screen.getByText('bars are 3 trading day(s) behind the anchor (max 0)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Resume monitoring' })).toBeTruthy()
+  })
+})

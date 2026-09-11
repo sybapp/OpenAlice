@@ -51,3 +51,41 @@ describe('demo Issue handlers', () => {
     })
   })
 })
+
+describe('demo Issue watch pause', () => {
+  it('round-trips a watchPaused patch through the detail contract', async () => {
+    const pause = await fetch(
+      `${baseUrl}/api/issues/demo-ws-auto-quant/thesis-watch`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ watchPaused: true }),
+      },
+    )
+    expect(pause.status).toBe(200)
+    expect((await pause.json()).issue).toMatchObject({ id: 'thesis-watch', watchPaused: true })
+
+    const resume = await fetch(
+      `${baseUrl}/api/issues/demo-ws-auto-quant/thesis-watch`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ watchPaused: null }),
+      },
+    )
+    expect(resume.status).toBe(200)
+    expect((await resume.json()).issue.watchPaused).toBeUndefined()
+  })
+
+  it('rejects a non-boolean watchPaused', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/issues/demo-ws-auto-quant/thesis-watch`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ watchPaused: 'yes' }),
+      },
+    )
+    expect(response.status).toBe(400)
+  })
+})

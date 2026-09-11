@@ -188,6 +188,7 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
       what?: string
       watch?: unknown
       expectedWatchVersion?: number
+      watchPaused?: boolean | null
       commentPrompt?: string | null
       catchUp?: boolean
     } = {}
@@ -351,6 +352,16 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
       }
       patch.expectedWatchVersion = raw
     }
+    if ('watchPaused' in fields) {
+      const raw = fields['watchPaused']
+      if (raw === null || raw === false) {
+        patch.watchPaused = null
+      } else if (raw === true) {
+        patch.watchPaused = true
+      } else {
+        return c.json({ error: 'invalid_watch_paused', message: 'watchPaused must be true, false, or null' }, 400)
+      }
+    }
     if ('catchUp' in fields) {
       if (typeof fields['catchUp'] !== 'boolean') {
         return c.json({ error: 'invalid_catch_up', message: 'catchUp must be true or false' }, 400)
@@ -360,7 +371,7 @@ export function createIssuesRoutes(svc: WorkspaceService, deps: IssueRoutesDeps 
     if (Object.keys(patch).length === 0) {
       return c.json({
         error: 'no_fields',
-        message: 'provide at least one of status, priority, assignee, agent, credential, model, effort, timeout, what, watch, expectedWatchVersion, commentPrompt, catchUp',
+        message: 'provide at least one of status, priority, assignee, agent, credential, model, effort, timeout, what, watch, expectedWatchVersion, watchPaused, commentPrompt, catchUp',
       }, 400)
     }
 

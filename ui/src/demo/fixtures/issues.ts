@@ -54,7 +54,7 @@ export const demoIssuesSnapshot: IssueSnapshot = {
           nextDueAtMs: now + 16 * HOUR,
           automationHealth: { state: 'running', message: 'A scheduled run is in progress.', latestTaskId: 'demo-run-morning-1' },
         },
-        // Scheduled (every) + urgent.
+        // Scheduled (every) + urgent + watched (monitoring plan armed).
         {
           id: 'thesis-watch',
           title: 'Thesis invalidation watch',
@@ -62,12 +62,29 @@ export const demoIssuesSnapshot: IssueSnapshot = {
           priority: 'urgent',
           assignee: '@resume-demo-thesis-owner',
           when: { kind: 'every', every: '1h' },
+          watch: {
+            version: 2,
+            source: { barId: 'tradingview|NVDA', interval: '1h' },
+            rule: {
+              all: [
+                { type: 'price_above', price: 190.5 },
+                { type: 'ema_alignment', direction: 'bullish' },
+              ],
+            },
+          },
+          watchState: {
+            watchVersion: 2,
+            lastCheckedAt: now - 5 * 60_1000,
+            lastTriggeredAt: now - HOUR / 2,
+            lastStatus: 'hit',
+            lastRunId: 'demo-run-thesis-2',
+          },
           lastFiredAtMs: now - HOUR / 2,
           nextDueAtMs: now + HOUR / 2,
           automationHealth: {
-            state: 'interrupted',
-            message: 'The 30m watchdog ran 14m late. The computer likely slept or OpenAlice was paused; this run was not automatically retried.',
-            latestTaskId: 'demo-run-thesis-1',
+            state: 'healthy',
+            message: 'Monitoring: condition hit and dispatched; waiting for the harness verdict.',
+            latestTaskId: 'demo-run-thesis-2',
           },
         },
         // Pure work item — no `when`, scanner ignores it, board still shows it.
@@ -604,6 +621,10 @@ export function demoIssueUpdate(
   if (patch.timeout !== undefined) {
     if (patch.timeout === null) delete boardIssue.timeout
     else boardIssue.timeout = patch.timeout
+  }
+  if (patch.watchPaused !== undefined) {
+    if (patch.watchPaused === null || patch.watchPaused === false) delete boardIssue.watchPaused
+    else boardIssue.watchPaused = true
   }
   return demoIssueDetail(wsId, id)
 }

@@ -28,6 +28,7 @@ import type {
   HeadlessTaskStatus,
 } from '../headless-task-registry.js'
 import type { IssuePriority, IssueRecord, IssueStatus, IssueTimeout, IssueWatch } from './declaration.js'
+import type { WatchRuntimeState } from '../schedule/watch-state.js'
 import type { IssueComment } from './comments.js'
 import type { IssueAutomationHealth } from './automation-health.js'
 import { issueRunFailure, type IssueRunFailure } from './run-failure.js'
@@ -53,6 +54,10 @@ export interface IssuesSnapshotIssue {
   timeout?: IssueTimeout
   /** Machine-checkable monitoring subset (v1 whitelist); absent ⇒ no monitoring. */
   watch?: IssueWatch
+  /** Independent monitoring pause switch; present-and-true ⇒ paused. */
+  watchPaused?: true
+  /** Live check/trigger memory for a watched issue; absent ⇒ never checked. */
+  watchState?: WatchRuntimeState
   /** Present iff the issue self-schedules. */
   when?: Schedule
   /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
@@ -231,6 +236,9 @@ export interface IssueFiringMarkers {
   lastFiredAtMs: number | null
   nextDueAtMs: number | null
   automationHealth: IssueAutomationHealth
+  /** Live check/trigger memory for a watched issue; absent ⇒ never checked.
+   * Carried on markers (not the file) so board/detail/schedule agree. */
+  watchState?: WatchRuntimeState
 }
 
 // ==================== Detail (Phase 2a) ====================
@@ -260,6 +268,10 @@ export interface IssueDetailIssue {
   timeout?: IssueTimeout
   /** Machine-checkable monitoring subset (v1 whitelist); absent ⇒ no monitoring. */
   watch?: IssueWatch
+  /** Independent monitoring pause switch; present-and-true ⇒ paused. */
+  watchPaused?: true
+  /** Live check/trigger memory for a watched issue; absent ⇒ never checked. */
+  watchState?: WatchRuntimeState
   /** Optional comment-reply Input Prompt template. Omission keeps the default wrapper. */
   commentPrompt?: string
   /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
@@ -475,12 +487,14 @@ export function detailIssue(
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
     ...(issue.watch ? { watch: issue.watch } : {}),
+    ...(issue.watchPaused ? { watchPaused: true as const } : {}),
     ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
     ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
     ...(markers ? {
       lastFiredAtMs: markers.lastFiredAtMs,
       nextDueAtMs: markers.nextDueAtMs,
       automationHealth: markers.automationHealth,
+      ...(markers.watchState ? { watchState: markers.watchState } : {}),
     } : {}),
   }
 }
@@ -505,12 +519,14 @@ export function snapshotBoardIssue(
     ...(issue.effort ? { effort: issue.effort } : {}),
     ...(issue.timeout ? { timeout: issue.timeout } : {}),
     ...(issue.watch ? { watch: issue.watch } : {}),
+    ...(issue.watchPaused ? { watchPaused: true as const } : {}),
     ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
     ...(issue.when ? { when: issue.when } : {}),
     ...(markers ? {
       lastFiredAtMs: markers.lastFiredAtMs,
       nextDueAtMs: markers.nextDueAtMs,
       automationHealth: markers.automationHealth,
+      ...(markers.watchState ? { watchState: markers.watchState } : {}),
     } : {}),
   }
 }

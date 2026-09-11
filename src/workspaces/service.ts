@@ -2495,6 +2495,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
                   ? {
                     watch: {
                       armed: true,
+                      ...(issue.watchPaused ? { paused: true as const } : {}),
                       ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
                       ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
                       ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),
@@ -2570,6 +2571,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     const markers: IssueFiringMarkers | null = scheduledSnapshot ? {
       lastFiredAtMs: scheduledSnapshot.lastFiredAtMs,
       nextDueAtMs: scheduledSnapshot.nextDueAtMs,
+      ...(watchState ? { watchState } : {}),
       automationHealth: issueAutomationHealth({
         status: issue.status,
         nowMs: Date.now(),
@@ -2578,6 +2580,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           ? {
             watch: {
               armed: true,
+              ...(issue.watchPaused ? { paused: true as const } : {}),
               ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
               ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
               ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),

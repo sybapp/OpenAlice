@@ -17,6 +17,10 @@ export interface ScheduleTask {
   model?: string
   effort?: ModelReasoningEffort
   assignee: string
+  /** Armed monitoring plan; absent ⇒ plain schedule. */
+  watch?: import('./issues.js').IssueWatch
+  /** Live check/trigger memory; absent ⇒ never checked. */
+  watchState?: import('./issues.js').WatchRuntimeState
   enabled: boolean
   /** When the scanner last fired this task (epoch ms), null if never. */
   lastFiredAtMs: number | null

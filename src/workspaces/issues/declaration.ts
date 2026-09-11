@@ -198,6 +198,10 @@ const issueFrontmatterObjectSchema = z.object({
    * stays in the markdown What; unknown leaf types or extra keys are invalid
    * (loud), never a silent miss. See `watch/spec.ts` for the v1 whitelist. */
   watch: issueWatchSchema.optional(),
+  /** Monitoring pause switch (independent on/off, decision AA-1). Paused keeps
+   * the plan intact and only suppresses watched dispatch; unpausing resumes
+   * with the same watch version and preserved latch memory. Omission is live. */
+  watchPaused: z.boolean().optional(),
   /** Dual-read of the 0.89.4-beta Telegram-only flag. Transformed to connectorDesk. */
   telegramConnector: z.literal(true).optional(),
   /** The former parallel ownership field is outside the baseline. Keeping a

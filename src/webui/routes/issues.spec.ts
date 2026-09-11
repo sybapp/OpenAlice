@@ -298,6 +298,20 @@ describe('PATCH /api/issues/:wsId/:id', () => {
     expect(cleared.body.issue.watch).toBeUndefined()
   })
 
+  it('pauses and resumes a watch without touching the plan', async () => {
+    await createIssue(wsDir, { id: 'i1', title: 'T' })
+    const { app } = build()
+    const paused = await req(app, 'PATCH', '/ws-1/i1', { watchPaused: true })
+    expect(paused.status).toBe(200)
+    expect(paused.body.issue.watchPaused).toBe(true)
+    const resumed = await req(app, 'PATCH', '/ws-1/i1', { watchPaused: null })
+    expect(resumed.status).toBe(200)
+    expect(resumed.body.issue.watchPaused).toBeUndefined()
+    const bad = await req(app, 'PATCH', '/ws-1/i1', { watchPaused: 'yes' })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error).toBe('invalid_watch_paused')
+  })
+
   it('400 invalid_watch_version for a non-integer expected version', async () => {
     await createIssue(wsDir, { id: 'i1', title: 'T' })
     const { app } = build()

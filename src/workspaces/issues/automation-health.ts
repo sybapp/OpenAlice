@@ -61,6 +61,7 @@ export interface IssueAutomationHealthInput {
    * reads as monitoring progress, never as scheduler failure. */
   watch?: {
     armed: boolean
+    paused?: boolean
     lastCheckedAt?: number
     lastTriggeredAt?: number
     lastStatus?: 'hit' | 'miss' | 'unavailable'
@@ -96,6 +97,9 @@ export function issueAutomationRuntime(input: {
  * the board does not cry failure while Alice is correctly standing by. A
  * fresh unlatched hit that has not dispatched yet still reads `due`. */
 function watchDueHealth(watch: NonNullable<IssueAutomationHealthInput['watch']>): IssueAutomationHealth {
+  if (watch.paused) {
+    return { state: 'healthy', message: 'Monitoring paused; the plan is kept. Resume to keep watching.' }
+  }
   if (watch.lastStatus === 'unavailable') {
     return {
       state: 'healthy',
