@@ -33,6 +33,8 @@
  *   effort: none | minimal | low | medium | high | xhigh | max
  *   timeout: 15m | 30m | 45m | 60m  (optional run budget; omit = no watchdog)
  *   commentPrompt: <optional template for the comment-reply Input Prompt>
+ *   watch: <optional deterministic pre-dispatch monitoring gate; v1 whitelist in watch/spec.ts>
+ *   watchPaused: <optional pause for watched dispatch; plan + latch kept, omission is live>
  *   connectorDesk: telegram   (optional; at most one live desk per connector)
  *   ---
  *   <markdown What — the exact work definition and scheduled prompt>

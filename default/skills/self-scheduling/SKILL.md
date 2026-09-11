@@ -4,7 +4,8 @@ description: >
   Define durable work and scheduled/headless execution with
   `.alice/issues/<id>.md`: structured ownership and optional `when` frontmatter
   plus one canonical markdown What. Use for creating or editing an Issue,
-  choosing its assignee, schedule, prompt, delivery behavior, or health state.
+  choosing its assignee, schedule, prompt, delivery behavior, health state,
+  or machine-checkable `watch` monitoring (deterministic pre-dispatch gate).
   Use the `alice` skill instead when the goal is to ask another
   Session for an answer.
 ---
@@ -15,7 +16,9 @@ OpenAlice treats an issue as a collaboration object, not just a timer. It is the
 durable place to put trading follow-up, monitoring work, open questions,
 handoffs, and scheduled checks. Status, priority, and assignee tell humans and
 agents what deserves attention; `when` is the extra field that lets an issue
-summon a headless agent run.
+summon a headless agent run. `watch` is the condition field for monitoring
+Issues: the scanner judges it deterministically before any dispatch, so point
+conditions belong there — not buried in What for every run to re-judge.
 
 This workspace owns its work as **one markdown file per issue** in `.alice/issues/`
 at its own root. Each file is YAML frontmatter (the structured fields) plus a
@@ -43,7 +46,7 @@ You have two equivalent paths, and both write the **same**
    with no separate path.
 2. **Editing the file directly** with your normal file tools. Reach for this when
    you are writing rich markdown **What** or scheduling frontmatter
-  (`when` / `assignee` / `agent` / `credential` / `credentialSource` / `model` / `effort` / `timeout` / `commentPrompt`) — the CLI verbs cover the board fields, What, timeout, comment prompt, and
+  (`when` / `assignee` / `agent` / `credential` / `credentialSource` / `model` / `effort` / `timeout` / `watch` / `watchPaused` / `commentPrompt`) — the CLI verbs cover the board fields, What, timeout, watch, watchPaused, comment prompt, and
    comments, but the document and schedule shape read most clearly as text. The
    file is always the single source of truth either way.
 
@@ -64,11 +67,13 @@ alice issue create --title "Split the data fetcher" \
   --priority medium \
   --what "src/fetch.ts mixes the HTTP call with the normalization step."
 
-# update — patch board fields, canonical What, or the optional run timeout;
+# update — patch board fields, canonical What, run timeout, or the watch plan;
 # scheduling cadence (`when`) is left untouched. Setting status done|canceled is how
 # you silence a self-scheduled issue (there is no separate enabled flag).
+# For a monitoring Issue prefer --watchPaused to pause dispatch (plan kept).
 alice issue update --id morning-scan --status done
 alice issue update --id morning-scan --timeout 30m
+alice issue update --id nvda-watch --watch '{"version":2,"source":{"barId":"tradingview|NVDA","interval":"1h"},"rule":{"type":"price_above","price":195}}' --expected-watch-version 1
 
 # comment — append markdown to the structured `<id>.comments.json` sidecar. An
 # attributable Session signs with @resumeId. If somebody else comments on an
@@ -91,6 +96,20 @@ alice issue create --title "Pre-market brief" --priority high \
   --credential openai-primary \
   --model gpt-5.6 \
   --effort high
+```
+
+A monitoring Issue adds the deterministic gate (`--watch` takes JSON — run
+`alice issue <verb> --help` for the live shape). Keep the cheap
+trigger in `watch`, the rich read in `what`:
+
+```bash
+# Discover the barId first — never guess it
+alice analysis search-bars --query NVDA
+
+alice issue create --title "NVDA breakout watch" \
+  --when '{"kind":"every","every":"15m"}' \
+  --watch '{"version":1,"source":{"barId":"tradingview|NVDA","interval":"1h"},"rule":{"all":[{"type":"price_above","price":190.5},{"type":"ema_alignment","direction":"bullish"}]}}' \
+  --what "NVDA breakout watch. The scanner already judged the close/EMA gate — do NOT re-judge it. On dispatch: run the multi-timeframe + Fib/VWAP + CVD/divergence read, then re-arm, propose a trade, or close."
 ```
 
 The verb set is `list` / `show` / `create` / `update` / `comment` (no `delete` —
@@ -223,6 +242,21 @@ plain tracked item; add a `when` and it starts firing.
   first), **propose a trade** (stage/commit; approval follows the same
   switch as any suggestion), or **close** (`--status done|canceled`).
   Never invent a fourth exit and never guess hidden state from prose.
+  Out of v1 on purpose: multi-source rules, cross-interval rules, volume /
+  order-flow thresholds (CVD, absorption, exhaustion, footprint), and
+  open/high/low intraday touch. Those stay in `what` as post-hit analysis —
+  never as a reason to skip `watch`. Hybrid pattern: the cheap
+  machine-checkable trigger in `watch` (e.g. `price_above` + `ema_alignment`),
+  the multi-timeframe + Fib/VWAP + CVD/divergence read in `what`. A fitting
+  `watch` fires deterministically with zero LLM; a What-only condition burns a
+  full run every tick and can drift. Discover the `barId` first, never guess
+  it: `alice analysis search-bars --query NVDA` (see the `alice-analysis`
+  skill). Shape authority is
+  `src/domain/analysis/technical-analysis/watch/spec.ts`.
+- **`watchPaused`** *(optional)* — pause watched dispatch with the plan and
+  latch kept; resume continues the same arming (`issue update --watchPaused
+  true`; null/false resumes). Prefer this over closing the Issue when the
+  thesis is intact but firing should stop.
 
 `agent`, `credential`/`credentialSource`, `model`, and `effort` are one Session-creation tuple.
 They are valid only for `@new-then-resume` / `@new-each-run`; an exact `@resumeId` Session owns
@@ -294,8 +328,13 @@ reply is delivered. Put an Inbox push in What when a separate notification or
 report is part of completion, and avoid duplicating a reply that already serves
 that purpose. Inbox is a human delivery record, not storage for every run result.
 
-Put **conditions inside `what`**, not in the schedule — unless the Issue is a
-monitoring Issue with a `watch` field. For "ping me only if X", write:
+Two kinds of conditions — put each in the right place. A **machine-checkable
+pre-dispatch trigger** belongs in the `watch` frontmatter field (deterministic,
+zero-LLM, judged before every dispatch; see the `watch` entry above). **Everything
+else** — multi-timeframe reads, order-flow/volume, news, multi-source logic —
+belongs in `what` as post-hit analysis. If the trigger fits the v1 whitelist,
+always use `watch`: a What-only condition burns a full headless run every tick
+and can drift. For "ping me only if X" with no machine gate, write:
 "check X; if it holds, push an alert; otherwise do nothing and exit."
 For a `watch` Issue, the scanner already judged the machine condition — your
 turn opens with its `<watch-verdict>`, so analyze (don't re-judge), then
@@ -324,6 +363,8 @@ take exactly one of the three exits above.
   reported on the board, in isolation, without breaking the other issues.
 - Remove an issue by deleting its `.alice/issues/<id>.md` file (and commit). To
   pause a schedule without deleting it, set `status: done` or `status: canceled`.
+  To pause only watched dispatch with the plan kept, use
+  `issue update --id <id> --watchPaused true`.
 - **Legacy:** the old single `.alice/issue.json` is retired. If you find one,
   split each issue into its own `.alice/issues/<id>.md` file with the
   frontmatter above.

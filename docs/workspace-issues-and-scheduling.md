@@ -109,6 +109,8 @@ The filename stem is the stable issue id. Frontmatter:
   `{comment}`. Chat-style Issues (including the Telegram phone desk) set
   `{comment}` alone so the inbound text is the prompt. Empty/null write drops
   the field and restores the default.
+- `watch` — optional deterministic pre-dispatch monitoring gate for a monitoring Issue. Shape: `{ version, source: { barId, interval, assetClass? }, quote?, freshness?, indicators?, rule }` with one leaf or one `{ all: [...] }` / `{ any: [...] }` group (1–8 leaves, no nesting). v1 whitelist: closed-bar `price_above` / `price_below` / `price_in_range` / `price_out_of_range` / `price_cross_above` / `price_cross_below`, `ema_alignment` / `price_vs_ema` / `price_vs_vwap`, `structure_break` (BOS/CHoCH), `zone_touch` (FVG/OB). Multi-source, cross-interval, volume/order-flow, and intraday-touch conditions are out of v1 — they stay in What as post-hit analysis. A hit dispatches once per arming; the run opens with a `<watch-verdict>` block and exits by re-arming (`expectedWatchVersion` guards stale plans), proposing a trade, or closing. Unknown types are invalid files, never silent misses.
+- `watchPaused` — optional pause for watched dispatch only. The plan and latch are kept; resume continues the same arming. Omission is live.
 - `connectorDesk: <adapter id>` — present only on that connector's phone-desk
   Issue (one live desk per connector, not one desk for the whole Project).
   Omission is a normal Issue. Settings → Connectors on that adapter card is
@@ -251,7 +253,7 @@ alice issue comment --id <id> --text "..."
 The CLI and MCP tools use the same implementation and write the same files.
 Direct file editing is also valid and is the clearest way to author rich What
 markdown plus `when` / `assignee` / `agent` / `credential` / `model` / `effort` /
-`timeout` frontmatter.
+`timeout` / `watch` / `watchPaused` frontmatter.
 
 `issue comment` is preferable to a generic `issue ask --owner` for normal
 collaboration because it leaves the question and answer in the Issue Activity
@@ -292,7 +294,7 @@ occupancy until the turn finishes; returning to interactive mode is explicit.
   -> Inbox item linked to the run and issue
 ```
 
-The scanner interprets timing only. It hands the visible markdown What to the
+The scanner interprets timing plus the deterministic `watch` gate. For a watched Issue it judges `watch` before any dispatch and hands the `<watch-verdict>` block to the run alongside the visible markdown What — machine-checkable triggers belong in `watch`, richer analysis stays in What. For an unwatched Issue it hands the visible markdown What to the
 agent unchanged. Conditions belong in that prompt: for “notify only if X,” the
 run checks X and exits silently when false.
 
@@ -502,6 +504,7 @@ provenance store.
 | `src/workspaces/issues/declaration.ts` | File schema, canonical What parsing, validation |
 | `src/workspaces/issues/comments.ts` | Structured per-Issue markdown comment sidecars |
 | `src/workspaces/issues/mutate.ts` | Safe read-modify-write operations |
+| `src/domain/analysis/technical-analysis/watch/` | Deterministic `watch` schema, judgement, freshness, and check seams |
 | `src/workspaces/issues/board.ts` | Global board/detail projections |
 | `src/workspaces/issues/auto-complete.ts` | Successful one-shot → `done` transition |
 | `src/workspaces/issues/automation-health.ts` | Live schedule/run/owner health projection |
