@@ -1085,6 +1085,8 @@ describe('ScheduleScanner watch gating', () => {
     const { scanner, dispatch } = scannerFor([ws])
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe('comment owner handoff', () => {
   it('uses the Issue runtime, claims once, and preserves the schedule marker', async () => {
