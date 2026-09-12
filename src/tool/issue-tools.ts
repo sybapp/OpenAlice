@@ -547,9 +547,10 @@ export const issueCreateFactory: WorkspaceToolFactory = {
         effort: z.enum(MODEL_REASONING_EFFORTS).optional().describe('Reasoning effort for one scheduled run.'),
         timeout: z.enum(ISSUE_TIMEOUTS).optional().describe('Optional scheduled-run watchdog (15m/30m/45m/60m). Omit for no limit.'),
         watch: z.unknown().optional().describe('Deterministic pre-dispatch monitoring gate — JSON watch plan (v1 whitelist in watch/spec.ts: one source + one interval, closed-bar price/EMA/VWAP/structure). Omit for no monitoring; richer logic stays in `what`.'),
+        watchPaused: z.boolean().optional().describe('Start paused: keeps the plan without firing until resumed via issue_update. Only meaningful alongside `watch`.'),
         commentPrompt: z.string().min(1).optional().describe('Comment-reply Input Prompt template. Must include {comment}. Omit for the default wrapper.'),
       }),
-      execute: async ({ title, id, status, priority, assignee, when, what, agent, credential, credentialSource, model, effort, timeout, watch, commentPrompt }) => {
+      execute: async ({ title, id, status, priority, assignee, when, what, agent, credential, credentialSource, model, effort, timeout, watch, watchPaused, commentPrompt }) => {
         const dir = selfDir(ctx)
         if (!dir.ok) return { ok: false as const, error: dir.error }
         // Structured creation is attributable: "who creates it owns it". A
@@ -573,6 +574,7 @@ export const issueCreateFactory: WorkspaceToolFactory = {
           effort,
           timeout,
           ...(watch !== undefined ? { watch } : {}),
+          ...(watchPaused !== undefined ? { watchPaused } : {}),
           commentPrompt,
         })
         if (res.ok) {

@@ -53,6 +53,9 @@ export class WatchRuntimeStore {
     private readonly logger: Logger,
   ) {}
 
+  /** Serialize snapshots: scans update multiple workspaces concurrently. */
+  private flushChain: Promise<void> = Promise.resolve()
+
   static async load(path: string, logger: Logger): Promise<WatchRuntimeStore> {
     const store = new WatchRuntimeStore(path, logger)
     try {
@@ -80,7 +83,7 @@ export class WatchRuntimeStore {
 
   async set(wsId: string, issueId: string, state: WatchRuntimeState): Promise<void> {
     this.records.set(composite(wsId, issueId), state)
-    await this.flush()
+    await this.enqueueFlush()
   }
 
   /** Drop states whose key wasn't seen this scan — bounds growth. */
@@ -92,7 +95,12 @@ export class WatchRuntimeStore {
         changed = true
       }
     }
-    if (changed) await this.flush()
+    if (changed) await this.enqueueFlush()
+  }
+
+  private async enqueueFlush(): Promise<void> {
+    this.flushChain = this.flushChain.then(() => this.flush())
+    await this.flushChain
   }
 
   private async flush(): Promise<void> {

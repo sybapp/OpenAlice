@@ -980,6 +980,32 @@ describe('ScheduleScanner watch gating', () => {
     expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW + 61_000)
   })
 
+  it('a latched hit clears a stale dispatch-skip reason', async () => {
+    // A capacity skip leaves `dispatch skipped …; hit unconsumed` in
+    // lastReason; the next tick's fresh latched-hit judgement must not keep
+    // showing it next to "Condition met".
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const skip = vi.fn(async () => { throw new Error('headless capacity reached') })
+    const first = scannerFor([ws], { dispatch: skip, watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW })
+    await first.scanner.scan()
+    expect(watchStates.get('w1', 'watch-1')?.lastReason).toMatch(/unconsumed/)
+    // Same arming, signal-less verdict: first dispatch latches on the
+    // version; the latched branch must drop the stale reason.
+    const ok = vi.fn(async () => ({ taskId: 'run-1', resumeId: 'resume-1' }))
+    const second = scannerFor([ws], { dispatch: ok, watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    await second.scanner.scan()
+    expect(ok).toHaveBeenCalledTimes(1)
+    const third = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 122_000 })
+    await third.scanner.scan()
+    expect(third.dispatch).not.toHaveBeenCalled()
+    const state = watchStates.get('w1', 'watch-1')!
+    expect(state.lastStatus).toBe('hit')
+    expect(state.lastReason).toBeUndefined()
+  })
+
   it('check failure isolates: visible reason, no dispatch, scan continues', async () => {
     const ws = await makeWs('w1', [{
       id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,

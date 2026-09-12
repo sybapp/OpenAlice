@@ -111,8 +111,11 @@ export interface HeadlessTaskRecord {
   /** Explicit one-run selections requested by the dispatching Issue. */
   readonly model?: string
   readonly effort?: ModelReasoningEffort
-  /** The task prompt (the run's instruction) — shown collapsible in the panel. */
-  readonly prompt: string
+  /** The task prompt (the run's instruction) — shown collapsible in the panel.
+   * Mutable only through {@link HeadlessTaskRegistry.setPrompt}: the scanner
+   * prepends the watch-verdict block to a just-created run before its child
+   * spawns. Everywhere else treats the record as immutable. */
+  prompt: string
   status: HeadlessTaskStatus
   readonly startedAt: number
   finishedAt?: number
@@ -285,7 +288,7 @@ export class HeadlessTaskRegistry {
   async setPrompt(taskId: string, prompt: string): Promise<void> {
     const rec = this.tasks.find((t) => t.taskId === taskId)
     if (!rec) return
-    (rec as { prompt: string }).prompt = prompt
+    rec.prompt = prompt
     await this.flush()
   }
 

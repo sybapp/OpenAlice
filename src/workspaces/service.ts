@@ -80,6 +80,7 @@ import {
 import { ScheduleMarkerStore } from './schedule/marker-store.js';
 import { checkWatch } from '../domain/analysis/technical-analysis/watch/check.js';
 import { WatchRuntimeStore } from './schedule/watch-state.js';
+import type { WatchRuntimeState } from './schedule/watch-state.js';
 import {
   ScheduleScanner,
   ScheduledIssueRunNowError,
@@ -138,6 +139,7 @@ import {
   issueAutomationOwnerState,
   issueAutomationRuntime,
 } from './issues/automation-health.js';
+
 import {
   issueAssigneeClaimsFirstSession,
   issueAssigneeResumeId,
@@ -695,6 +697,22 @@ export function resumeFromRecord(
   }
   if (adapter.capabilities.resumeLast) return 'last';
   return undefined;
+}
+
+function issueWatchHealth(
+  watch: IssueRecord['watch'],
+  paused: boolean | undefined,
+  state: WatchRuntimeState | undefined,
+) {
+  if (!watch) return undefined
+  return {
+    armed: true as const,
+    ...(paused ? { paused: true as const } : {}),
+    ...(state?.lastCheckedAt !== undefined ? { lastCheckedAt: state.lastCheckedAt } : {}),
+    ...(state?.lastTriggeredAt !== undefined ? { lastTriggeredAt: state.lastTriggeredAt } : {}),
+    ...(state?.lastStatus ? { lastStatus: state.lastStatus } : {}),
+    ...(state?.lastReason ? { lastReason: state.lastReason } : {}),
+  }
 }
 
 export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions): Promise<WorkspaceService> {
@@ -1851,6 +1869,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     conversation?: AgentConversationDispatch,
     /** Birth stamp when this dispatch allocates a new product Session. */
     createdBy?: SessionCreatedBy,
+    /** Build the final prompt after the task id is minted, before spawn. */
+    promptForRun?: (runId: string) => string,
   ): Promise<{ taskId: string; resumeId: string }> => {
     if (catalog.get(ws.id)?.lifecycle !== 'active') {
       throw new Error(`workspace is not active: ${ws.id}`);
@@ -1945,6 +1965,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       });
     }
     let rec: HeadlessTaskRecord;
+    let launchPrompt = prompt;
     let productSessionResumeId: string | undefined;
     let occupancySessionId: string | undefined;
     try {
@@ -1991,6 +2012,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         ...(inquiry ? { inquiry } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
+      launchPrompt = promptForRun ? promptForRun(rec.taskId) : prompt;
+      if (launchPrompt !== prompt) await headlessTasks.setPrompt(rec.taskId, launchPrompt);
       await resumeRegistry.ensure({
         resumeId: identity.resumeId,
         wsId: ws.id,
@@ -2100,7 +2123,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // failures and terminal in-band runtime errors fail the task; retryable
     // errors followed by a later assistant reply remain visible in Activity
     // without turning a recovered run into a false failure.
-    void runHeadlessTaskMethod(ws, adapter, prompt, timeoutMs, {
+    void runHeadlessTaskMethod(ws, adapter, launchPrompt, timeoutMs, {
       taskId: rec.taskId,
       resumeId: rec.resumeId,
       ...(nativeResume ? { resume: nativeResume } : {}),
@@ -2492,17 +2515,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
                 status: issue.status,
                 nowMs,
                 nextDueAtMs: fired.nextDueAtMs,
-                ...(issue.watch
-                  ? {
-                    watch: {
-                      armed: true,
-                      ...(issue.watchPaused ? { paused: true as const } : {}),
-                      ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
-                      ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
-                      ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),
-                      ...(watchState?.lastReason ? { lastReason: watchState.lastReason } : {}),
-                    },
-                  }
+                ...(issueWatchHealth(issue.watch, issue.watchPaused, watchState)
+                  ? { watch: issueWatchHealth(issue.watch, issue.watchPaused, watchState) }
                   : {}),
                 ownerState: issueAutomationOwnerState(issue.assignee, assigneeSession),
                 runtime: issueRuntimeAvailability(issue, defaultIssueAgent, availability),
@@ -2568,7 +2582,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       const identity = resumeRegistry.get(task.resumeId);
       return issueRunRecord(task, identity?.lifecycle !== 'retired' && Boolean(identity?.agentSessionId));
     });
-    const watchState = issue.watch ? (watchStates.get(ws.id, issue.id) ?? undefined) : undefined;
+    const watchState = scheduledSnapshot?.watchState;
     const markers: IssueFiringMarkers | null = scheduledSnapshot ? {
       lastFiredAtMs: scheduledSnapshot.lastFiredAtMs,
       nextDueAtMs: scheduledSnapshot.nextDueAtMs,
@@ -2577,17 +2591,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         status: issue.status,
         nowMs: Date.now(),
         nextDueAtMs: scheduledSnapshot.nextDueAtMs,
-        ...(issue.watch
-          ? {
-            watch: {
-              armed: true,
-              ...(issue.watchPaused ? { paused: true as const } : {}),
-              ...(watchState?.lastCheckedAt !== undefined ? { lastCheckedAt: watchState.lastCheckedAt } : {}),
-              ...(watchState?.lastTriggeredAt !== undefined ? { lastTriggeredAt: watchState.lastTriggeredAt } : {}),
-              ...(watchState?.lastStatus ? { lastStatus: watchState.lastStatus } : {}),
-              ...(watchState?.lastReason ? { lastReason: watchState.lastReason } : {}),
-            },
-          }
+        ...(issueWatchHealth(issue.watch, issue.watchPaused, watchState)
+          ? { watch: issueWatchHealth(issue.watch, issue.watchPaused, watchState) }
           : {}),
         ownerState: issueAutomationOwnerState(issue.assignee, assigneeSession),
         runtime: runtimeAvailability,

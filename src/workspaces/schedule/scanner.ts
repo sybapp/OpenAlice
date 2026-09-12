@@ -129,6 +129,8 @@ export interface ScheduleScannerDeps {
     conversation?: undefined,
     /** Birth stamp when this fire allocates a new product Session. */
     createdBy?: SessionCreatedBy,
+    /** Build the final prompt after the task id is minted, before spawn. */
+    promptForRun?: (runId: string) => string,
   ) => Promise<{ taskId: string; resumeId: string }>
   /** Persist @new-then-resume -> exact @resumeId after the first fresh dispatch. */
   claimFreshSession?: (input: {
@@ -542,6 +544,10 @@ export class ScheduleScanner {
         watchVersion: issue.watch.version,
         lastCheckedAt: nowMs,
         lastStatus: 'hit',
+        // A latched hit is a fresh judgement, not a stale failure: drop any
+        // reason left by an earlier dispatch-skip so the board does not show
+        // e.g. "dispatch skipped" next to "Condition met".
+        lastReason: undefined,
         lastEvidence: verdictEvidence(verdict),
       })
       this.deps.logger.info('schedule.watch_latched', { wsId: ws.id, taskId: issueId })
@@ -568,16 +574,29 @@ export class ScheduleScanner {
         issueAssigneeClaimsFirstSession(issue.assignee),
         issueTimeoutMs(issue.timeout),
         issue.connectorDesk,
+        false,
+        undefined,
+        undefined,
+        (runId) => issueWatchVerdictBlock({
+          watchVersion: issue.watch.version,
+          status: 'hit',
+          leaves: verdict.leaves,
+          evidence: { ...verdict.evidence },
+          signalIds: verdict.signalIds,
+          runId,
+        }) + `\n\n${issueFirePrompt(issue)}`,
       )
-      const verdictBlock = issueWatchVerdictBlock({
+      // Keep the durable record aligned for runtimes that expose a prompt
+      // rewrite hook; the dispatch callback already supplied this text before
+      // the child was spawned.
+      await this.deps.rewritePrompt?.(runId, `${issueWatchVerdictBlock({
         watchVersion: issue.watch.version,
         status: 'hit',
         leaves: verdict.leaves,
         evidence: { ...verdict.evidence },
         signalIds: verdict.signalIds,
         runId,
-      })
-      await this.deps.rewritePrompt?.(runId, `${verdictBlock}\n\n${issueFirePrompt(issue)}`)
+      })}\n\n${issueFirePrompt(issue)}`)
       await this.deps.markers.set(ws.id, issueId, nowMs)
       await states.set(ws.id, issueId, {
         watchVersion: issue.watch.version,
@@ -666,6 +685,7 @@ export class ScheduleScanner {
     manual = false,
     commentId?: string,
     retryOfTaskId?: string,
+    promptForRun?: (runId: string) => string,
   ): Promise<{ taskId: string; resumeId: string }> {
     const dispatchKey = `${issueWorkspace.id}:${issueId}`
     if (this.dispatchingIssues.has(dispatchKey)) {
@@ -742,12 +762,15 @@ export class ScheduleScanner {
         question: what,
         resolution: { mode: resumeId ? 'exact' : 'reconstructed' },
       } : undefined
+      const callDispatch = (...args: unknown[]) =>
+        this.deps.dispatch(...args as Parameters<ScheduleScannerDeps['dispatch']>)
       const result = inquiry
-        ? await this.deps.dispatch(executionWorkspace, adapter, what, timeoutMs, undefined,
-            resumeId, inquiry, selection, undefined, createdBy)
+        ? await callDispatch(executionWorkspace, adapter, what, timeoutMs, undefined,
+            resumeId, inquiry, selection, undefined, createdBy,
+            ...(promptForRun ? [promptForRun] : []))
         : resumeId
         ? selection
-          ? await this.deps.dispatch(
+          ? await callDispatch(
               executionWorkspace,
               adapter,
               what,
@@ -756,17 +779,19 @@ export class ScheduleScanner {
               resumeId,
               undefined,
               selection,
+              ...(promptForRun ? [undefined, undefined, promptForRun] : []),
             )
-          : await this.deps.dispatch(
+          : await callDispatch(
               executionWorkspace,
               adapter,
               what,
               timeoutMs,
               trigger,
               resumeId,
+              ...(promptForRun ? [undefined, undefined, undefined, undefined, promptForRun] : []),
             )
         : selection
-          ? await this.deps.dispatch(
+          ? await callDispatch(
               executionWorkspace,
               adapter,
               what,
@@ -777,8 +802,9 @@ export class ScheduleScanner {
               selection,
               undefined,
               createdBy,
+              ...(promptForRun ? [promptForRun] : []),
             )
-          : await this.deps.dispatch(
+          : await callDispatch(
               executionWorkspace,
               adapter,
               what,
@@ -789,6 +815,7 @@ export class ScheduleScanner {
               undefined,
               undefined,
               createdBy,
+              ...(promptForRun ? [promptForRun] : []),
             )
       if (claimFreshSession) {
         if (!this.deps.claimFreshSession) {

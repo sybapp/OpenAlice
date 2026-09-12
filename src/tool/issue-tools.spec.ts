@@ -316,6 +316,22 @@ describe('issue_update', () => {
     expect((await readBack('w'))?.watchPaused).toBeUndefined()
   })
 
+  it('creates a watch already paused in one call', async () => {
+    const res = await run(issueCreateFactory.build(ctx()), {
+      id: 'armed-quiet',
+      title: 'Armed quiet',
+      when: { kind: 'every', every: '15m' },
+      what: 'watch NVDA',
+      watch: { version: 1, source: { barId: 'tradingview|NVDA', interval: '1h' }, rule: { type: 'price_above', price: 190.5 } },
+      watchPaused: true,
+    })
+    expect(res.ok).toBe(true)
+    expect(await readBack('armed-quiet')).toMatchObject({
+      watchPaused: true,
+      watch: { version: 1 },
+    })
+  })
+
   it('records successful mutations but not rejected ones', async () => {
     const append = vi.fn(async (input) => ({ id: 'p-1', ...input }))
     const context = ctx({ provenanceStore: { append, list: vi.fn(), latest: vi.fn() } })

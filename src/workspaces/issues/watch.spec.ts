@@ -129,6 +129,40 @@ describe('watch frontmatter round-trip', () => {
     expect(res.issue.when).toEqual({ kind: 'every', every: '15m' })
   })
 
+  it('creates paused alongside a watch, and ignores watchPaused without one', async () => {
+    const paused = await createIssue(dir, {
+      id: 'paused-watch',
+      title: 'Paused watch',
+      when: { kind: 'every', every: '15m' },
+      watch: baseWatch,
+      watchPaused: true,
+      what: 'armed but quiet',
+    })
+    expect(paused.ok).toBe(true)
+    if (!paused.ok) return
+    expect(paused.issue.watch).toMatchObject({ version: 1 })
+    expect(paused.issue.watchPaused).toBe(true)
+    const unpaused = await createIssue(dir, {
+      id: 'plain-watch',
+      title: 'Plain watch',
+      watch: baseWatch,
+      watchPaused: true,
+    })
+    expect(unpaused.ok).toBe(true)
+    if (!unpaused.ok) return
+    expect(unpaused.issue.watchPaused).toBe(true)
+    const noWatch = await createIssue(dir, {
+      id: 'no-watch',
+      title: 'No watch',
+      watchPaused: true,
+      what: 'plain item',
+    })
+    expect(noWatch.ok).toBe(true)
+    if (!noWatch.ok) return
+    // Pause without a plan is meaningless: accepted but not persisted.
+    expect(noWatch.issue.watchPaused).toBeUndefined()
+  })
+
   it('clears a watch with null', async () => {
     await createIssue(dir, { id: 'w', title: 'W', watch: baseWatch })
     const res = await updateIssueFields(dir, 'w', { watch: null })
