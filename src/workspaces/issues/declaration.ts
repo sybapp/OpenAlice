@@ -382,13 +382,15 @@ export function issueWatchVerdictBlock(input: {
   evidence: Record<string, unknown>
   signalIds: readonly string[]
   runId: string
+  freshLeafIndices?: readonly number[]
 }): string {
   const leaves = input.leaves
     .map((leaf) => {
       const actual = leaf.actual !== undefined ? ` actual=${JSON.stringify(leaf.actual)}` : ''
       const expected = leaf.expected !== undefined ? ` expected=${JSON.stringify(leaf.expected)}` : ''
       const reason = leaf.reason ? ` reason=${JSON.stringify(leaf.reason)}` : ''
-      return `- leaf[${leaf.index}]: ${leaf.status}${actual}${expected}${reason}`
+      const fresh = input.freshLeafIndices?.includes(leaf.index) ? ' [fresh]' : ''
+      return `- leaf[${leaf.index}]: ${leaf.status}${fresh}${actual}${expected}${reason}`
     })
     .join('\n')
   const signals = input.signalIds.length > 0

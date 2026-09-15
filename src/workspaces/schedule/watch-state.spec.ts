@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,8 +37,8 @@ describe('WatchRuntimeStore', () => {
       lastTriggeredAt: 90,
       lastStatus: 'hit',
       lastEvidence: { close: 195 },
-      consumedSignalIds: ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'],
       lastRunId: 'run-1',
+      leafStates: { 0: { lastTriggeredAt: 90, consumedSignalIds: ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'] } },
     })
 
     const second = await WatchRuntimeStore.load(path, noopLogger)
@@ -48,8 +48,53 @@ describe('WatchRuntimeStore', () => {
       lastTriggeredAt: 90,
       lastStatus: 'hit',
       lastEvidence: { close: 195 },
-      consumedSignalIds: ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'],
       lastRunId: 'run-1',
+      leafStates: { 0: { lastTriggeredAt: 90, consumedSignalIds: ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'] } },
+    })
+  })
+
+  it('ignores unknown fields (including the retired flat consumedSignalIds) on load', async () => {
+    const path = join(dir, 'watch-state.json')
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      states: {
+        'w1 i1': {
+          watchVersion: 1,
+          lastCheckedAt: 50,
+          lastTriggeredAt: 40,
+          lastStatus: 'hit',
+          consumedSignalIds: ['old-sig-1', 'old-sig-2'],
+          lastRunId: 'run-1',
+        },
+      },
+    }), 'utf8')
+    const store = await WatchRuntimeStore.load(path, noopLogger)
+    // Unshipped branch-only shape: no dual-read, no seed — the flat ids are
+    // dropped and the per-leaf latch starts clean.
+    expect(store.get('w1', 'i1')).toMatchObject({
+      watchVersion: 1,
+      lastTriggeredAt: 40,
+    })
+    expect(store.get('w1', 'i1')?.leafStates).toBeUndefined()
+  })
+
+  it('round-trips independent per-leaf latches', async () => {
+    const path = join(dir, 'watch-state.json')
+    const store = await WatchRuntimeStore.load(path, noopLogger)
+    await store.set('w1', 'i1', {
+      watchVersion: 1,
+      lastCheckedAt: 10,
+      lastTriggeredAt: 20,
+      lastStatus: 'hit',
+      leafStates: {
+        0: { lastTriggeredAt: 20 },
+        1: { consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'] },
+      },
+    })
+    const reloaded = await WatchRuntimeStore.load(path, noopLogger)
+    expect(reloaded.get('w1', 'i1')?.leafStates).toEqual({
+      0: { lastTriggeredAt: 20 },
+      1: { consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'] },
     })
   })
 

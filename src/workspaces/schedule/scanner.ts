@@ -58,7 +58,7 @@ import {
   type ScheduleSnapshotTask,
   type ScheduleSnapshotWorkspace,
 } from './declaration.js'
-import type { WatchRuntimeState } from './watch-state.js'
+import type { WatchRuntimeState, WatchLeafState } from './watch-state.js'
 
 export const DEFAULT_INTERVAL_MS = 60_000
 
@@ -463,21 +463,29 @@ export class ScheduleScanner {
           ...(previous.lastStatus ? { lastStatus: previous.lastStatus } : {}),
           ...(previous.lastReason ? { lastReason: previous.lastReason } : {}),
           ...(previous.lastEvidence ? { lastEvidence: previous.lastEvidence } : {}),
-          ...(previous.consumedSignalIds ? { consumedSignalIds: previous.consumedSignalIds } : {}),
           ...(previous.lastRunId ? { lastRunId: previous.lastRunId } : {}),
+          ...(previous.leafStates ? { leafStates: previous.leafStates } : {}),
         }
         : {}),
     })
     this.deps.logger.info('schedule.watch_paused_skip', { wsId: ws.id, taskId: issue.id })
   }
 
-  /** Due + watched fire: judge first, dispatch only on a fresh (unlatched)
-   * hit. `miss` / `unavailable` / latched-hit record check memory and never
-   * touch the dispatch path — zero LLM calls. A dispatch throw (capacity /
-   * busy) leaves the hit unconsumed so the next due tick re-judges and
-   * retries; only a successful dispatch latches + advances the schedule
-   * marker. A per-issue check throw is isolated like an invalid file: the
-   * issue keeps waiting with a visible reason instead of breaking the scan. */
+  /** Due + watched fire: judge first, dispatch only on a leaf with
+   * fresh (unlatched) content.  Each leaf latches independently:
+   * - Price / indicator (signal-less): latches on its OWN `lastTriggeredAt`
+   *   — once its hit is dispatched it stays silent while the condition
+   *   holds; a miss clears it (band exit re-arms within the same arming),
+   *   while `unavailable` preserves it (a data gap is not a band exit).
+   * - Structure / zone (signal-bearing): deduplicates on its OWN signal ids
+   *   only, so a stale structure signal cannot block a fresh price leaf
+   *   (and vice versa).
+   * Any dispatchable leaf triggers the run; the verdict block marks which
+   * leaves are fresh ([fresh]).  `miss` / `unavailable` / latched-hit
+   * leaves record check memory and never touch the dispatch path — zero
+   * LLM calls.  A dispatch throw (capacity / busy) leaves all hit leaves
+   * unconsumed so the next due tick re-judges and retries; only a
+   * successful dispatch latches + advances the schedule marker. */
   private async fireWatched(
     ws: WorkspaceMeta,
     issue: IssueRecord & { when: Schedule; watch: NonNullable<IssueRecord['watch']> },
@@ -510,6 +518,13 @@ export class ScheduleScanner {
       return
     }
 
+    const prevLeafStates = base.leafStates ?? {}
+    // The per-leaf state that reflects this check WITHOUT any dispatch — the
+    // right snapshot for latched/miss/non-hit verdicts and for a dispatch
+    // that fails (nothing was consumed).  A fresh hit stays unconsumed, so
+    // the next due tick re-judges and retries.
+    const noDispatchLeafStates = this.buildLeafStates(prevLeafStates, verdict.leaves, nowMs, false)
+
     if (verdict.status !== 'hit') {
       await states.set(ws.id, issueId, {
         ...base,
@@ -518,6 +533,7 @@ export class ScheduleScanner {
         lastStatus: verdict.status,
         ...(verdict.reason ? { lastReason: verdict.reason } : { lastReason: undefined }),
         lastEvidence: verdictEvidence(verdict),
+        leafStates: noDispatchLeafStates,
       })
       this.deps.logger.info('schedule.watch_no_fire', {
         wsId: ws.id,
@@ -528,17 +544,17 @@ export class ScheduleScanner {
       return
     }
 
-    // Hit: latch on (version + consumed signal ids). A sustained hit with
-    // no new signals and no re-arm stays silent — exactly-once per arming.
-    // Signal-less hits (pure price/indicator leaves) latch on the version:
-    // they fire once per arming and wait for the harness to re-arm.
-    const freshSignals = verdict.signalIds.filter(
-      (id) => !(base.consumedSignalIds ?? []).includes(id),
-    )
-    const latchable = verdict.signalIds.length === 0
-      ? base.lastTriggeredAt === undefined
-      : freshSignals.length > 0
-    if (!latchable) {
+    // Which leaves have content worth dispatching?  Each leaf latches on its
+    // own state: a signal-less hit is fresh only while it has not yet been
+    // dispatched (this arming); a signal-bearing leaf is fresh on any id not
+    // yet consumed by it.
+    const freshIndices: number[] = []
+    for (const leaf of verdict.leaves) {
+      if (isLeafFresh(prevLeafStates[leaf.index], leaf)) freshIndices.push(leaf.index)
+    }
+
+    if (freshIndices.length === 0) {
+      // All leaves latched — record the check and stay silent.
       await states.set(ws.id, issueId, {
         ...base,
         watchVersion: issue.watch.version,
@@ -549,20 +565,12 @@ export class ScheduleScanner {
         // e.g. "dispatch skipped" next to "Condition met".
         lastReason: undefined,
         lastEvidence: verdictEvidence(verdict),
+        leafStates: noDispatchLeafStates,
       })
       this.deps.logger.info('schedule.watch_latched', { wsId: ws.id, taskId: issueId })
       return
     }
 
-    const consumed = verdict.signalIds.length === 0
-      ? (base.consumedSignalIds ?? [])
-      : [...(base.consumedSignalIds ?? []), ...freshSignals]
-    // The dispatched prompt opens with the exact judgement that armed it:
-    // verdict block + What. The block carries the dispatch's own run id,
-    // which is known only after dispatch mints it — so dispatch What alone,
-    // then rewrite the stored prompt with the block prepended (see
-    // dispatchPromptWithVerdict below). What stays the executable
-    // instruction; the block is provenance.
     try {
       const { taskId: runId } = await this.dispatchIssue(
         ws,
@@ -584,8 +592,13 @@ export class ScheduleScanner {
           evidence: { ...verdict.evidence },
           signalIds: verdict.signalIds,
           runId,
+          freshLeafIndices: freshIndices,
         }) + `\n\n${issueFirePrompt(issue)}`,
       )
+      // Consumption applied: signal-less hit leaves latch at now, signal-
+      // bearing leaves fold their current signals into their own consumed
+      // set.  Kept durable so a restart deduplicates correctly.
+      const dispatchedLeafStates = this.buildLeafStates(prevLeafStates, verdict.leaves, nowMs, true)
       // Keep the durable record aligned for runtimes that expose a prompt
       // rewrite hook; the dispatch callback already supplied this text before
       // the child was spawned.
@@ -596,6 +609,7 @@ export class ScheduleScanner {
         evidence: { ...verdict.evidence },
         signalIds: verdict.signalIds,
         runId,
+        freshLeafIndices: freshIndices,
       })}\n\n${issueFirePrompt(issue)}`)
       await this.deps.markers.set(ws.id, issueId, nowMs)
       await states.set(ws.id, issueId, {
@@ -604,18 +618,20 @@ export class ScheduleScanner {
         lastTriggeredAt: nowMs,
         lastStatus: 'hit',
         lastEvidence: verdictEvidence(verdict),
-        consumedSignalIds: consumed,
         lastRunId: runId,
+        leafStates: dispatchedLeafStates,
       })
       this.deps.logger.info('schedule.watch_fired', {
         wsId: ws.id,
         taskId: issueId,
         runId,
         signals: verdict.signalIds,
+        freshLeaves: freshIndices,
       })
     } catch (err) {
       // Admission skip: record the check but consume nothing — the hit
-      // stays live and the next due tick re-judges (fresh data) and retries.
+      // stays live (unconsumed) and the next due tick re-judges (fresh
+      // data) and retries.  Latched leaves keep their latch.
       await states.set(ws.id, issueId, {
         ...base,
         watchVersion: issue.watch.version,
@@ -623,6 +639,7 @@ export class ScheduleScanner {
         lastStatus: 'hit',
         lastReason: `dispatch skipped (${err instanceof Error ? err.message : String(err)}); hit unconsumed`,
         lastEvidence: verdictEvidence(verdict),
+        leafStates: noDispatchLeafStates,
       })
       await this.noteCronMiss(ws.id, issueId, issue.when, nowMs)
       this.deps.logger.info('schedule.watch_fire_skipped', {
@@ -631,6 +648,56 @@ export class ScheduleScanner {
         reason: err instanceof Error ? err.message : String(err),
       })
     }
+  }
+
+  /** Next per-leaf latch state for this check. With `dispatched` false the
+   * hit is left unconsumed (latched leaves keep their latch, fresh hits stay
+   * fresh): the correct snapshot for a miss, an all-latched verdict, or a
+   * failed dispatch. With `dispatched` true, successful hits consume: a
+   * signal-less leaf latches at `nowMs` and a signal-bearing leaf folds its
+   * current ids into its own consumed set. A signal-less miss clears its
+   * latch (band exit re-arms within the same arming); `unavailable` preserves
+   * it (a data gap is not a band exit). A signal-bearing leaf keeps its
+   * consumed ids whenever it carries no new ones — including on a miss or
+   * on a tick where it is silent — so an idle sibling never loses history.
+   * Leaves with prior state but no judgement this tick are preserved as-is. */
+  private buildLeafStates(
+    prev: Record<number, WatchLeafState>,
+    leaves: WatchCheckVerdict['leaves'],
+    nowMs: number,
+    dispatched: boolean,
+  ): Record<number, WatchLeafState> {
+    const next: Record<number, WatchLeafState> = {}
+    const seen = new Set<number>()
+    for (const leaf of leaves) {
+      seen.add(leaf.index)
+      const before = prev[leaf.index]
+      const beforeIds = before?.consumedSignalIds ?? []
+      // Only a hit leaf contributes new signal ids; a miss/unavailable leaf
+      // carries none per the evaluator contract, and must not invent any.
+      const currentIds = leaf.status === 'hit' ? leaf.signalIds : []
+      if (currentIds.length > 0 || beforeIds.length > 0) {
+        // Signal-bearing leaf: never drop consumed ids without a dispatch.
+        const consumed = dispatched
+          ? [...new Set([...beforeIds, ...currentIds])]
+          : [...beforeIds]
+        if (consumed.length > 0) next[leaf.index] = { consumedSignalIds: consumed }
+      } else if (leaf.status === 'hit') {
+        next[leaf.index] = dispatched
+          ? { lastTriggeredAt: nowMs }
+          : (before?.lastTriggeredAt !== undefined ? { lastTriggeredAt: before.lastTriggeredAt } : {})
+        if (!dispatched && before?.lastTriggeredAt === undefined) delete next[leaf.index]
+      } else if (leaf.status === 'unavailable' && before?.lastTriggeredAt !== undefined) {
+        // Data gap preserves the latch; only a miss (band exit) clears it.
+        next[leaf.index] = { lastTriggeredAt: before.lastTriggeredAt }
+      }
+      // Signal-less miss leaves no state — the latch is cleared.
+    }
+    for (const [key, state] of Object.entries(prev)) {
+      const idx = Number(key)
+      if (!seen.has(idx)) next[idx] = { ...state }
+    }
+    return next
   }
 
   /** One judgement per identical watch per scan. Concurrent issues share the
@@ -876,6 +943,22 @@ function verdictEvidence(verdict: WatchCheckVerdict): Record<string, unknown> {
     evidence: verdict.evidence,
     ...(verdict.reason ? { reason: verdict.reason } : {}),
   }
+}
+
+/** Whether one leaf carries content worth dispatching: a hit whose latch
+ * does not already cover it. A signal-less hit is fresh only while
+ * undispatched this arming; a signal-bearing leaf is fresh on any id it has
+ * not yet consumed (a silent signal-bearing leaf carries nothing new). */
+function isLeafFresh(
+  prev: WatchLeafState | undefined,
+  leaf: WatchCheckVerdict['leaves'][number],
+): boolean {
+  if (leaf.status !== 'hit') return false
+  if (leaf.signalIds.length > 0) {
+    return leaf.signalIds.some((id) => !(prev?.consumedSignalIds ?? []).includes(id))
+  }
+  if ((prev?.consumedSignalIds?.length ?? 0) > 0) return false
+  return prev?.lastTriggeredAt === undefined
 }
 
 function issueRunOverrides(issue: IssueRecord): SessionRuntimeSelection | undefined {

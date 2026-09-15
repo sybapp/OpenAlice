@@ -22,9 +22,31 @@ const composite = (wsId: string, issueId: string): string => `${wsId}${SEP}${iss
 
 export type WatchCheckStatus = 'hit' | 'miss' | 'unavailable'
 
+/** Per-leaf latch state: each leaf in a multi-leaf watch rule is judged
+ * independently so a price hit and a structure signal do not mask each
+ * other.  A signal-less (price/indicator) leaf latches on `lastTriggeredAt`
+ * — once its hit is dispatched it stays silent while the condition holds;
+ * a miss clears it, so this arming can re-fire on a band re-entry.  A
+ * signal-bearing (structure_break / zone_touch) leaf deduplicates on its
+ * OWN consumedSignalIds only — another leaf's signals never block it. */
+export interface WatchLeafState {
+  /** Epoch ms when this leaf's hit was last dispatched. Absent (or cleared
+   * by a miss) means the current hit is unconsumed and can still fire. */
+  lastTriggeredAt?: number
+  /** Signal ids this leaf has already consumed (signal-bearing leaves only;
+   * a fresh id on the same version dispatches again). */
+  consumedSignalIds?: string[]
+}
+
 /** The checker's memory of one armed condition. `watchVersion` is the `watch`
  * frontmatter version this state belongs to; a version bump (re-arm) resets
- * the latch, which is how "one arming triggers at most once" is enforced. */
+ * the latch, which is how "one arming triggers at most once" is enforced.
+ *
+ * Per-leaf state (`leafStates`) is the sole latch memory so that each leaf
+ * latches independently. `lastTriggeredAt` stays top-level as the global
+ * dispatch cadence for the board/health; per-leaf latch timestamps live in
+ * `leafStates`. The flat `consumedSignalIds` shape never shipped (branch-only
+ * in 184ef182), so it is replaced directly with no migration path. */
 export interface WatchRuntimeState {
   /** Watch version last checked (mirrors `watch.version` in the file). */
   watchVersion: number
@@ -38,11 +60,11 @@ export interface WatchRuntimeState {
   lastReason?: string
   /** Compact evidence of the latest check (actuals, data window). */
   lastEvidence?: Record<string, unknown>
-  /** Signal ids consumed by the latch — a sustained hit reuses these and
-   * must not dispatch again until the version bumps or new ids appear. */
-  consumedSignalIds?: string[]
   /** Latest dispatch this state produced (traceability). */
   lastRunId?: string
+  /** Per-leaf latch state keyed by leaf index.  Absent means no leaf has
+   * been checked yet (first tick). */
+  leafStates?: Record<number, WatchLeafState>
 }
 
 export class WatchRuntimeStore {
@@ -117,6 +139,19 @@ export class WatchRuntimeStore {
   }
 }
 
+function decodeLeafState(value: unknown): WatchLeafState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  const next: WatchLeafState = {}
+  if (typeof row['lastTriggeredAt'] === 'number' && Number.isFinite(row['lastTriggeredAt'])) {
+    next.lastTriggeredAt = row['lastTriggeredAt'] as number
+  }
+  if (Array.isArray(row['consumedSignalIds']) && row['consumedSignalIds'].every((id) => typeof id === 'string')) {
+    next.consumedSignalIds = [...(row['consumedSignalIds'] as string[])]
+  }
+  return Object.keys(next).length > 0 ? next : null
+}
+
 function decodeState(value: unknown): WatchRuntimeState | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const row = value as Record<string, unknown>
@@ -136,9 +171,19 @@ function decodeState(value: unknown): WatchRuntimeState | null {
   if (row['lastEvidence'] && typeof row['lastEvidence'] === 'object' && !Array.isArray(row['lastEvidence'])) {
     next.lastEvidence = row['lastEvidence'] as Record<string, unknown>
   }
-  if (Array.isArray(row['consumedSignalIds']) && row['consumedSignalIds'].every((id) => typeof id === 'string')) {
-    next.consumedSignalIds = [...(row['consumedSignalIds'] as string[])]
-  }
   if (typeof row['lastRunId'] === 'string') next.lastRunId = row['lastRunId'] as string
+
+  // Per-leaf latch state. Absent means no leaf has been checked yet.
+  if (row['leafStates'] && typeof row['leafStates'] === 'object' && !Array.isArray(row['leafStates'])) {
+    const decoded: Record<number, WatchLeafState> = {}
+    for (const [key, val] of Object.entries(row['leafStates'] as Record<string, unknown>)) {
+      const idx = Number(key)
+      if (!Number.isFinite(idx) || !Number.isInteger(idx)) continue
+      const leaf = decodeLeafState(val)
+      if (leaf) decoded[idx] = leaf
+    }
+    if (Object.keys(decoded).length > 0) next.leafStates = decoded
+  }
+
   return next
 }

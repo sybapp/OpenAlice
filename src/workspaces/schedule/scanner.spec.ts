@@ -163,10 +163,48 @@ function hitVerdict(over: Partial<WatchCheckVerdict> = {}): WatchCheckVerdict {
   }
 }
 
+/** A single signal-bearing (structure_break / zone_touch) hit leaf — the leaf
+ * carries its own signal ids, the way `evaluateWatch` reports them. */
+function signalHitVerdict(signalIds: string[]): WatchCheckVerdict {
+  return hitVerdict({
+    leaves: [{ index: 0, status: 'hit', actual: signalIds.length, expected: 'structure', signalIds }],
+    signalIds,
+  })
+}
+
+/** A two-leaf `any`-style verdict: leaf 0 price (signal-less), leaf 1
+ * structure (signal-bearing). Indexes mirror `MIXED_WATCH.any`. */
+function mixedHitVerdict(price: 'hit' | 'miss', structureIds: string[]): WatchCheckVerdict {
+  const status: 'hit' | 'miss' = price === 'hit' || structureIds.length > 0 ? 'hit' : 'miss'
+  return {
+    status,
+    leaves: [
+      { index: 0, status: price, actual: price === 'hit' ? 195 : 180, expected: 190, signalIds: [] },
+      { index: 1, status: structureIds.length > 0 ? ('hit' as const) : ('miss' as const), actual: structureIds.length, expected: 'BOS', signalIds: structureIds },
+    ],
+    signalIds: structureIds,
+    evidence: { close: price === 'hit' ? 195 : 180, barCount: 120, watchVersion: 1 },
+  }
+}
+
 const WATCH = {
   version: 1,
   source: { barId: 'vendor|NVDA', interval: '1h' },
   rule: { type: 'price_above', price: 190 },
+} as const
+
+/** Two-leaf `any` watch: a price leaf (leaf 0) and a structure leaf (leaf 1),
+ * mirroring the mixed price + BOS monitor where the two must latch
+ * independently. */
+const MIXED_WATCH = {
+  version: 1,
+  source: { barId: 'vendor|NVDA', interval: '1h' },
+  rule: {
+    any: [
+      { type: 'price_above', price: 190 },
+      { type: 'structure_break', kind: 'BOS', direction: 'bullish' },
+    ],
+  },
 } as const
 
 function scannerFor(
@@ -887,15 +925,15 @@ describe('ScheduleScanner watch gating', () => {
       id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
     }])
     const watchStates = new FakeWatchStates()
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['BOS|swing|bullish|d2|d1|190|192'] }))
+    const check = vi.fn(async () => signalHitVerdict(['BOS|swing|bullish|d2|d1|190|192']))
     const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
     expect(watchStates.get('w1', 'watch-1')).toMatchObject({
       watchVersion: 1,
       lastTriggeredAt: NOW,
-      consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'],
       lastRunId: 'run-1',
+      leafStates: { 0: { consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'] } },
     })
     // Same signals, next due tick: re-judged, still a hit, but latched — no second dispatch.
     const { scanner: second, dispatch: dispatch2 } = scannerFor([ws], {
@@ -933,10 +971,27 @@ describe('ScheduleScanner watch gating', () => {
       lastCheckedAt: NOW,
       lastTriggeredAt: NOW,
       lastStatus: 'hit',
-      consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'],
       lastRunId: 'run-1',
     })
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['BOS|swing|bullish|d2|d1|190|192'] }))
+    const check = vi.fn(async () => signalHitVerdict(['BOS|swing|bullish|d2|d1|190|192']))
+    const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('restart dedups (per-leaf latch): reloaded leaf state does not re-dispatch', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW,
+      lastStatus: 'hit',
+      lastRunId: 'run-1',
+      leafStates: { 0: { consumedSignalIds: ['BOS|swing|bullish|d2|d1|190|192'] } },
+    })
+    const check = vi.fn(async () => signalHitVerdict(['BOS|swing|bullish|d2|d1|190|192']))
     const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
     await scanner.scan()
     expect(dispatch).not.toHaveBeenCalled()
@@ -952,14 +1007,16 @@ describe('ScheduleScanner watch gating', () => {
       lastCheckedAt: NOW,
       lastTriggeredAt: NOW,
       lastStatus: 'hit',
-      consumedSignalIds: ['old-signal'],
       lastRunId: 'run-1',
+      leafStates: { 0: { consumedSignalIds: ['old-signal'] } },
     })
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['new-signal'] }))
+    const check = vi.fn(async () => signalHitVerdict(['new-signal']))
     const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
-    expect(watchStates.get('w1', 'watch-1')?.consumedSignalIds).toEqual(['old-signal', 'new-signal'])
+    expect(watchStates.get('w1', 'watch-1')?.leafStates?.[0]).toEqual({
+      consumedSignalIds: ['old-signal', 'new-signal'],
+    })
   })
 
   it('capacity skip consumes nothing: the hit stays live for the next tick', async () => {
@@ -1039,7 +1096,7 @@ describe('ScheduleScanner watch gating', () => {
       id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go trade it', watch: WATCH,
     }])
     const watchStates = new FakeWatchStates()
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-1'] }))
+    const check = vi.fn(async () => signalHitVerdict(['sig-1']))
     const rewritePrompt = vi.fn(async () => undefined)
     const dispatch = vi.fn(async () => ({ taskId: 'run-abc', resumeId: 'resume-new-worker-a1b2c3' }))
     const { scanner } = scannerFor([ws], { dispatch, watchStates, watchChecker: { check }, rewritePrompt })
@@ -1055,6 +1112,8 @@ describe('ScheduleScanner watch gating', () => {
     expect(prompt).toContain('watchVersion: 1')
     expect(prompt).toContain('runId: run-abc')
     expect(prompt).toContain('sig-1')
+    // The per-leaf block marks the triggering leaf as fresh.
+    expect(prompt).toContain('leaf[0]: hit [fresh]')
     expect(prompt.endsWith('go trade it')).toBe(true)
     expect(watchStates.get('w1', 'watch-1')?.lastRunId).toBe('run-abc')
   })
@@ -1069,10 +1128,10 @@ describe('ScheduleScanner watch gating', () => {
       lastCheckedAt: NOW - 60_000,
       lastTriggeredAt: NOW - 60_000,
       lastStatus: 'hit',
-      consumedSignalIds: ['sig-old'],
       lastRunId: 'run-old',
+      leafStates: { 0: { consumedSignalIds: ['sig-old'] } },
     })
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-old'] }))
+    const check = vi.fn(async () => signalHitVerdict(['sig-old']))
     const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
     await scanner.scan()
     expect(check).not.toHaveBeenCalled()
@@ -1081,7 +1140,6 @@ describe('ScheduleScanner watch gating', () => {
       watchVersion: 1,
       lastCheckedAt: NOW,
       lastTriggeredAt: NOW - 60_000,
-      consumedSignalIds: ['sig-old'],
       lastRunId: 'run-old',
     })
   })
@@ -1096,10 +1154,10 @@ describe('ScheduleScanner watch gating', () => {
       lastCheckedAt: NOW,
       lastTriggeredAt: NOW,
       lastStatus: 'hit',
-      consumedSignalIds: ['sig-old'],
       lastRunId: 'run-old',
+      leafStates: { 0: { consumedSignalIds: ['sig-old'] } },
     })
-    const check = vi.fn(async () => hitVerdict({ signalIds: ['sig-old'] }))
+    const check = vi.fn(async () => signalHitVerdict(['sig-old']))
     const { scanner, dispatch } = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 61_000 })
     await scanner.scan()
     expect(check).toHaveBeenCalledTimes(1)
@@ -1111,6 +1169,114 @@ describe('ScheduleScanner watch gating', () => {
     const { scanner, dispatch } = scannerFor([ws])
     await scanner.scan()
     expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('signal-less leaf re-fires on a band re-entry within the same arming', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const first = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW })
+    await first.scanner.scan()
+    expect(first.dispatch).toHaveBeenCalledTimes(1)
+    // Sustained hit stays latched — no second dispatch while in the band.
+    const sustained = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    await sustained.scanner.scan()
+    expect(sustained.dispatch).not.toHaveBeenCalled()
+    // Price drops out: the leaf's latch clears, nothing dispatches.
+    const miss = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => ({
+        status: 'miss' as const,
+        leaves: [{ index: 0, status: 'miss', actual: 180, expected: 190, signalIds: [] }],
+        signalIds: [],
+        evidence: { close: 180, barCount: 120, watchVersion: 1 },
+      }) },
+      now: NOW + 122_000,
+    })
+    await miss.scanner.scan()
+    expect(miss.dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')?.leafStates?.[0]?.lastTriggeredAt).toBeUndefined()
+    // Band re-entry on the same arming fires again — no version bump needed.
+    const reentry = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 183_000 })
+    await reentry.scanner.scan()
+    expect(reentry.dispatch).toHaveBeenCalledTimes(1)
+    expect(watchStates.get('w1', 'watch-1')?.leafStates?.[0]?.lastTriggeredAt).toBe(NOW + 183_000)
+  })
+
+  it('mixed any-rule: a fresh structure signal fires while a latched in-band price stays silent', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: MIXED_WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const first = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => mixedHitVerdict('hit', []) },
+      now: NOW,
+    })
+    await first.scanner.scan()
+    expect(first.dispatch).toHaveBeenCalledTimes(1) // price leaf fresh → fire
+    // The price leaf is now latched (still in-band). A fresh structure signal
+    // on the same version must still fire — not masked by the latched price.
+    const rewritePrompt = vi.fn(async () => undefined)
+    const next = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => mixedHitVerdict('hit', ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192']) },
+      rewritePrompt,
+      now: NOW + 61_000,
+    })
+    await next.scanner.scan()
+    expect(next.dispatch).toHaveBeenCalledTimes(1)
+    const state = watchStates.get('w1', 'watch-1')!
+    // Price leaf stays consumed (sustained in-band)…
+    expect(state.leafStates?.[0]?.lastTriggeredAt).toBe(NOW + 61_000)
+    // …and the structure leaf consumed only its own signal id.
+    expect(state.leafStates?.[1]?.consumedSignalIds).toEqual(['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'])
+    // The verdict block marks the fresh structure leaf, not the latched price.
+    const [, prompt] = rewritePrompt.mock.lastCall as unknown as [string, string]
+    expect(prompt).toContain('leaf[1]: hit [fresh]')
+    expect(prompt).not.toContain('leaf[0]: hit [fresh]')
+  })
+
+  it('mixed any-rule: a price band re-entry fires while a latched structure signal stays silent', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: MIXED_WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    // Price already fired in-band; structure consumed an old BOS signal.
+    await watchStates.set('w1', 'watch-1', {
+      watchVersion: 1,
+      lastCheckedAt: NOW,
+      lastTriggeredAt: NOW,
+      lastStatus: 'hit',
+      lastRunId: 'run-1',
+      leafStates: {
+        0: { lastTriggeredAt: NOW },
+        1: { consumedSignalIds: ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'] },
+      },
+    })
+    // Price drops out of the band: nothing fresh, its latch clears.
+    const drop = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => mixedHitVerdict('miss', ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192']) },
+      now: NOW + 61_000,
+    })
+    await drop.scanner.scan()
+    expect(drop.dispatch).not.toHaveBeenCalled()
+    expect(watchStates.get('w1', 'watch-1')?.leafStates?.[0]?.lastTriggeredAt).toBeUndefined()
+    // Price re-enters the band on the same arming: it fires independently —
+    // the old structure signal must not cover it.
+    const reentry = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => mixedHitVerdict('hit', ['BOS|swing|bullish|2024-01-02|2024-01-01|190|192']) },
+      now: NOW + 122_000,
+    })
+    await reentry.scanner.scan()
+    expect(reentry.dispatch).toHaveBeenCalledTimes(1)
+    const state = watchStates.get('w1', 'watch-1')!
+    expect(state.leafStates?.[0]?.lastTriggeredAt).toBe(NOW + 122_000)
+    // The structure leaf keeps its consumed signal (no new BOS id).
+    expect(state.leafStates?.[1]?.consumedSignalIds).toEqual(['BOS|swing|bullish|2024-01-02|2024-01-01|190|192'])
   })
 })
 
