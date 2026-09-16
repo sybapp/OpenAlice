@@ -90,7 +90,7 @@ function unavailablePremiumDiscount(): PremiumDiscountContext {
   }
 }
 
-function emptyMarketStructure(): MarketStructureAnalysis {
+export function createEmptyMarketStructure(): MarketStructureAnalysis {
   return {
     marketStructureMode: 'pivot',
     swingPoints: {
@@ -253,7 +253,7 @@ export function analyzePriceActionBars(params: AnalyzePriceActionBarsParams): Pr
   if (bars.length === 0) {
     const volatility = calculatePriceActionVolatility(bars)
     return {
-      marketStructure: emptyMarketStructure(),
+      marketStructure: createEmptyMarketStructure(),
       premiumDiscount: unavailablePremiumDiscount(),
       liquidityPools: [],
       liquiditySweeps: [],

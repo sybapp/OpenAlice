@@ -22,6 +22,27 @@ Issue(when + watch) -> Alice check (hit/miss/unavailable) -> hit+latch -> harnes
 4. **Branch base is the current stack.** Work lives on `feat/issue-watch-monitor` branched from `feat/technical-analysis-suite`. Reconcile with `dev` only at acceptance.
 5. **This plan file is the contract.** Increments land as verified commits on the same branch.
 
+## Follow-up hardening from issue/agent review
+
+The earlier analysis issues (#25 temporal sandboxing and #26 fact-checking) and the
+agent-facing skills exposed four operational gaps in the first watch cut:
+
+- A watch miss left its dispatch marker untouched, so a `15m` watch fetched on
+  every one-minute scanner tick. `lastCheckedAt` is now the check cursor; the
+  dispatch marker still advances only after an accepted run.
+- A forming latest bar could make `BarMeta.staleTradingDays: 0` look fresh even
+  after the checker dropped that bar. Freshness is recomputed against `meta.asOf`
+  after the closed-bar filter.
+- Price-only and EMA-only watches paid for full Price Action analysis. The check
+  path now computes only the families present in the rule; structure/zone and
+  auto/structure VWAP retain the full context they require.
+- Watch state and the verdict prompt now retain signal ids per leaf. Authoring
+  guidance makes `when`, intraday freshness, `since`, narrow zone lookbacks,
+  `all`/`any`, and explicit VWAP anchors operational rather than implicit.
+
+A watch or `watchPaused` without its required scheduling/plan context is invalid
+rather than an inert board field.
+
 ## What "1. 再说明白一点" means (the `watch` contract)
 
 ### Where it lives

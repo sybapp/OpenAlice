@@ -9,13 +9,15 @@
  * - `closed_bar` quote: the last bar must END at or before `now` — a bar
  *   still in progress is usable history but never the judgement bar.
  * - `maxStaleTradingDays` (default 0): trading-day gap between the last
- *   CLOSED bar and the anchor must not exceed it.
+ *   CLOSED bar and the anchor must not exceed it. When `anchorDate` is
+ *   provided, the gap is recomputed after dropping a forming latest row.
  * - `maxStaleMinutes` (intraday intervals only): wall-clock gap between the
  *   last closed bar end and `now` must not exceed it. Omission means no
  *   minute-level bound (daily/weekly bars have no intraday expectation).
  */
 
 import { intervalToMinutes, parseBarDateUTC } from '../order-flow/interval-time.js'
+import { tradingDaysBetween } from '@/domain/market-data/bars/freshness.js'
 import type { OhlcvBar } from '@/domain/market-data/bars/types.js'
 
 export interface WatchFreshnessPolicy {
@@ -29,6 +31,10 @@ export interface WatchFreshnessInput {
   policy?: WatchFreshnessPolicy
   /** Trading-day gap from the bar layer (`BarMeta.staleTradingDays`). */
   staleTradingDays?: number
+  /** Effective request anchor (`BarMeta.asOf`). Recomputed after dropping a
+   * forming bar so a fresh-but-unclosed row cannot make the prior close look
+   * current. */
+  anchorDate?: string
   nowMs: number
 }
 
@@ -62,7 +68,9 @@ export function gateWatchFreshness(input: WatchFreshnessInput): WatchFreshnessVe
     }
   }
   const last = closedBars.at(-1)!
-  const staleDays = input.staleTradingDays ?? 0
+  const staleDays = input.anchorDate
+    ? tradingDaysBetween(last.date, input.anchorDate)
+    : input.staleTradingDays ?? 0
   const maxDays = input.policy?.maxStaleTradingDays ?? 0
   if (staleDays > maxDays) {
     return {

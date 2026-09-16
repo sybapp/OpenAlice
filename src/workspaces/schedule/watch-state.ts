@@ -56,6 +56,8 @@ export interface WatchRuntimeState {
   lastTriggeredAt?: number
   /** Result of the latest check (`miss` also records, for the board). */
   lastStatus?: WatchCheckStatus
+  /** A hit was judged but admission failed; retry without consuming it. */
+  dispatchPending?: boolean
   /** Human/machine reason for the latest `unavailable` (or check failure). */
   lastReason?: string
   /** Compact evidence of the latest check (actuals, data window). */
@@ -167,6 +169,7 @@ function decodeState(value: unknown): WatchRuntimeState | null {
   if (row['lastStatus'] === 'hit' || row['lastStatus'] === 'miss' || row['lastStatus'] === 'unavailable') {
     next.lastStatus = row['lastStatus']
   }
+  if (row['dispatchPending'] === true) next.dispatchPending = true
   if (typeof row['lastReason'] === 'string') next.lastReason = row['lastReason'] as string
   if (row['lastEvidence'] && typeof row['lastEvidence'] === 'object' && !Array.isArray(row['lastEvidence'])) {
     next.lastEvidence = row['lastEvidence'] as Record<string, unknown>

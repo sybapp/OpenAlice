@@ -899,6 +899,28 @@ describe('ScheduleScanner watch gating', () => {
     expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBeUndefined()
   })
 
+  it('uses the Issue cadence for watch checks after a miss', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1', title: 'watch', when: { kind: 'every', every: '15m' }, what: 'go', watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    const check = vi.fn(async () => ({
+      status: 'miss' as const,
+      leaves: [{ index: 0, status: 'miss' as const, actual: 180, expected: 190, signalIds: [] }],
+      signalIds: [],
+      evidence: { close: 180, barCount: 120, watchVersion: 1 },
+    }))
+    const first = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW })
+    await first.scanner.scan()
+    const beforeCadence = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 60_000 })
+    await beforeCadence.scanner.scan()
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(beforeCadence.scanner.snapshot()?.workspaces[0]?.tasks[0]?.nextDueAtMs).toBe(NOW + 15 * 60_000)
+    const next = scannerFor([ws], { watchStates, watchChecker: { check }, now: NOW + 15 * 60_000 })
+    await next.scanner.scan()
+    expect(check).toHaveBeenCalledTimes(2)
+  })
+
   it('unavailable records its reason and never dispatches', async () => {
     const ws = await makeWs('w1', [{
       id: 'watch-1', title: 'watch', when: { kind: 'every', every: '15m' }, what: 'go', watch: WATCH,
@@ -1019,7 +1041,7 @@ describe('ScheduleScanner watch gating', () => {
     })
   })
 
-  it('capacity skip consumes nothing: the hit stays live for the next tick', async () => {
+  it('capacity skip consumes nothing and retries after the backoff', async () => {
     const ws = await makeWs('w1', [{
       id: 'watch-1', title: 'watch', when: { kind: 'every', every: '1m' }, what: 'go', watch: WATCH,
     }])
@@ -1030,11 +1052,53 @@ describe('ScheduleScanner watch gating', () => {
     expect(dispatch).toHaveBeenCalledTimes(1)
     const state = watchStates.get('w1', 'watch-1')!
     expect(state.lastTriggeredAt).toBeUndefined()
+    expect(state.dispatchPending).toBe(true)
     expect(state.lastReason).toMatch(/unconsumed/)
-    const retry = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    const tooSoon = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    await tooSoon.scanner.scan()
+    expect(tooSoon.dispatch).not.toHaveBeenCalled()
+
+    const retry = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => hitVerdict() },
+      now: NOW + 5 * 60_000 + 1,
+    })
     await retry.scanner.scan()
     expect(retry.dispatch).toHaveBeenCalledTimes(1)
-    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW + 61_000)
+    expect(watchStates.get('w1', 'watch-1')?.dispatchPending).toBeUndefined()
+    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW + 5 * 60_000 + 1)
+  })
+
+  it('retries a pending one-shot watch after a capacity skip', async () => {
+    const ws = await makeWs('w1', [{
+      id: 'watch-1',
+      title: 'watch',
+      when: { kind: 'at', at: new Date(NOW - 60_000).toISOString() },
+      what: 'go',
+      watch: WATCH,
+    }])
+    const watchStates = new FakeWatchStates()
+    let attempts = 0
+    const dispatch = vi.fn(async () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('headless capacity reached')
+      return { taskId: 'run-2', resumeId: 'resume-2' }
+    })
+    const first = scannerFor([ws], { dispatch, watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW })
+    await first.scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(watchStates.get('w1', 'watch-1')?.dispatchPending).toBe(true)
+
+    const retry = scannerFor([ws], {
+      dispatch,
+      watchStates,
+      watchChecker: { check: async () => hitVerdict() },
+      now: NOW + 5 * 60_000 + 1,
+    })
+    await retry.scanner.scan()
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(watchStates.get('w1', 'watch-1')?.dispatchPending).toBeUndefined()
+    expect(watchStates.get('w1', 'watch-1')?.lastTriggeredAt).toBe(NOW + 5 * 60_000 + 1)
   })
 
   it('a latched hit clears a stale dispatch-skip reason', async () => {
@@ -1052,10 +1116,19 @@ describe('ScheduleScanner watch gating', () => {
     // Same arming, signal-less verdict: first dispatch latches on the
     // version; the latched branch must drop the stale reason.
     const ok = vi.fn(async () => ({ taskId: 'run-1', resumeId: 'resume-1' }))
-    const second = scannerFor([ws], { dispatch: ok, watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 61_000 })
+    const second = scannerFor([ws], {
+      dispatch: ok,
+      watchStates,
+      watchChecker: { check: async () => hitVerdict() },
+      now: NOW + 5 * 60_000 + 1,
+    })
     await second.scanner.scan()
     expect(ok).toHaveBeenCalledTimes(1)
-    const third = scannerFor([ws], { watchStates, watchChecker: { check: async () => hitVerdict() }, now: NOW + 122_000 })
+    const third = scannerFor([ws], {
+      watchStates,
+      watchChecker: { check: async () => hitVerdict() },
+      now: NOW + 6 * 60_000 + 2,
+    })
     await third.scanner.scan()
     expect(third.dispatch).not.toHaveBeenCalled()
     const state = watchStates.get('w1', 'watch-1')!
@@ -1112,8 +1185,11 @@ describe('ScheduleScanner watch gating', () => {
     expect(prompt).toContain('watchVersion: 1')
     expect(prompt).toContain('runId: run-abc')
     expect(prompt).toContain('sig-1')
-    // The per-leaf block marks the triggering leaf as fresh.
+    // The per-leaf block marks the triggering leaf as fresh and preserves its
+    // identity for the harness to audit.
     expect(prompt).toContain('leaf[0]: hit [fresh]')
+    expect(prompt).toContain('signalIds=["sig-1"]')
+    expect(prompt).toContain('freshSignalIds=["sig-1"]')
     expect(prompt.endsWith('go trade it')).toBe(true)
     expect(watchStates.get('w1', 'watch-1')?.lastRunId).toBe('run-abc')
   })

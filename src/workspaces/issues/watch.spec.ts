@@ -129,7 +129,7 @@ describe('watch frontmatter round-trip', () => {
     expect(res.issue.when).toEqual({ kind: 'every', every: '15m' })
   })
 
-  it('creates paused alongside a watch, and ignores watchPaused without one', async () => {
+  it('requires a schedule and watch plan for monitoring controls', async () => {
     const paused = await createIssue(dir, {
       id: 'paused-watch',
       title: 'Paused watch',
@@ -142,29 +142,25 @@ describe('watch frontmatter round-trip', () => {
     if (!paused.ok) return
     expect(paused.issue.watch).toMatchObject({ version: 1 })
     expect(paused.issue.watchPaused).toBe(true)
-    const unpaused = await createIssue(dir, {
+
+    const unscheduled = await createIssue(dir, {
       id: 'plain-watch',
       title: 'Plain watch',
       watch: baseWatch,
-      watchPaused: true,
     })
-    expect(unpaused.ok).toBe(true)
-    if (!unpaused.ok) return
-    expect(unpaused.issue.watchPaused).toBe(true)
+    expect(unscheduled.ok).toBe(false)
+
     const noWatch = await createIssue(dir, {
       id: 'no-watch',
       title: 'No watch',
       watchPaused: true,
       what: 'plain item',
     })
-    expect(noWatch.ok).toBe(true)
-    if (!noWatch.ok) return
-    // Pause without a plan is meaningless: accepted but not persisted.
-    expect(noWatch.issue.watchPaused).toBeUndefined()
+    expect(noWatch.ok).toBe(false)
   })
 
   it('clears a watch with null', async () => {
-    await createIssue(dir, { id: 'w', title: 'W', watch: baseWatch })
+    await createIssue(dir, { id: 'w', title: 'W', when: { kind: 'every', every: '15m' }, watch: baseWatch })
     const res = await updateIssueFields(dir, 'w', { watch: null })
     expect(res.ok).toBe(true)
     if (!res.ok) return
@@ -172,10 +168,11 @@ describe('watch frontmatter round-trip', () => {
   })
 
   it('marks a bad watch file invalid without poisoning the rest', async () => {
-    await createIssue(dir, { id: 'good', title: 'Good', watch: baseWatch })
+    await createIssue(dir, { id: 'good', title: 'Good', when: { kind: 'every', every: '15m' }, watch: baseWatch })
     const bad = await createIssue(dir, {
       id: 'bad',
       title: 'Bad',
+      when: { kind: 'every', every: '15m' },
       watch: { ...baseWatch, rule: { type: 'rsi_above', rsi: 70 } },
     })
     expect(bad.ok).toBe(false)
@@ -186,7 +183,7 @@ describe('watch frontmatter round-trip', () => {
   })
 
   it('returns invalid when patching a malformed watch', async () => {
-    await createIssue(dir, { id: 'w', title: 'W', watch: baseWatch })
+    await createIssue(dir, { id: 'w', title: 'W', when: { kind: 'every', every: '15m' }, watch: baseWatch })
     const res = await updateIssueFields(dir, 'w', {
       watch: { ...baseWatch, rule: { type: 'price_in_range', low: 9, high: 1 } },
     })
@@ -196,7 +193,7 @@ describe('watch frontmatter round-trip', () => {
   })
 
   it('pauses and resumes without touching the plan or latch version', async () => {
-    await createIssue(dir, { id: 'w', title: 'W', watch: baseWatch })
+    await createIssue(dir, { id: 'w', title: 'W', when: { kind: 'every', every: '15m' }, watch: baseWatch })
     const paused = await updateIssueFields(dir, 'w', { watchPaused: true })
     expect(paused.ok).toBe(true)
     if (!paused.ok) return

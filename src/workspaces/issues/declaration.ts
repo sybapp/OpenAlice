@@ -33,8 +33,8 @@
  *   effort: none | minimal | low | medium | high | xhigh | max
  *   timeout: 15m | 30m | 45m | 60m  (optional run budget; omit = no watchdog)
  *   commentPrompt: <optional template for the comment-reply Input Prompt>
- *   watch: <optional deterministic pre-dispatch monitoring gate; v1 whitelist in watch/spec.ts>
- *   watchPaused: <optional pause for watched dispatch; plan + latch kept, omission is live>
+ *   watch: <optional deterministic pre-dispatch monitoring gate; requires `when`; v1 whitelist in watch/spec.ts>
+ *   watchPaused: <optional pause for watched dispatch; requires `watch`; plan + latch kept, omission is live>
  *   connectorDesk: telegram   (optional; at most one live desk per connector)
  *   ---
  *   <markdown What — the exact work definition and scheduled prompt>
@@ -280,6 +280,20 @@ export const issueFrontmatterSchema = issueFrontmatterObjectSchema
         })
       }
     }
+    if (value.watch && !value.when) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['watch'],
+        message: 'watch requires a schedule (`when`)',
+      })
+    }
+    if (value.watchPaused && !value.watch) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['watchPaused'],
+        message: 'watchPaused requires a watch plan',
+      })
+    }
   })
 type IssueFrontmatterFile = z.infer<typeof issueFrontmatterSchema>
 export type IssueFrontmatter = Omit<IssueFrontmatterFile, 'what' | 'execution'>
@@ -378,6 +392,8 @@ export function issueWatchVerdictBlock(input: {
     actual?: number | string
     expected?: number | string
     reason?: string
+    signalIds?: readonly string[]
+    freshSignalIds?: readonly string[]
   }>
   evidence: Record<string, unknown>
   signalIds: readonly string[]
@@ -389,8 +405,14 @@ export function issueWatchVerdictBlock(input: {
       const actual = leaf.actual !== undefined ? ` actual=${JSON.stringify(leaf.actual)}` : ''
       const expected = leaf.expected !== undefined ? ` expected=${JSON.stringify(leaf.expected)}` : ''
       const reason = leaf.reason ? ` reason=${JSON.stringify(leaf.reason)}` : ''
+      const signals = leaf.signalIds && leaf.signalIds.length > 0
+        ? ` signalIds=${JSON.stringify(leaf.signalIds)}`
+        : ''
+      const freshSignals = leaf.freshSignalIds && leaf.freshSignalIds.length > 0
+        ? ` freshSignalIds=${JSON.stringify(leaf.freshSignalIds)}`
+        : ''
       const fresh = input.freshLeafIndices?.includes(leaf.index) ? ' [fresh]' : ''
-      return `- leaf[${leaf.index}]: ${leaf.status}${fresh}${actual}${expected}${reason}`
+      return `- leaf[${leaf.index}]: ${leaf.status}${fresh}${actual}${expected}${reason}${signals}${freshSignals}`
     })
     .join('\n')
   const signals = input.signalIds.length > 0

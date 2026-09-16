@@ -1,5 +1,5 @@
 import { inspectBarQuality, invalidOhlcFields } from './quality.js'
-import { describeBarFreshness } from './freshness.js'
+import { describeBarFreshness, tradingDaysBetween } from './freshness.js'
 /**
  * Federated bar layer — service.
  *
@@ -141,22 +141,6 @@ function buildMeta(symbol: string, bars: OhlcvBar[], extra: Partial<BarMeta>): B
     bars: bars.length,
     ...extra,
   }
-}
-
-/** Trading-day gap between two YYYY-MM-DD dates (Mon–Fri; holidays ignored, so
- *  a holiday inflates the gap by ≤1 — acceptable for a staleness signal). */
-function tradingDaysBetween(fromISO: string, toISO: string): number {
-  const a = new Date(`${fromISO}T00:00:00Z`)
-  const b = new Date(`${toISO}T00:00:00Z`)
-  if (!(b.getTime() > a.getTime())) return 0
-  let days = 0
-  const d = new Date(a)
-  while (d.getTime() < b.getTime()) {
-    d.setUTCDate(d.getUTCDate() + 1)
-    const wd = d.getUTCDay()
-    if (wd !== 0 && wd !== 6) days++
-  }
-  return days
 }
 
 /** Add record timestamps alongside the legacy weekday comparison. */

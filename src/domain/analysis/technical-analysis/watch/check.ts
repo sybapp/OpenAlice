@@ -22,11 +22,11 @@ import type {
   BarService,
   OhlcvBar,
 } from '../../../market-data/bars/types.js'
-import { analyzePriceActionBars } from '../price-action/analyze.js'
+import { analyzePriceActionBars, createEmptyMarketStructure } from '../price-action/analyze.js'
 import { buildTechnicalAnalysisIndicators } from '../indicators.js'
 import { evaluateWatch, type WatchEvaluationEvidence, type WatchLeafEvaluation } from './eval.js'
 import { gateWatchFreshness } from './freshness.js'
-import type { IssueWatch, WatchRule } from './spec.js'
+import { watchLeafDataKind, watchLeaves, type IssueWatch } from './spec.js'
 
 /** Bars loaded per check. Covers the ATR-200 default, EMA-50 default, and
  * the external-structure 101-bar window with headroom. */
@@ -80,6 +80,7 @@ export async function checkWatch(
     interval: watch.source.interval,
     policy: watch.freshness,
     staleTradingDays: meta.staleTradingDays,
+    anchorDate: meta.asOf,
     nowMs,
   })
   if (!gated.ok) {
@@ -87,18 +88,28 @@ export async function checkWatch(
   }
   const closedBars = gated.closedBars
 
-  // Structure is always computed: indicator judgement needs the market
-  // structure input, and the sync pass over loaded bars is cheap — the
-  // expensive intrabar order-flow fetch never runs here.
-  const priceAction = analyzePriceActionBars({
-    bars: closedBars,
-    interval: watch.source.interval,
-  })
-  const indicators = buildTechnicalAnalysisIndicators(
-    closedBars,
-    priceAction.marketStructure,
-    { ...watch.indicators, fibEnabled: false, confluenceEnabled: false },
+  const leaves = watchLeaves(watch.rule)
+  const needsIndicators = leaves.some((leaf) => watchLeafDataKind[leaf.type] === 'indicators')
+  // `auto` VWAP can select a recent structure anchor, so it needs the same
+  // price-action context as an explicit structure VWAP. Price/EMA-only watches
+  // stay on the cheap path: no zone/liquidity analysis just to read a close.
+  const needsPriceAction = leaves.some((leaf) =>
+    watchLeafDataKind[leaf.type] === 'priceAction'
+    || (leaf.type === 'price_vs_vwap' && (leaf.anchor === undefined || leaf.anchor === 'auto' || leaf.anchor === 'structure')),
   )
+  const priceAction = needsPriceAction
+    ? analyzePriceActionBars({
+      bars: closedBars,
+      interval: watch.source.interval,
+    })
+    : undefined
+  const indicators = needsIndicators
+    ? buildTechnicalAnalysisIndicators(
+      closedBars,
+      priceAction?.marketStructure ?? createEmptyMarketStructure(),
+      { ...watch.indicators, fibEnabled: false, confluenceEnabled: false },
+    )
+    : undefined
   const evaluation = evaluateWatch({ bars: closedBars, indicators, priceAction }, watch.rule)
   return versioned({
     status: evaluation.status,

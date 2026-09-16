@@ -53,6 +53,7 @@ import { issueWatchVerdictBlock, isWatchedIssue } from '../issues/declaration.js
 import type { IssueWatch } from '../../domain/analysis/technical-analysis/watch/spec.js'
 import {
   fireBase,
+  nextWatchRun,
   snapshotScheduledIssue,
   type ScheduleSnapshot,
   type ScheduleSnapshotTask,
@@ -362,7 +363,10 @@ export class ScheduleScanner {
       // Paused monitoring still records its key (prune-safe) but never
       // judges or dispatches. Plan and latch memory are preserved, so
       // resume continues the same arming — no re-fire of consumed hits.
-      if (isFireable(issue) && this.isDue(ws.id, issue.id, when, nowMs)) {
+      const watchStateForDue = isWatchedIssue(issue) && this.deps.watchChecker && this.deps.watchStates
+        ? this.deps.watchStates.get(ws.id, issue.id)
+        : undefined
+      if (isFireable(issue) && this.isDue(ws.id, issue.id, when, nowMs, watchStateForDue)) {
         if (isWatchedIssue(issue) && issue.watchPaused) {
           await this.noteWatchPaused(ws, issue, nowMs)
         } else if (isWatchedIssue(issue) && this.deps.watchChecker && this.deps.watchStates) {
@@ -392,10 +396,18 @@ export class ScheduleScanner {
     return { wsId: ws.id, tag: ws.tag, status: 'ok', tasks }
   }
 
-  private isDue(wsId: string, taskId: string, when: Schedule, nowMs: number): boolean {
+  private isDue(
+    wsId: string,
+    taskId: string,
+    when: Schedule,
+    nowMs: number,
+    watchState?: WatchRuntimeState,
+  ): boolean {
     const last = this.deps.markers.get(wsId, taskId) ?? null
     const held = this.deps.markers.getHeld(wsId, taskId) ?? null
-    const next = computeNextRun(when, fireBase(when, last, nowMs, this.intervalMs, held))
+    const next = watchState
+      ? nextWatchRun(when, last, nowMs, this.intervalMs, held, watchState)
+      : computeNextRun(when, fireBase(when, last, nowMs, this.intervalMs, held))
     return next !== null && next <= nowMs
   }
 
@@ -461,6 +473,7 @@ export class ScheduleScanner {
         ? {
           ...(previous.lastTriggeredAt !== undefined ? { lastTriggeredAt: previous.lastTriggeredAt } : {}),
           ...(previous.lastStatus ? { lastStatus: previous.lastStatus } : {}),
+          ...(previous.dispatchPending ? { dispatchPending: true } : {}),
           ...(previous.lastReason ? { lastReason: previous.lastReason } : {}),
           ...(previous.lastEvidence ? { lastEvidence: previous.lastEvidence } : {}),
           ...(previous.lastRunId ? { lastRunId: previous.lastRunId } : {}),
@@ -483,9 +496,10 @@ export class ScheduleScanner {
    * Any dispatchable leaf triggers the run; the verdict block marks which
    * leaves are fresh ([fresh]).  `miss` / `unavailable` / latched-hit
    * leaves record check memory and never touch the dispatch path — zero
-   * LLM calls.  A dispatch throw (capacity / busy) leaves all hit leaves
-   * unconsumed so the next due tick re-judges and retries; only a
-   * successful dispatch latches + advances the schedule marker. */
+   * LLM calls. A dispatch throw (capacity / busy) leaves all hit leaves
+   * unconsumed; catch-up schedules retry on the next due tick, while a
+   * calendar-only cron consumes the missed slot. Only a successful dispatch
+   * latches + advances the schedule marker. */
   private async fireWatched(
     ws: WorkspaceMeta,
     issue: IssueRecord & { when: Schedule; watch: NonNullable<IssueRecord['watch']> },
@@ -512,6 +526,7 @@ export class ScheduleScanner {
         watchVersion: issue.watch.version,
         lastCheckedAt: nowMs,
         lastStatus: 'unavailable',
+        dispatchPending: undefined,
         lastReason: `watch check failed: ${err instanceof Error ? err.message : String(err)}`,
       })
       this.deps.logger.warn('schedule.watch_check_failed', { wsId: ws.id, taskId: issueId, err })
@@ -531,6 +546,7 @@ export class ScheduleScanner {
         watchVersion: issue.watch.version,
         lastCheckedAt: nowMs,
         lastStatus: verdict.status,
+        dispatchPending: undefined,
         ...(verdict.reason ? { lastReason: verdict.reason } : { lastReason: undefined }),
         lastEvidence: verdictEvidence(verdict),
         leafStates: noDispatchLeafStates,
@@ -560,6 +576,7 @@ export class ScheduleScanner {
         watchVersion: issue.watch.version,
         lastCheckedAt: nowMs,
         lastStatus: 'hit',
+        dispatchPending: undefined,
         // A latched hit is a fresh judgement, not a stale failure: drop any
         // reason left by an earlier dispatch-skip so the board does not show
         // e.g. "dispatch skipped" next to "Condition met".
@@ -571,6 +588,10 @@ export class ScheduleScanner {
       return
     }
 
+    const promptLeaves = verdict.leaves.map((leaf) => ({
+      ...leaf,
+      freshSignalIds: freshSignalIdsForLeaf(prevLeafStates[leaf.index], leaf),
+    }))
     try {
       const { taskId: runId } = await this.dispatchIssue(
         ws,
@@ -588,7 +609,7 @@ export class ScheduleScanner {
         (runId) => issueWatchVerdictBlock({
           watchVersion: issue.watch.version,
           status: 'hit',
-          leaves: verdict.leaves,
+          leaves: promptLeaves,
           evidence: { ...verdict.evidence },
           signalIds: verdict.signalIds,
           runId,
@@ -605,7 +626,7 @@ export class ScheduleScanner {
       await this.deps.rewritePrompt?.(runId, `${issueWatchVerdictBlock({
         watchVersion: issue.watch.version,
         status: 'hit',
-        leaves: verdict.leaves,
+        leaves: promptLeaves,
         evidence: { ...verdict.evidence },
         signalIds: verdict.signalIds,
         runId,
@@ -629,14 +650,16 @@ export class ScheduleScanner {
         freshLeaves: freshIndices,
       })
     } catch (err) {
-      // Admission skip: record the check but consume nothing — the hit
-      // stays live (unconsumed) and the next due tick re-judges (fresh
-      // data) and retries.  Latched leaves keep their latch.
+      // Admission skip: record the check but consume no hit leaves. Catch-up
+      // schedules retry on the next due tick with fresh data; calendar-only
+      // cron consumes the missed slot. Latched leaves keep their latch.
       await states.set(ws.id, issueId, {
         ...base,
         watchVersion: issue.watch.version,
         lastCheckedAt: nowMs,
         lastStatus: 'hit',
+        dispatchPending: undefined,
+        ...(scheduleCatchesUp(issue.when) ? { dispatchPending: true } : {}),
         lastReason: `dispatch skipped (${err instanceof Error ? err.message : String(err)}); hit unconsumed`,
         lastEvidence: verdictEvidence(verdict),
         leafStates: noDispatchLeafStates,
@@ -939,8 +962,10 @@ function verdictEvidence(verdict: WatchCheckVerdict): Record<string, unknown> {
       ...(leaf.actual !== undefined ? { actual: leaf.actual } : {}),
       ...(leaf.expected !== undefined ? { expected: leaf.expected } : {}),
       ...(leaf.reason ? { reason: leaf.reason } : {}),
+      ...(leaf.signalIds.length > 0 ? { signalIds: leaf.signalIds } : {}),
     })),
     evidence: verdict.evidence,
+    ...(verdict.signalIds.length > 0 ? { signalIds: verdict.signalIds } : {}),
     ...(verdict.reason ? { reason: verdict.reason } : {}),
   }
 }
@@ -949,14 +974,21 @@ function verdictEvidence(verdict: WatchCheckVerdict): Record<string, unknown> {
  * does not already cover it. A signal-less hit is fresh only while
  * undispatched this arming; a signal-bearing leaf is fresh on any id it has
  * not yet consumed (a silent signal-bearing leaf carries nothing new). */
+function freshSignalIdsForLeaf(
+  prev: WatchLeafState | undefined,
+  leaf: WatchCheckVerdict['leaves'][number],
+): string[] {
+  if (leaf.signalIds.length === 0) return []
+  const consumed = new Set(prev?.consumedSignalIds ?? [])
+  return leaf.signalIds.filter((id) => !consumed.has(id))
+}
+
 function isLeafFresh(
   prev: WatchLeafState | undefined,
   leaf: WatchCheckVerdict['leaves'][number],
 ): boolean {
   if (leaf.status !== 'hit') return false
-  if (leaf.signalIds.length > 0) {
-    return leaf.signalIds.some((id) => !(prev?.consumedSignalIds ?? []).includes(id))
-  }
+  if (leaf.signalIds.length > 0) return freshSignalIdsForLeaf(prev, leaf).length > 0
   if ((prev?.consumedSignalIds?.length ?? 0) > 0) return false
   return prev?.lastTriggeredAt === undefined
 }

@@ -53,6 +53,22 @@ describe('gateWatchFreshness', () => {
     expect(out.reason).toMatch(/3 trading day\(s\) behind/)
   })
 
+  it('recomputes trading-day freshness after dropping a forming latest bar', () => {
+    const out = gateWatchFreshness({
+      bars: [
+        bar('2024-01-01 09:00', 100),
+        bar('2024-01-02 10:00', 101), // still forming at 10:30Z
+      ],
+      interval: '1h',
+      staleTradingDays: 0, // metadata describes the forming Jan 2 row
+      anchorDate: '2024-01-02',
+      nowMs: Date.parse('2024-01-02T10:30:00Z'),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.reason).toMatch(/1 trading day\(s\) behind/)
+  })
+
   it('enforces the minute-level bound on intraday intervals', () => {
     const bars = [bar('2024-01-02 09:00', 100)] // ends 10:00Z
     const stale = gateWatchFreshness({

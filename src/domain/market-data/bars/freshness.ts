@@ -1,4 +1,18 @@
 /** Record age is not feed latency: sessions, bar boundaries and publication rules differ. */
+export function tradingDaysBetween(from: string, to: string): number {
+  const start = new Date(`${from.slice(0, 10)}T00:00:00Z`)
+  const end = new Date(`${to.slice(0, 10)}T00:00:00Z`)
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return 0
+  let days = 0
+  const cursor = new Date(start)
+  while (cursor < end) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+    const weekday = cursor.getUTCDay()
+    if (weekday !== 0 && weekday !== 6) days += 1
+  }
+  return days
+}
+
 export interface BarFreshness {
   earliestRecordAt: string | null
   earliestTimestampKind: 'instant' | 'date' | 'unknown'

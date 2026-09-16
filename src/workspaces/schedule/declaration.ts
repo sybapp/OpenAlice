@@ -14,7 +14,7 @@
  * the route layer can import everything scheduling-related from one place.
  */
 
-import { computeNextRun, type Schedule } from '../../core/schedule-expr.js'
+import { computeNextRun, scheduleCatchesUp, type Schedule } from '../../core/schedule-expr.js'
 import type { ModelReasoningEffort } from '../../ai-providers/model-semantics.js'
 import {
   isFireable,
@@ -26,6 +26,9 @@ import {
   type IssueWatch,
 } from '../issues/declaration.js'
 import type { WatchRuntimeState } from './watch-state.js'
+
+/** Admission retries must not turn a blocked watch into a per-scan fetch loop. */
+const WATCH_RETRY_BACKOFF_MS = 5 * 60_000
 
 export {
   isFireable,
@@ -106,6 +109,29 @@ export function fireBase(
   return nowMs - lookbackMs
 }
 
+/**
+ * Watch checks have their own cursor. A miss must not leave an `every` Issue
+ * permanently due, otherwise a 15m watch fetches on every one-minute scanner
+ * tick. An unconsumed hit is the exception: catch-up schedules keep retrying
+ * it until admission succeeds, while `catchUp: false` already consumed the
+ * calendar slot through the normal held cursor.
+ */
+export function nextWatchRun(
+  when: Schedule,
+  lastFiredAtMs: number | null,
+  nowMs: number,
+  lookbackMs: number,
+  heldAtMs: number | null,
+  watchState?: WatchRuntimeState,
+): number | null {
+  const retryUnconsumedHit = watchState?.dispatchPending === true && scheduleCatchesUp(when)
+  if (retryUnconsumedHit) return watchState.lastCheckedAt + WATCH_RETRY_BACKOFF_MS
+  return computeNextRun(
+    when,
+    watchState?.lastCheckedAt ?? fireBase(when, lastFiredAtMs, nowMs, lookbackMs, heldAtMs),
+  )
+}
+
 /** Build a dashboard row for a SCHEDULED issue: its `when` + last-fired marker +
  *  computed next-due (same base-seed as the scanner's due-ness, so the dashboard
  *  matches real firing). Caller must pass an issue that has a `when`. Pass the
@@ -120,7 +146,9 @@ export function snapshotScheduledIssue(
   heldAtMs: number | null = null,
   watchState?: WatchRuntimeState,
 ): ScheduleSnapshotTask {
-  const next = computeNextRun(when, fireBase(when, lastFiredAtMs, nowMs, lookbackMs, heldAtMs))
+  const next = watchState
+    ? nextWatchRun(when, lastFiredAtMs, nowMs, lookbackMs, heldAtMs, watchState)
+    : computeNextRun(when, fireBase(when, lastFiredAtMs, nowMs, lookbackMs, heldAtMs))
   return {
     id: issue.id,
     issue: issue.title,

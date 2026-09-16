@@ -309,7 +309,12 @@ describe('issue_update', () => {
   })
 
   it('pauses and resumes a watch without touching the plan', async () => {
-    await run(issueCreateFactory.build(ctx()), { id: 'w', title: 'W' })
+    await run(issueCreateFactory.build(ctx()), {
+      id: 'w',
+      title: 'W',
+      when: { kind: 'every', every: '15m' },
+      watch: { version: 1, source: { barId: 'tradingview|NVDA', interval: '1h' }, rule: { type: 'price_above', price: 190.5 } },
+    })
     await run(issueUpdateFactory.build(ctx()), { id: 'w', watchPaused: true })
     expect(await readBack('w')).toMatchObject({ watchPaused: true })
     await run(issueUpdateFactory.build(ctx()), { id: 'w', watchPaused: null })
@@ -381,7 +386,7 @@ describe('issue_update', () => {
   })
 
   it('rejects an invalid watch update without touching the file', async () => {
-    await run(issueCreateFactory.build(ctx()), { id: 'w', title: 'W' })
+    await run(issueCreateFactory.build(ctx()), { id: 'w', title: 'W', when: { kind: 'every', every: '15m' } })
     const res = await run(issueUpdateFactory.build(ctx()), {
       id: 'w',
       watch: { version: 1, source: { barId: 'x', interval: '1h' }, rule: { type: 'rsi_above', rsi: 70 } },

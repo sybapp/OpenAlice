@@ -108,7 +108,7 @@ alice analysis search-bars --query NVDA
 
 alice issue create --title "NVDA breakout watch" \
   --when '{"kind":"every","every":"15m"}' \
-  --watch '{"version":1,"source":{"barId":"tradingview|NVDA","interval":"1h"},"rule":{"all":[{"type":"price_above","price":190.5},{"type":"ema_alignment","direction":"bullish"}]}}' \
+  --watch '{"version":1,"source":{"barId":"tradingview|NVDA","interval":"1h"},"freshness":{"maxStaleTradingDays":0,"maxStaleMinutes":150},"rule":{"all":[{"type":"price_above","price":190.5},{"type":"ema_alignment","direction":"bullish"}]}}' \
   --what "NVDA breakout watch. The scanner already judged the close/EMA gate — do NOT re-judge it. On dispatch: run the multi-timeframe + Fib/VWAP + CVD/divergence read, then re-arm, propose a trade, or close."
 ```
 
@@ -234,8 +234,11 @@ plain tracked item; add a `when` and it starts firing.
   (close only), `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
   `structure_break` (BOS/CHoCH), `zone_touch` (FVG/OB). Judgement uses
   closed bars only; unknown types are invalid files, never silent misses.
-  A hit dispatches ONCE per arming — your turn opens with a
-  `<watch-verdict>` block (version, per-leaf actuals, bar window, signal
+  `watch` requires `when`; `watchPaused` requires `watch`. Set an explicit
+  `freshness.maxStaleMinutes` for intraday monitoring, especially with a
+  delayed source. A signal-less hit dispatches once while it holds; a
+  signal-bearing leaf may dispatch again only for a new signal id. Your turn
+  opens with a `<watch-verdict>` block (version, per-leaf actuals, bar window, signal
   ids, run id). Your three valid exits: **re-arm** (write a new `watch`
   with a bumped `version` + reason via `issue update --watch …
   --expected-watch-version <live>`; a stale version is refused, re-read
@@ -245,7 +248,12 @@ plain tracked item; add a `when` and it starts firing.
   Out of v1 on purpose: multi-source rules, cross-interval rules, volume /
   order-flow thresholds (CVD, absorption, exhaustion, footprint), and
   open/high/low intraday touch. Those stay in `what` as post-hit analysis —
-  never as a reason to skip `watch`. Hybrid pattern: the cheap
+  never as a reason to skip `watch`. Use `price_cross_*` for a one-time
+  breakout, `all` for a conjunction, and `any` only when either trigger is
+  genuinely valid; each leaf latches independently. For `structure_break`,
+  set `since` to the intended observation start; for `zone_touch`, keep
+  `lookbackBars` small. Prefer an explicit VWAP `anchor` over `auto` when the
+  anchor is part of the thesis. Hybrid pattern: the cheap
   machine-checkable trigger in `watch` (e.g. `price_above` + `ema_alignment`),
   the multi-timeframe + Fib/VWAP + CVD/divergence read in `what`. A fitting
   `watch` fires deterministically with zero LLM; a What-only condition burns a

@@ -142,6 +142,26 @@ export const watchLeafSchema = z.discriminatedUnion('type', [
   zoneTouchSchema,
 ])
 export type WatchLeaf = z.infer<typeof watchLeafSchema>
+export type WatchLeafType = WatchLeaf['type']
+export type WatchLeafDataKind = 'price' | 'indicators' | 'priceAction'
+
+/** Every leaf must declare its computation dependency. The Record is an
+ * exhaustiveness check: adding a schema leaf without classifying it fails the
+ * typecheck instead of silently returning `unavailable`. `price_vs_vwap` has
+ * a price-action exception for auto/structure anchors in the checker. */
+export const watchLeafDataKind = {
+  price_above: 'price',
+  price_below: 'price',
+  price_in_range: 'price',
+  price_out_of_range: 'price',
+  price_cross_above: 'price',
+  price_cross_below: 'price',
+  ema_alignment: 'indicators',
+  price_vs_ema: 'indicators',
+  price_vs_vwap: 'indicators',
+  structure_break: 'priceAction',
+  zone_touch: 'priceAction',
+} satisfies Record<WatchLeafType, WatchLeafDataKind>
 
 const watchAllSchema = z.object({
   all: z.array(watchLeafSchema).min(1).max(8),
@@ -154,6 +174,12 @@ const watchAnySchema = z.object({
 /** One level only: a single leaf, or one `all` / `any` group. No nesting. */
 export const watchRuleSchema = z.union([watchLeafSchema, watchAllSchema, watchAnySchema])
 export type WatchRule = z.infer<typeof watchRuleSchema>
+
+export function watchLeaves(rule: WatchRule): WatchLeaf[] {
+  if ('all' in rule) return rule.all
+  if ('any' in rule) return rule.any
+  return [rule]
+}
 
 export const issueWatchSchema = z.object({
   version: z.number().int().min(1),

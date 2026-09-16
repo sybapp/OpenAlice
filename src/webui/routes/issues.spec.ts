@@ -274,7 +274,7 @@ describe('PATCH /api/issues/:wsId/:id', () => {
       source: { barId: 'vendor|NVDA', interval: '1h' },
       rule: { type: 'price_above', price: 190 },
     }
-    await createIssue(wsDir, { id: 'i1', title: 'T' })
+    await createIssue(wsDir, { id: 'i1', title: 'T', when: { kind: 'every', every: '15m' } })
     const { app } = build()
     const set = await req(app, 'PATCH', '/ws-1/i1', { watch: watchV1 })
     expect(set.status).toBe(200)
@@ -299,7 +299,12 @@ describe('PATCH /api/issues/:wsId/:id', () => {
   })
 
   it('pauses and resumes a watch without touching the plan', async () => {
-    await createIssue(wsDir, { id: 'i1', title: 'T' })
+    await createIssue(wsDir, {
+      id: 'i1',
+      title: 'T',
+      when: { kind: 'every', every: '15m' },
+      watch: { version: 1, source: { barId: 'vendor|NVDA', interval: '1h' }, rule: { type: 'price_above', price: 190 } },
+    })
     const { app } = build()
     const paused = await req(app, 'PATCH', '/ws-1/i1', { watchPaused: true })
     expect(paused.status).toBe(200)

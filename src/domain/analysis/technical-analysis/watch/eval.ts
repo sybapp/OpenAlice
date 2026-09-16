@@ -18,7 +18,7 @@ import type { TechnicalAnalysisIndicatorResult } from '../indicators.js'
 import type { PriceActionAnalysisResult } from '../price-action/analyze.js'
 import type { FairValueGap, OrderBlock } from '../price-action/types.js'
 import { fvgZoneId, orderBlockZoneId, structureBreakId } from './identity.js'
-import type { WatchLeaf, WatchRule } from './spec.js'
+import { watchLeaves, type WatchLeaf, type WatchRule } from './spec.js'
 
 export type WatchLeafStatus = 'hit' | 'miss' | 'unavailable'
 
@@ -56,8 +56,8 @@ export interface WatchEvaluation {
 
 export interface WatchEvalInput {
   bars: readonly OhlcvBar[]
-  indicators: TechnicalAnalysisIndicatorResult
-  priceAction: PriceActionAnalysisResult
+  indicators?: TechnicalAnalysisIndicatorResult
+  priceAction?: PriceActionAnalysisResult
 }
 
 function leafResult(
@@ -127,12 +127,15 @@ function evalIndicatorLeaf(
   leaf: WatchLeaf,
   index: number,
   bars: readonly OhlcvBar[],
-  indicators: TechnicalAnalysisIndicatorResult,
+  indicators: TechnicalAnalysisIndicatorResult | undefined,
 ): WatchLeafEvaluation {
   if (leaf.type !== 'ema_alignment' && leaf.type !== 'price_vs_ema' && leaf.type !== 'price_vs_vwap') {
     throw new Error(`evalIndicatorLeaf: not an indicator leaf: ${(leaf as WatchLeaf).type}`)
   }
   const { close } = lastCloses(bars)
+  if (indicators === undefined) {
+    return leafResult(index, 'unavailable', { reason: 'indicator data is unavailable for this rule' })
+  }
   if (leaf.type === 'ema_alignment') {
     const bias = indicators.ema.bias
     if (bias === 'unavailable') {
@@ -176,13 +179,16 @@ function evalStructureBreakLeaf(
   leaf: WatchLeaf,
   index: number,
   bars: readonly OhlcvBar[],
-  priceAction: PriceActionAnalysisResult,
+  priceAction: PriceActionAnalysisResult | undefined,
 ): WatchLeafEvaluation {
   if (leaf.type !== 'structure_break') {
     throw new Error(`evalStructureBreakLeaf: not a structure leaf: ${(leaf as WatchLeaf).type}`)
   }
   if (bars.length === 0) {
     return leafResult(index, 'unavailable', { reason: 'no bars: cannot place structure events' })
+  }
+  if (priceAction === undefined) {
+    return leafResult(index, 'unavailable', { reason: 'price-action data is unavailable for this rule' })
   }
   const kinds = leaf.kind === 'any' ? (['BOS', 'CHoCH'] as const) : ([leaf.kind] as const)
   const signalIds: string[] = []
@@ -220,13 +226,16 @@ function evalZoneTouchLeaf(
   leaf: WatchLeaf,
   index: number,
   bars: readonly OhlcvBar[],
-  priceAction: PriceActionAnalysisResult,
+  priceAction: PriceActionAnalysisResult | undefined,
 ): WatchLeafEvaluation {
   if (leaf.type !== 'zone_touch') {
     throw new Error(`evalZoneTouchLeaf: not a zone leaf: ${(leaf as WatchLeaf).type}`)
   }
   if (bars.length === 0) {
     return leafResult(index, 'unavailable', { reason: 'no bars: cannot judge a zone touch' })
+  }
+  if (priceAction === undefined) {
+    return leafResult(index, 'unavailable', { reason: 'price-action data is unavailable for this rule' })
   }
   const zones: Array<{ id: string; top: number; bottom: number }> = leaf.zone === 'FVG'
     ? priceAction.fvgs
@@ -309,11 +318,7 @@ export function evaluateWatch(input: WatchEvalInput, rule: WatchRule): WatchEval
       reason: 'no bars loaded for this window',
     }
   }
-  const leaves: WatchLeafEvaluation[] = 'all' in rule
-    ? rule.all.map((leaf, index) => evalLeaf(leaf, index, input))
-    : 'any' in rule
-      ? rule.any.map((leaf, index) => evalLeaf(leaf, index, input))
-      : [evalLeaf(rule, 0, input)]
+  const leaves: WatchLeafEvaluation[] = watchLeaves(rule).map((leaf, index) => evalLeaf(leaf, index, input))
   const mode = 'all' in rule ? 'all' : 'any' in rule ? 'any' : null
   const status = mode === null ? leaves[0]!.status : combine(leaves, mode)
   return {

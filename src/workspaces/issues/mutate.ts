@@ -109,7 +109,7 @@ export interface CreateIssueInput {
   /** Monitoring rule set (validated against the v1 whitelist). */
   watch?: unknown
   /** Start paused: keeps the plan without firing until resumed. Only
-   * meaningful alongside `watch`; ignored otherwise. */
+   * valid alongside `watch`; otherwise the declaration is rejected. */
   watchPaused?: boolean
   /** @deprecated Compatibility alias for callers written before What became the
    * sole markdown document. New callers must use `what`. */
@@ -450,8 +450,8 @@ export async function createIssue(
       }
     }
     data.watch = parsed.data
-    if (input.watchPaused === true) data.watchPaused = true
   }
+  if (input.watchPaused === true) data.watchPaused = true
   const requestedDesk = input.connectorDesk ?? (input.telegramConnector === true ? 'telegram' : undefined)
   if (requestedDesk) {
     if (!options?.allowConnectorDesk && !options?.allowTelegramConnector) {
