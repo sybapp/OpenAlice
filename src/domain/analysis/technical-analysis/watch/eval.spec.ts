@@ -100,12 +100,17 @@ function priceAction(over: Partial<PriceActionAnalysisResult> = {}): PriceAction
   }
 }
 
-function input(bars: OhlcvBar[], over: Partial<WatchEvalInput> = {}): WatchEvalInput {
+function input(
+  bars: OhlcvBar[],
+  over: { indicators?: TechnicalAnalysisIndicatorResult; priceAction?: PriceActionAnalysisResult } = {},
+): WatchEvalInput {
   return {
-    bars,
-    indicators: indicators(),
-    priceAction: priceAction(),
-    ...over,
+    contexts: new Map([['default', {
+      status: 'ready',
+      bars,
+      indicators: over.indicators ?? indicators(),
+      priceAction: over.priceAction ?? priceAction(),
+    }]]),
   }
 }
 
@@ -217,6 +222,14 @@ describe('evaluateWatch — structure leaves', () => {
     expect(out.signalIds[0]).toContain('BOS|swing|bullish')
   })
 
+  it('namespaces signal ids from a non-default context', () => {
+    const pa = priceAction({ marketStructure: structure({ bos: [bosEvent] }) })
+    const out = evaluateWatch({
+      contexts: new Map([['daily', { status: 'ready' as const, bars: bosBars, priceAction: pa }]]),
+    }, { type: 'structure_break', source: 'daily', kind: 'BOS' })
+    expect(out.signalIds[0]).toMatch(/^daily\\|BOS\\|swing\\|bullish/)
+  })
+
   it('misses on direction / kind mismatch and honors since', () => {
     const pa = priceAction({ marketStructure: structure({ bos: [bosEvent] }) })
     const inState = input(bosBars, { priceAction: pa })
@@ -318,5 +331,42 @@ describe('evaluateWatch — combination + empty window', () => {
     const out = evaluateWatch(input([]), { type: 'price_above', price: 1 })
     expect(out.status).toBe('unavailable')
     expect(out.reason).toMatch(/no bars/)
+  })
+
+  it('evaluates each leaf against its named context', () => {
+    const out = evaluateWatch({
+      contexts: new Map([
+        ['default', { status: 'ready' as const, bars: [bar('2024-01-01', 110)] }],
+        ['daily', { status: 'ready' as const, bars: [bar('2024-01-01', 200)] }],
+      ]),
+    }, {
+      all: [
+        { type: 'price_above', price: 100 },
+        { type: 'price_above', source: 'daily', price: 190 },
+      ],
+    })
+    expect(out).toMatchObject({
+      status: 'hit',
+      leaves: [{ source: 'default', status: 'hit' }, { source: 'daily', status: 'hit' }],
+      evidence: { contexts: { default: { barCount: 1 }, daily: { barCount: 1 } } },
+    })
+  })
+
+  it('keeps a source failure local to its leaves', () => {
+    const out = evaluateWatch({
+      contexts: new Map([
+        ['default', { status: 'unavailable' as const, reason: 'source down' }],
+        ['daily', { status: 'ready' as const, bars: [bar('2024-01-01', 200)] }],
+      ]),
+    }, {
+      any: [
+        { type: 'price_above', price: 100 },
+        { type: 'price_above', source: 'daily', price: 190 },
+      ],
+    })
+    expect(out).toMatchObject({
+      status: 'hit',
+      leaves: [{ status: 'unavailable', reason: 'source down' }, { status: 'hit', source: 'daily' }],
+    })
   })
 })

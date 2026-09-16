@@ -1,6 +1,6 @@
 # Plan: Watch v2 — named contexts, cheap volume, closed-bar touch
 
-**Status:** active — Phase 1 complete; Phase 2 next
+**Status:** active — Phase 2 complete; Phase 3 next
 **Owner guides:** [[docs/workspace-issues-and-scheduling.md]], [[docs/market-data-architecture.md]]
 **Base:** `plans/issue-watch-monitor.md` (v1 contract + increments 1–4). This file covers v2 expansion only; v1 file stays the contract until acceptance.
 **Delivery:** feature-branch iteration. No PR until maintainer accepts.

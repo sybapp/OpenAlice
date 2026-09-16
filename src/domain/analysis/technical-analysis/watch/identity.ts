@@ -19,6 +19,11 @@ function barDate(bars: readonly OhlcvBar[], index: number | undefined): string {
   return bars[index]?.date ?? `index:${index}`
 }
 
+/** Keep existing default signal ids stable; namespace additional contexts. */
+export function sourceSignalId(source: string, signalId: string): string {
+  return source === 'default' ? signalId : `${source}|${signalId}`
+}
+
 /** Stable id for a BOS/CHoCH event. `kind` is the array it came from — the
  * event itself does not carry it. */
 export function structureBreakId(

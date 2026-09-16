@@ -71,6 +71,50 @@ describe('issueWatchSchema', () => {
     }).success).toBe(true)
   })
 
+  it('accepts named sources and validates each leaf reference', () => {
+    const named = {
+      ...baseWatch,
+      sources: { daily: { barId: 'tradingview|NVDA', interval: '1d' } },
+      rule: {
+        all: [
+          { type: 'price_above', price: 190 },
+          { type: 'ema_alignment', source: 'daily', direction: 'bullish' },
+        ],
+      },
+    }
+    expect(issueWatchSchema.safeParse(named).success).toBe(true)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      rule: { type: 'price_above', source: 'missing', price: 190 },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      rule: { type: 'price_above', source: 'default', price: 190 },
+    }).success).toBe(true)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      sources: { default: { barId: 'tradingview|NVDA', interval: '1d' } },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      sources: { daily: baseWatch.source },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      sources: {
+        d1: { barId: 'tradingview|NVDA', interval: '1d' },
+        h4: { barId: 'tradingview|NVDA', interval: '4h' },
+        h1: { barId: 'tradingview|NVDA', interval: '1h' },
+        m30: { barId: 'tradingview|NVDA', interval: '30m' },
+        m15: { barId: 'tradingview|NVDA', interval: '15m' },
+      },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...named,
+      sources: { Daily: { barId: 'tradingview|NVDA', interval: '1d' } },
+    }).success).toBe(false)
+  })
+
   it('requires a minute freshness bound for intraday price_touch', () => {
     expect(issueWatchSchema.safeParse({
       ...baseWatch,

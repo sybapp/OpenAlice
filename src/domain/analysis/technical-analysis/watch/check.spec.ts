@@ -33,7 +33,7 @@ function watch(rule: IssueWatch['rule'], version = 1): IssueWatch {
 
 describe('checkWatch', () => {
   it('maps a fetch throw to unavailable, never miss', async () => {
-    const barService = { getBars: vi.fn(async () => { throw new Error('source down') }) }
+    const barService = { getBars: vi.fn(() => { throw new Error('source down') }) }
     const out = await checkWatch(
       { barService },
       watch({ type: 'price_above', price: 1 }),
@@ -162,6 +162,124 @@ describe('checkWatch', () => {
     expect(out.status).toBe('hit')
     expect(out.evidence.close).toBe(100)
     expect(out.evidence.watchVersion).toBe(3)
+  })
+
+  it('keeps a failed context local when another source satisfies any', async () => {
+    const bars = [bar('2024-01-02', 200)]
+    const barService = {
+      getBars: vi.fn(async (ref: { barId: string }) => {
+        if (ref.barId === 'vendor|down') throw new Error('down')
+        return { bars, meta: { symbol: 'X', from: bars[0]!.date, to: bars[0]!.date, bars: 1, staleTradingDays: 0 } }
+      }),
+    }
+    const out = await checkWatch({ barService }, {
+      version: 1,
+      source: { barId: 'vendor|down', interval: '1d' },
+      sources: { daily: { barId: 'vendor|up', interval: '1d' } },
+      rule: {
+        any: [
+          { type: 'price_above', price: 100 },
+          { type: 'price_above', source: 'daily', price: 190 },
+        ],
+      },
+    }, Date.parse('2024-01-03T00:00:00Z'))
+    expect(out).toMatchObject({
+      status: 'hit',
+      leaves: [{ source: 'default', status: 'unavailable' }, { source: 'daily', status: 'hit' }],
+      evidence: { contexts: { default: { status: 'unavailable' }, daily: { status: 'ready', barCount: 1 } } },
+    })
+  })
+
+  it('deduplicates identical bar fetches across named sources', async () => {
+    const bars = [bar('2024-01-02', 200)]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[0]!.date, bars: 1, staleTradingDays: 0 },
+      })),
+    }
+    const source = { barId: 'vendor|X', interval: '1d' as const }
+    const out = await checkWatch({ barService }, {
+      version: 1,
+      source: { barId: 'vendor|default', interval: '1d' },
+      sources: { first: source, second: source },
+      rule: {
+        all: [
+          { type: 'price_above', source: 'first', price: 190 },
+          { type: 'price_above', source: 'second', price: 190 },
+        ],
+      },
+    }, Date.parse('2024-01-03T00:00:00Z'))
+    expect(out.status).toBe('hit')
+    expect(barService.getBars).toHaveBeenCalledTimes(1)
+  })
+
+  it('caps five unique context fetches at four concurrent requests', async () => {
+    const bars = [bar('2024-01-02', 200)]
+    let active = 0
+    let peak = 0
+    let release: (() => void) | undefined
+    const firstFour = new Promise<void>((resolve) => { release = resolve })
+    const barService = {
+      getBars: vi.fn(async () => {
+        active += 1
+        peak = Math.max(peak, active)
+        if (active === 4) release?.()
+        await firstFour
+        active -= 1
+        return { bars, meta: { symbol: 'X', from: bars[0]!.date, to: bars[0]!.date, bars: 1, staleTradingDays: 0 } }
+      }),
+    }
+    const out = await checkWatch({ barService }, {
+      version: 1,
+      source: { barId: 'vendor|default', interval: '1d' },
+      sources: {
+        d1: { barId: 'vendor|d1', interval: '1d' },
+        h4: { barId: 'vendor|h4', interval: '4h' },
+        h1: { barId: 'vendor|h1', interval: '1h' },
+        m30: { barId: 'vendor|m30', interval: '30m' },
+      },
+      rule: {
+        all: [
+          { type: 'price_above', price: 1 },
+          { type: 'price_above', source: 'd1', price: 1 },
+          { type: 'price_above', source: 'h4', price: 1 },
+          { type: 'price_above', source: 'h1', price: 1 },
+          { type: 'price_above', source: 'm30', price: 1 },
+        ],
+      },
+    }, Date.parse('2024-01-03T00:00:00Z'))
+    expect(out.status).toBe('hit')
+    expect(peak).toBe(4)
+    expect(barService.getBars).toHaveBeenCalledTimes(5)
+  })
+
+  it('keeps evidence key order deterministic and drops top-level dataAsOf when default is unused', async () => {
+    const bars = [bar('2024-01-02', 200)]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[0]!.date, bars: 1, staleTradingDays: 0 },
+      })),
+    }
+    const out = await checkWatch({ barService }, {
+      version: 1,
+      source: { barId: 'vendor|default', interval: '1d' },
+      sources: {
+        b: { barId: 'vendor|b', interval: '1d' },
+        a: { barId: 'vendor|a', interval: '1d' },
+      },
+      rule: {
+        all: [
+          { type: 'price_above', source: 'b', price: 1 },
+          { type: 'price_above', source: 'a', price: 1 },
+        ],
+      },
+    }, Date.parse('2024-01-03T00:00:00Z'))
+    expect(out.status).toBe('hit')
+    expect(Object.keys(out.evidence.contexts ?? {})).toEqual(['b', 'a'])
+    expect(out.evidence.dataAsOf).toBeUndefined()
+    expect(out.evidence.contexts?.b?.dataAsOf).toBe(bars[0]!.date)
   })
 
   it('does not treat a forming bar range as a price_touch', async () => {

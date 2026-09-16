@@ -226,7 +226,7 @@ plain tracked item; add a `when` and it starts firing.
   `{comment}` alone.
 - **`watch`** *(optional — monitoring Issues only)* — the machine-checkable
   condition set the scanner judges deterministically before any dispatch.
-  Shape: `{ version, source: { barId, interval, assetClass? }, quote?,
+  Shape: `{ version, source: { barId, interval, assetClass? }, sources?, quote?,
   freshness?, indicators?, rule }` where `rule` is one leaf or one
   `{ all: [...] }` / `{ any: [...] }` group (1–8 leaves, no nesting).
   Leaf whitelist: `price_above` / `price_below` / `price_in_range` /
@@ -246,8 +246,11 @@ plain tracked item; add a `when` and it starts firing.
   first), **propose a trade** (stage/commit; approval follows the same
   switch as any suggestion), or **close** (`--status done|canceled`).
   Never invent a fourth exit and never guess hidden state from prose.
-  Out of v1 on purpose: multi-source rules, cross-interval rules, volume /
-  order-flow thresholds (CVD, absorption, exhaustion, footprint), and
+  `source` is the default bar context; `sources` adds at most four named lowercase
+  contexts and a leaf selects one with `source: '<name>'`. Contexts are
+  freshness-gated and judged independently, so `all` / `any` may combine intervals;
+  a check is bounded to five contexts, 1,000 total bars (`WATCH_MAX_TOTAL_BARS`), and four concurrent fetches. Out of scope remain
+  volume/order-flow thresholds (CVD, absorption, exhaustion, footprint) and
   open/high/low intraday touch. Those stay in `what` as post-hit analysis —
   never as a reason to skip `watch`. Use `price_cross_*` for a one-time
   breakout, `all` for a conjunction, and `any` only when either trigger is
@@ -340,7 +343,7 @@ that purpose. Inbox is a human delivery record, not storage for every run result
 Two kinds of conditions — put each in the right place. A **machine-checkable
 pre-dispatch trigger** belongs in the `watch` frontmatter field (deterministic,
 zero-LLM, judged before every dispatch; see the `watch` entry above). **Everything
-else** — multi-timeframe reads, order-flow/volume, news, multi-source logic —
+else** — order-flow/volume, news, or other analysis beyond the leaf whitelist —
 belongs in `what` as post-hit analysis. If the trigger fits the v1 whitelist,
 always use `watch`: a What-only condition burns a full headless run every tick
 and can drift. For "ping me only if X" with no machine gate, write:

@@ -3,7 +3,8 @@
  * monitoring Issue. Human intent stays in the markdown `What`; this is the
  * closed whitelist the deterministic checker understands.
  *
- * v1 is deliberately small: one source + one interval per watch, one-level
+ * Named contexts let leaves select independent bar sources/intervals; the
+ * required `source` is the backward-compatible `default`. Rules remain one-level
  * `all` / `any` (1–8 leaves), closed-bar quote only. Unknown `type` or extra
  * keys are invalid (loud), never a silent miss.
  *
@@ -23,11 +24,21 @@ export type WatchInterval = z.infer<typeof watchIntervalSchema>
 
 const assetClassSchema = z.enum(['equity', 'crypto', 'currency', 'commodity'])
 
-const watchSourceSchema = z.object({
+export const watchSourceSchema = z.object({
   barId: z.string().min(1),
   interval: watchIntervalSchema,
   assetClass: assetClassSchema.optional(),
 }).strict()
+export type WatchSource = z.infer<typeof watchSourceSchema>
+
+export const watchSourceNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/, {
+  message: 'source names must start with a lowercase letter and contain only lowercase letters, numbers, or hyphens',
+})
+export type WatchSourceName = z.infer<typeof watchSourceNameSchema>
+
+function watchLeafObject<T extends z.ZodRawShape>(shape: T) {
+  return z.object({ ...shape, source: watchSourceNameSchema.optional() }).strict()
+}
 
 /** v1 quote is closed bars only. An intraday "touch" must explicitly declare
  * a realtime/quote source once that kind exists; close price never proves an
@@ -47,19 +58,19 @@ const watchFreshnessSchema = z.object({
 
 const closeFieldSchema = z.literal('close')
 
-const priceAboveSchema = z.object({
+const priceAboveSchema = watchLeafObject({
   type: z.literal('price_above'),
   price: z.number().finite(),
   field: closeFieldSchema.optional(),
 }).strict()
 
-const priceBelowSchema = z.object({
+const priceBelowSchema = watchLeafObject({
   type: z.literal('price_below'),
   price: z.number().finite(),
   field: closeFieldSchema.optional(),
 }).strict()
 
-const priceInRangeSchema = z.object({
+const priceInRangeSchema = watchLeafObject({
   type: z.literal('price_in_range'),
   low: z.number().finite(),
   high: z.number().finite(),
@@ -70,7 +81,7 @@ const priceInRangeSchema = z.object({
   }
 })
 
-const priceOutOfRangeSchema = z.object({
+const priceOutOfRangeSchema = watchLeafObject({
   type: z.literal('price_out_of_range'),
   low: z.number().finite(),
   high: z.number().finite(),
@@ -81,43 +92,43 @@ const priceOutOfRangeSchema = z.object({
   }
 })
 
-const priceCrossAboveSchema = z.object({
+const priceCrossAboveSchema = watchLeafObject({
   type: z.literal('price_cross_above'),
   price: z.number().finite(),
   field: closeFieldSchema.optional(),
 }).strict()
 
-const priceCrossBelowSchema = z.object({
+const priceCrossBelowSchema = watchLeafObject({
   type: z.literal('price_cross_below'),
   price: z.number().finite(),
   field: closeFieldSchema.optional(),
 }).strict()
 
-const priceTouchSchema = z.object({
+const priceTouchSchema = watchLeafObject({
   type: z.literal('price_touch'),
   price: z.number().finite(),
   /** How many of the most recent closed bars may overlap the level (default 1). */
   lookbackBars: z.number().int().min(1).max(500).optional(),
 }).strict()
 
-const emaAlignmentSchema = z.object({
+const emaAlignmentSchema = watchLeafObject({
   type: z.literal('ema_alignment'),
   direction: z.enum(['bullish', 'bearish']),
 }).strict()
 
-const priceVsEmaSchema = z.object({
+const priceVsEmaSchema = watchLeafObject({
   type: z.literal('price_vs_ema'),
   which: z.enum(['fast', 'slow', 'long']),
   relation: z.enum(['above', 'below']),
 }).strict()
 
-const priceVsVwapSchema = z.object({
+const priceVsVwapSchema = watchLeafObject({
   type: z.literal('price_vs_vwap'),
   relation: z.enum(['above', 'below', 'at']),
   anchor: z.enum(['auto', 'rolling', 'session', 'week', 'month', 'year', 'structure']).optional(),
 }).strict()
 
-const structureBreakSchema = z.object({
+const structureBreakSchema = watchLeafObject({
   type: z.literal('structure_break'),
   kind: z.enum(['BOS', 'CHoCH', 'any']),
   direction: z.enum(['bullish', 'bearish']).optional(),
@@ -126,7 +137,7 @@ const structureBreakSchema = z.object({
   since: z.string().min(1).optional(),
 }).strict()
 
-const zoneTouchSchema = z.object({
+const zoneTouchSchema = watchLeafObject({
   type: z.literal('zone_touch'),
   zone: z.enum(['FVG', 'OB']),
   relation: z.literal('touch'),
@@ -134,7 +145,7 @@ const zoneTouchSchema = z.object({
   lookbackBars: z.number().int().min(1).max(500).optional(),
 }).strict()
 
-/** Closed v1 leaf set. Anything else is a schema error, never a silent miss. */
+/** Closed leaf set. Anything else is a schema error, never a silent miss. */
 export const watchLeafSchema = z.discriminatedUnion('type', [
   priceAboveSchema,
   priceBelowSchema,
@@ -172,6 +183,13 @@ export const watchLeafDataKind = {
   zone_touch: 'priceAction',
 } satisfies Record<WatchLeafType, WatchLeafDataKind>
 
+/** `auto` / `structure` VWAP asks the price-action layer for its anchor. */
+export function needsPriceAction(leaf: WatchLeaf): boolean {
+  return watchLeafDataKind[leaf.type] === 'priceAction'
+    || (leaf.type === 'price_vs_vwap'
+      && (leaf.anchor === undefined || leaf.anchor === 'auto' || leaf.anchor === 'structure'))
+}
+
 const watchAllSchema = z.object({
   all: z.array(watchLeafSchema).min(1).max(8),
 }).strict()
@@ -190,9 +208,19 @@ export function watchLeaves(rule: WatchRule): WatchLeaf[] {
   return [rule]
 }
 
+export const WATCH_MAX_CONTEXTS = 5
+export const WATCH_MAX_NAMED_SOURCES = WATCH_MAX_CONTEXTS - 1
+
+/** The required source is always the default context. */
+export function watchContexts(watch: Pick<IssueWatch, 'source' | 'sources'>): Record<string, WatchSource> {
+  return { default: watch.source, ...watch.sources }
+}
+
 export const issueWatchSchema = z.object({
   version: z.number().int().min(1),
   source: watchSourceSchema,
+  /** Additional named contexts. The required `source` field remains `default`. */
+  sources: z.record(watchSourceNameSchema, watchSourceSchema).optional(),
   /** Omission means closed-bar quote. */
   quote: watchQuoteSchema.optional(),
   freshness: watchFreshnessSchema.optional(),
@@ -200,14 +228,33 @@ export const issueWatchSchema = z.object({
   indicators: technicalAnalysisIndicatorOptionsSchema.optional(),
   rule: watchRuleSchema,
 }).strict().superRefine((value, ctx) => {
-  const isIntraday = value.source.interval !== '1d' && value.source.interval !== '1w'
-  if (isIntraday && watchLeaves(value.rule).some((leaf) => leaf.type === 'price_touch')
-    && value.freshness?.maxStaleMinutes === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['freshness', 'maxStaleMinutes'],
-      message: 'intraday price_touch requires freshness.maxStaleMinutes',
-    })
+  if (value.sources?.default !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['sources', 'default'], message: 'default is reserved for source' })
+  }
+  if (Object.keys(value.sources ?? {}).length > WATCH_MAX_NAMED_SOURCES) {
+    ctx.addIssue({ code: 'custom', path: ['sources'], message: `at most ${WATCH_MAX_NAMED_SOURCES} named sources are allowed` })
+  }
+  for (const [name, source] of Object.entries(value.sources ?? {})) {
+    if (source.barId === value.source.barId && source.interval === value.source.interval) {
+      ctx.addIssue({ code: 'custom', path: ['sources', name], message: 'named source must differ from default source' })
+    }
+  }
+  const sources = watchContexts(value)
+  for (const leaf of watchLeaves(value.rule)) {
+    const sourceName = leaf.source ?? 'default'
+    const source = sources[sourceName]
+    if (source === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['rule'], message: `leaf references unknown source: ${sourceName}` })
+      continue
+    }
+    const isIntraday = source.interval !== '1d' && source.interval !== '1w'
+    if (isIntraday && leaf.type === 'price_touch' && value.freshness?.maxStaleMinutes === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['freshness', 'maxStaleMinutes'],
+        message: 'intraday price_touch requires freshness.maxStaleMinutes',
+      })
+    }
   }
 })
 export type IssueWatch = z.infer<typeof issueWatchSchema>

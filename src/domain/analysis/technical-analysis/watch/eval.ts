@@ -17,7 +17,7 @@ import type { OhlcvBar } from '@/domain/market-data/bars/types.js'
 import type { TechnicalAnalysisIndicatorResult } from '../indicators.js'
 import type { PriceActionAnalysisResult } from '../price-action/analyze.js'
 import type { FairValueGap, OrderBlock } from '../price-action/types.js'
-import { fvgZoneId, orderBlockZoneId, structureBreakId } from './identity.js'
+import { fvgZoneId, orderBlockZoneId, sourceSignalId, structureBreakId } from './identity.js'
 import { watchLeaves, type WatchLeaf, type WatchRule } from './spec.js'
 
 export type WatchLeafStatus = 'hit' | 'miss' | 'unavailable'
@@ -25,6 +25,8 @@ export type WatchLeafStatus = 'hit' | 'miss' | 'unavailable'
 export interface WatchLeafEvaluation {
   /** Position of the leaf in the rule (0 for a single-leaf rule). */
   index: number
+  /** Named bar context that supplied this judgement. */
+  source?: string
   status: WatchLeafStatus
   /** Observed value (close, bias, relation, match count, …). */
   actual?: number | string
@@ -36,12 +38,26 @@ export interface WatchLeafEvaluation {
   signalIds: string[]
 }
 
-export interface WatchEvaluationEvidence {
+export interface WatchContextEvidence {
+  status: 'ready' | 'unavailable'
   close?: number
   previousClose?: number
   barFrom?: string
   barTo?: string
   barCount: number
+  dataAsOf?: string
+  reason?: string
+}
+
+export interface WatchEvaluationEvidence {
+  /** Compatibility summary for the required default context. */
+  close?: number
+  previousClose?: number
+  barFrom?: string
+  barTo?: string
+  barCount: number
+  /** Per-context bar windows, freshness results, and failures. */
+  contexts?: Record<string, WatchContextEvidence>
 }
 
 export interface WatchEvaluation {
@@ -54,10 +70,19 @@ export interface WatchEvaluation {
   reason?: string
 }
 
-export interface WatchEvalInput {
+export type WatchContext = {
+  status: 'ready'
   bars: readonly OhlcvBar[]
   indicators?: TechnicalAnalysisIndicatorResult
   priceAction?: PriceActionAnalysisResult
+  dataAsOf?: string
+} | {
+  status: 'unavailable'
+  reason: string
+}
+
+export interface WatchEvalInput {
+  contexts: ReadonlyMap<string, WatchContext>
 }
 
 function leafResult(
@@ -281,6 +306,15 @@ function evalLeaf(
   index: number,
   input: WatchEvalInput,
 ): WatchLeafEvaluation {
+  const source = leaf.source ?? 'default'
+  const context = input.contexts.get(source)
+  if (context === undefined) {
+    return leafResult(index, 'unavailable', { source, reason: `source ${source} was not loaded` })
+  }
+  if (context.status === 'unavailable') {
+    return leafResult(index, 'unavailable', { source, reason: context.reason })
+  }
+  let result: WatchLeafEvaluation
   switch (leaf.type) {
     case 'price_above':
     case 'price_below':
@@ -289,18 +323,23 @@ function evalLeaf(
     case 'price_cross_above':
     case 'price_cross_below':
     case 'price_touch':
-      return evalPriceLeaf(leaf, index, input.bars)
+      result = evalPriceLeaf(leaf, index, context.bars)
+      break
     case 'ema_alignment':
     case 'price_vs_ema':
     case 'price_vs_vwap':
-      return evalIndicatorLeaf(leaf, index, input.bars, input.indicators)
+      result = evalIndicatorLeaf(leaf, index, context.bars, context.indicators)
+      break
     case 'structure_break':
-      return evalStructureBreakLeaf(leaf, index, input.bars, input.priceAction)
+      result = evalStructureBreakLeaf(leaf, index, context.bars, context.priceAction)
+      break
     case 'zone_touch':
-      return evalZoneTouchLeaf(leaf, index, input.bars, input.priceAction)
+      result = evalZoneTouchLeaf(leaf, index, context.bars, context.priceAction)
+      break
     default:
       return assertNever(leaf)
   }
+  return { ...result, source, signalIds: result.signalIds.map((id) => sourceSignalId(source, id)) }
 }
 
 function combine(leaves: WatchLeafEvaluation[], mode: 'all' | 'any'): WatchLeafStatus {
@@ -314,33 +353,42 @@ function combine(leaves: WatchLeafEvaluation[], mode: 'all' | 'any'): WatchLeafS
   return 'miss'
 }
 
+function contextEvidence(context: WatchContext): WatchContextEvidence {
+  if (context.status === 'unavailable') return { status: 'unavailable', barCount: 0, reason: context.reason }
+  const { close, previousClose } = lastCloses(context.bars)
+  const lastBar = context.bars.at(-1)
+  return {
+    status: 'ready',
+    ...(close !== undefined ? { close } : {}),
+    ...(previousClose !== undefined ? { previousClose } : {}),
+    ...(context.bars[0] ? { barFrom: context.bars[0].date } : {}),
+    ...(lastBar ? { barTo: lastBar.date } : {}),
+    barCount: context.bars.length,
+    ...(context.dataAsOf !== undefined ? { dataAsOf: context.dataAsOf } : {}),
+  }
+}
+
 /** Deterministic judgement over loaded closed bars. Never throws on data —
  * empty windows and uncomputable values yield `unavailable`. */
 export function evaluateWatch(input: WatchEvalInput, rule: WatchRule): WatchEvaluation {
-  const { close, previousClose } = lastCloses(input.bars)
-  const evidence: WatchEvaluationEvidence = {
-    ...(close !== undefined ? { close } : {}),
-    ...(previousClose !== undefined ? { previousClose } : {}),
-    ...(input.bars[0] ? { barFrom: input.bars[0].date } : {}),
-    ...(input.bars.at(-1) ? { barTo: input.bars.at(-1)!.date } : {}),
-    barCount: input.bars.length,
-  }
-  if (input.bars.length === 0) {
-    return {
-      status: 'unavailable',
-      leaves: [],
-      signalIds: [],
-      evidence,
-      reason: 'no bars loaded for this window',
-    }
-  }
+  const contexts = Object.fromEntries([...input.contexts].map(([name, context]) => [name, contextEvidence(context)]))
+  const defaultEvidence = contexts.default ?? { status: 'unavailable' as const, barCount: 0, reason: 'default source was not loaded' }
+  const { status: _status, reason: _reason, dataAsOf: _dataAsOf, ...compatibilityEvidence } = defaultEvidence
+  const evidence: WatchEvaluationEvidence = { ...compatibilityEvidence, contexts }
   const leaves: WatchLeafEvaluation[] = watchLeaves(rule).map((leaf, index) => evalLeaf(leaf, index, input))
   const mode = 'all' in rule ? 'all' : 'any' in rule ? 'any' : null
   const status = mode === null ? leaves[0]!.status : combine(leaves, mode)
+  const emptyWindows = input.contexts.size > 0 && [...input.contexts.values()].every((context) =>
+    context.status === 'ready' && context.bars.length === 0,
+  )
+  const reason = status === 'unavailable'
+    ? (emptyWindows ? 'no bars loaded for this window' : leaves.find((leaf) => leaf.status === 'unavailable')?.reason)
+    : undefined
   return {
     status,
     leaves,
     signalIds: leaves.flatMap((leaf) => (leaf.status === 'hit' ? leaf.signalIds : [])),
     evidence,
+    ...(reason !== undefined ? { reason } : {}),
   }
 }
