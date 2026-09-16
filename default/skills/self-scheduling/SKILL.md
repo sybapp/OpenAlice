@@ -231,12 +231,13 @@ plain tracked item; add a `when` and it starts firing.
   `{ all: [...] }` / `{ any: [...] }` group (1–8 leaves, no nesting).
   Leaf whitelist: `price_above` / `price_below` / `price_in_range` /
   `price_out_of_range` / `price_cross_above` / `price_cross_below`
-  (close only), `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
+  (close only), `price_touch` (a price level overlapping recent closed-bar
+  high/low ranges), `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
   `structure_break` (BOS/CHoCH), `zone_touch` (FVG/OB). Judgement uses
   closed bars only; unknown types are invalid files, never silent misses.
-  `watch` requires `when`; `watchPaused` requires `watch`. Set an explicit
-  `freshness.maxStaleMinutes` for intraday monitoring, especially with a
-  delayed source. A signal-less hit dispatches once while it holds; a
+  `watch` requires `when`; `watchPaused` requires `watch`. `price_touch` on
+  an intraday interval requires `freshness.maxStaleMinutes`; set it for other
+  intraday monitoring too, especially with a delayed source. A signal-less hit dispatches once while it holds; a
   signal-bearing leaf may dispatch again only for a new signal id. Your turn
   opens with a `<watch-verdict>` block (version, per-leaf actuals, bar window, signal
   ids, run id). Your three valid exits: **re-arm** (write a new `watch`

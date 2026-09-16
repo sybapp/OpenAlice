@@ -28,6 +28,8 @@ function leafSummary(type: string, leaf: Record<string, unknown>): string {
       return `cross above ${fmtPrice(leaf['price'] as number)}`
     case 'price_cross_below':
       return `cross below ${fmtPrice(leaf['price'] as number)}`
+    case 'price_touch':
+      return `touch ${fmtPrice(leaf['price'] as number)}`
     case 'ema_alignment':
       return `EMA ${leaf['direction'] === 'bullish' ? 'bullish alignment' : 'bearish alignment'}`
     case 'price_vs_ema':

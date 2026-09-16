@@ -163,4 +163,26 @@ describe('checkWatch', () => {
     expect(out.evidence.close).toBe(100)
     expect(out.evidence.watchVersion).toBe(3)
   })
+
+  it('does not treat a forming bar range as a price_touch', async () => {
+    const bars = [bar('2024-01-02 09:00', 100), bar('2024-01-02 10:00', 50)]
+    const barService = {
+      getBars: vi.fn(async () => ({
+        bars,
+        meta: { symbol: 'X', from: bars[0]!.date, to: bars[1]!.date, bars: 2, staleTradingDays: 0 },
+      })),
+    }
+    const out = await checkWatch(
+      { barService },
+      {
+        version: 3,
+        source: { barId: 'vendor|X', interval: '1h' },
+        freshness: { maxStaleMinutes: 60 },
+        rule: { type: 'price_touch', price: 50 },
+      },
+      Date.parse('2024-01-02T10:30:00Z'),
+    )
+    expect(out.status).toBe('miss')
+    expect(out.leaves[0]).toMatchObject({ status: 'miss', actual: 0 })
+  })
 })

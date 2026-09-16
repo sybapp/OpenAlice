@@ -139,6 +139,24 @@ describe('evaluateWatch — price leaves', () => {
     expect(evaluateWatch(input(bars), { type: 'price_out_of_range', low: 100, high: 110 }).status).toBe('miss')
     expect(evaluateWatch(input(bars), { type: 'price_out_of_range', low: 200, high: 300 }).status).toBe('hit')
   })
+
+  it('hits price_touch at an inclusive bar boundary', () => {
+    const bars = [bar('2024-01-01', 100, { low: 99, high: 100 })]
+    const out = evaluateWatch(input(bars), { type: 'price_touch', price: 100 })
+    expect(out).toMatchObject({ status: 'hit', leaves: [{ status: 'hit', actual: 1, signalIds: [] }] })
+  })
+
+  it('uses only the configured closed-bar touch window', () => {
+    const bars = [
+      bar('2024-01-01', 100),
+      bar('2024-01-02', 100, { low: 104, high: 106 }),
+      bar('2024-01-03', 100),
+      bar('2024-01-04', 100),
+      bar('2024-01-05', 100),
+    ]
+    expect(evaluateWatch(input(bars), { type: 'price_touch', price: 105 }).status).toBe('miss')
+    expect(evaluateWatch(input(bars), { type: 'price_touch', price: 105, lookbackBars: 4 }).status).toBe('hit')
+  })
 })
 
 describe('evaluateWatch — indicator leaves', () => {

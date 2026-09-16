@@ -64,6 +64,23 @@ describe('issueWatchSchema', () => {
     for (const leaf of leaves) {
       expect(issueWatchSchema.safeParse({ ...baseWatch, rule: leaf }).success).toBe(true)
     }
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch,
+      freshness: { maxStaleMinutes: 60 },
+      rule: { type: 'price_touch', price: 1 },
+    }).success).toBe(true)
+  })
+
+  it('requires a minute freshness bound for intraday price_touch', () => {
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch,
+      rule: { type: 'price_touch', price: 190 },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch,
+      source: { ...baseWatch.source, interval: '1d' },
+      rule: { type: 'price_touch', price: 190 },
+    }).success).toBe(true)
   })
 
   it('rejects unknown leaf types, extra keys, and nested groups', () => {

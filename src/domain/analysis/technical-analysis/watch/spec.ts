@@ -93,6 +93,13 @@ const priceCrossBelowSchema = z.object({
   field: closeFieldSchema.optional(),
 }).strict()
 
+const priceTouchSchema = z.object({
+  type: z.literal('price_touch'),
+  price: z.number().finite(),
+  /** How many of the most recent closed bars may overlap the level (default 1). */
+  lookbackBars: z.number().int().min(1).max(500).optional(),
+}).strict()
+
 const emaAlignmentSchema = z.object({
   type: z.literal('ema_alignment'),
   direction: z.enum(['bullish', 'bearish']),
@@ -135,6 +142,7 @@ export const watchLeafSchema = z.discriminatedUnion('type', [
   priceOutOfRangeSchema,
   priceCrossAboveSchema,
   priceCrossBelowSchema,
+  priceTouchSchema,
   emaAlignmentSchema,
   priceVsEmaSchema,
   priceVsVwapSchema,
@@ -156,6 +164,7 @@ export const watchLeafDataKind = {
   price_out_of_range: 'price',
   price_cross_above: 'price',
   price_cross_below: 'price',
+  price_touch: 'price',
   ema_alignment: 'indicators',
   price_vs_ema: 'indicators',
   price_vs_vwap: 'indicators',
@@ -190,5 +199,15 @@ export const issueWatchSchema = z.object({
   /** Indicator tuning for the checker's computation (defaults apply). */
   indicators: technicalAnalysisIndicatorOptionsSchema.optional(),
   rule: watchRuleSchema,
-}).strict()
+}).strict().superRefine((value, ctx) => {
+  const isIntraday = value.source.interval !== '1d' && value.source.interval !== '1w'
+  if (isIntraday && watchLeaves(value.rule).some((leaf) => leaf.type === 'price_touch')
+    && value.freshness?.maxStaleMinutes === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['freshness', 'maxStaleMinutes'],
+      message: 'intraday price_touch requires freshness.maxStaleMinutes',
+    })
+  }
+})
 export type IssueWatch = z.infer<typeof issueWatchSchema>

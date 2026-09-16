@@ -92,6 +92,7 @@ the durable truth after it changes. Git history is the archive.
   `resumeId`=employee. Scene graph, top-down placeholders, game chrome, camera,
   and browser acceptance remain active.
 - [[plans/issue-watch-monitor.md]] — Issue-native conditional monitoring (`watch`): deterministic Alice check (price/indicator/structure whitelist, closed-bar default, latched hit) gates the existing harness dispatch; trade proposals reuse the single `allowAiTrading` approval switch. On `feat/issue-watch-monitor`, no PR until accepted.
+- [[plans/issue-watch-v2.md]] — Active: Phase 1 adds closed-bar `price_touch`; next expands Watch through named contexts (multi-source/cross-interval), cheap/proxy volume, and budgeted intrabar order-flow. Realtime quote semantics remain a separate plan.
 - [[plans/issue-comment-prompt.md]] — Optional per-Issue `commentPrompt`
   template for comment-reply Input Prompts. Omission keeps the historical
   wrapper; chat desks seed `{comment}`.

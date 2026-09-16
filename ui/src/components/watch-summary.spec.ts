@@ -15,6 +15,7 @@ describe('watch-summary', () => {
     expect(watchRuleSummary({ type: 'price_above', price: 190.5 })).toBe('close > 190.5')
     expect(watchRuleSummary({ type: 'ema_alignment', direction: 'bearish' })).toBe('EMA bearish alignment')
     expect(watchRuleSummary({ type: 'price_vs_vwap', relation: 'at' })).toBe('close at VWAP')
+    expect(watchRuleSummary({ type: 'price_touch', price: 190.5 })).toBe('touch 190.5')
     expect(watchRuleSummary({ type: 'zone_touch', zone: 'OB', relation: 'touch' })).toBe('OB touch')
     expect(watchRuleSummary({ type: 'structure_break', kind: 'any' })).toBe('new any break')
   })

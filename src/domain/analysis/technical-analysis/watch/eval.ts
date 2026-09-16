@@ -80,7 +80,8 @@ function lastCloses(bars: readonly OhlcvBar[]): { close?: number; previousClose?
 function evalPriceLeaf(leaf: WatchLeaf, index: number, bars: readonly OhlcvBar[]): WatchLeafEvaluation {
   if (leaf.type !== 'price_above' && leaf.type !== 'price_below'
     && leaf.type !== 'price_in_range' && leaf.type !== 'price_out_of_range'
-    && leaf.type !== 'price_cross_above' && leaf.type !== 'price_cross_below') {
+    && leaf.type !== 'price_cross_above' && leaf.type !== 'price_cross_below'
+    && leaf.type !== 'price_touch') {
     throw new Error(`evalPriceLeaf: not a price leaf: ${(leaf as WatchLeaf).type}`)
   }
   const { close, previousClose } = lastCloses(bars)
@@ -118,6 +119,14 @@ function evalPriceLeaf(leaf: WatchLeaf, index: number, bars: readonly OhlcvBar[]
       return leafResult(index, previousClose >= leaf.price && close < leaf.price ? 'hit' : 'miss', {
         actual: close,
         expected: `cross below ${leaf.price} (prev ${previousClose})`,
+      })
+    }
+    case 'price_touch': {
+      const window = bars.slice(-(leaf.lookbackBars ?? 1))
+      const touched = window.filter((bar) => bar.low <= leaf.price && bar.high >= leaf.price)
+      return leafResult(index, touched.length > 0 ? 'hit' : 'miss', {
+        actual: touched.length,
+        expected: `${leaf.price} touch within last ${window.length} closed bar(s)`,
       })
     }
   }
@@ -263,6 +272,10 @@ function evalZoneTouchLeaf(
   })
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unsupported watch leaf: ${String(value)}`)
+}
+
 function evalLeaf(
   leaf: WatchLeaf,
   index: number,
@@ -275,6 +288,7 @@ function evalLeaf(
     case 'price_out_of_range':
     case 'price_cross_above':
     case 'price_cross_below':
+    case 'price_touch':
       return evalPriceLeaf(leaf, index, input.bars)
     case 'ema_alignment':
     case 'price_vs_ema':
@@ -284,6 +298,8 @@ function evalLeaf(
       return evalStructureBreakLeaf(leaf, index, input.bars, input.priceAction)
     case 'zone_touch':
       return evalZoneTouchLeaf(leaf, index, input.bars, input.priceAction)
+    default:
+      return assertNever(leaf)
   }
 }
 
