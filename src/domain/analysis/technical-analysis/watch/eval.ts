@@ -15,6 +15,9 @@
 
 import type { OhlcvBar } from '@/domain/market-data/bars/types.js'
 import type { TechnicalAnalysisIndicatorResult } from '../indicators.js'
+import { buildOrderFlowDivergence } from '../order-flow/divergence.js'
+import type { OrderFlowDeltaBar } from '../order-flow/context.js'
+import { confidenceForCoverage } from '../order-flow/intrabar-plan.js'
 import type { PriceActionAnalysisResult } from '../price-action/analyze.js'
 import type { FairValueGap, OrderBlock } from '../price-action/types.js'
 import { fvgZoneId, orderBlockZoneId, sourceSignalId, structureBreakId } from './identity.js'
@@ -34,6 +37,8 @@ export interface WatchLeafEvaluation {
   expected?: number | string
   /** Why `unavailable` (or extra context for a hit). */
   reason?: string
+  /** Bar-proxy heuristic: never reported as measured flow (see Phase 3). */
+  fidelity?: 'bar_proxy'
   /** Stable signal identities consumed by this leaf (hits only). */
   signalIds: string[]
 }
@@ -100,6 +105,109 @@ function lastCloses(bars: readonly OhlcvBar[]): { close?: number; previousClose?
     ...(typeof close === 'number' && Number.isFinite(close) ? { close } : {}),
     ...(typeof previousClose === 'number' && Number.isFinite(previousClose) ? { previousClose } : {}),
   }
+}
+
+function evalVolumeLeaf(leaf: WatchLeaf, index: number, bars: readonly OhlcvBar[]): WatchLeafEvaluation {
+  if (leaf.type !== 'volume_spike' && leaf.type !== 'cvd_slope' && leaf.type !== 'price_volume_divergence') {
+    throw new Error(`evalVolumeLeaf: not a volume leaf: ${(leaf as WatchLeaf).type}`)
+  }
+  const window = bars.filter((bar) => typeof bar.volume === 'number' && Number.isFinite(bar.volume) && (bar.volume as number) > 0)
+  if (window.length === 0) {
+    return leafResult(index, 'unavailable', { fidelity: 'bar_proxy', reason: 'no positive volume in this window' })
+  }
+  switch (leaf.type) {
+    case 'volume_spike': {
+      const lookback = leaf.lookback ?? 20
+      if (window.length < lookback + 1) {
+        return leafResult(index, 'unavailable', { fidelity: 'bar_proxy', reason: `needs ${lookback + 1} positive-volume bars, has ${window.length}` })
+      }
+      const recent = window.slice(-(lookback + 1))
+      const mean = recent.slice(0, -1).reduce((sum, bar) => sum + (bar.volume as number), 0) / lookback
+      const last = recent[recent.length - 1]!.volume as number
+      const multiplier = leaf.multiplier ?? 2
+      return leafResult(index, last >= multiplier * mean ? 'hit' : 'miss', {
+        fidelity: 'bar_proxy',
+        actual: last,
+        expected: `${multiplier}x mean(${lookback}) = ${mean}`,
+      })
+    }
+    case 'cvd_slope': {
+      const lookback = leaf.lookback ?? 5
+      if (window.length < lookback + 1) {
+        return leafResult(index, 'unavailable', { fidelity: 'bar_proxy', reason: `needs ${lookback + 1} positive-volume bars, has ${window.length}` })
+      }
+      const recent = window.slice(-(lookback + 1))
+      const cvd = proxyCvd(recent)
+      const change = cvd[cvd.length - 1]! - cvd[0]!
+      const hit = leaf.direction === 'rising' ? change > 0 : change < 0
+      return leafResult(index, hit ? 'hit' : 'miss', {
+        fidelity: 'bar_proxy',
+        actual: change,
+        expected: `${leaf.direction} CVD over ${lookback} bars`,
+      })
+    }
+    case 'price_volume_divergence': {
+      const lookback = leaf.lookback ?? 50
+      const recent = bars.slice(-lookback)
+      const deltaBars = toProxyDeltaBars(recent)
+      if (recent.length !== deltaBars.length) {
+        return leafResult(index, 'unavailable', { fidelity: 'bar_proxy', reason: 'no positive volume in this window' })
+      }
+      const summary = buildOrderFlowDivergence({
+        targetBars: [...recent],
+        deltaBars,
+        targetIndexOffset: Math.max(0, bars.length - recent.length),
+      })
+      if (summary.status === 'unavailable') {
+        return leafResult(index, 'unavailable', { fidelity: 'bar_proxy', reason: summary.reason })
+      }
+      const match = summary.candidates.find((candidate) => candidate.direction === leaf.kind)
+      if (!match) {
+        return leafResult(index, 'miss', {
+          fidelity: 'bar_proxy',
+          actual: 0,
+          expected: `${leaf.kind} CVD divergence in last ${recent.length} bars`,
+        })
+      }
+      return leafResult(index, 'hit', {
+        fidelity: 'bar_proxy',
+        actual: `${match.direction} pivot ${match.priorPivot.timestamp} -> ${match.currentPivot.timestamp}`,
+        expected: `${leaf.kind} CVD divergence in last ${recent.length} bars`,
+        reason: `suggests ${match.direction} divergence (bar-proxy CVD, possible not measured)`,
+      })
+    }
+  }
+}
+
+function proxyCvd(bars: readonly OhlcvBar[]): number[] {
+  const out: number[] = []
+  let cvd = 0
+  for (const bar of bars) {
+    const volume = bar.volume as number
+    cvd += (bar.close >= bar.open ? 1 : -1) * volume
+    out.push(cvd)
+  }
+  return out
+}
+
+function toProxyDeltaBars(bars: readonly OhlcvBar[]): OrderFlowDeltaBar[] {
+  let cvd = 0
+  return bars.flatMap((bar) => {
+    if (typeof bar.volume !== 'number' || !Number.isFinite(bar.volume) || bar.volume <= 0) return []
+    const delta = (bar.close >= bar.open ? 1 : -1) * bar.volume
+    cvd += delta
+    const coverage = 1
+    return [{
+      ...bar,
+      delta,
+      cvd,
+      deltaRatio: 1,
+      coverage,
+      confidence: confidenceForCoverage(coverage),
+      lowConfidence: false,
+      isApproximation: true as const,
+    }]
+  })
 }
 
 function evalPriceLeaf(leaf: WatchLeaf, index: number, bars: readonly OhlcvBar[]): WatchLeafEvaluation {
@@ -324,6 +432,11 @@ function evalLeaf(
     case 'price_cross_below':
     case 'price_touch':
       result = evalPriceLeaf(leaf, index, context.bars)
+      break
+    case 'volume_spike':
+    case 'cvd_slope':
+    case 'price_volume_divergence':
+      result = evalVolumeLeaf(leaf, index, context.bars)
       break
     case 'ema_alignment':
     case 'price_vs_ema':

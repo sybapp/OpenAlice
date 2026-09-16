@@ -232,12 +232,15 @@ plain tracked item; add a `when` and it starts firing.
   Leaf whitelist: `price_above` / `price_below` / `price_in_range` /
   `price_out_of_range` / `price_cross_above` / `price_cross_below`
   (close only), `price_touch` (a price level overlapping recent closed-bar
-  high/low ranges), `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
+  high/low ranges), `volume_spike` / `cvd_slope` / `price_volume_divergence`
+  (bar-proxy volume on loaded bars, never measured flow),
+  `ema_alignment` / `price_vs_ema` / `price_vs_vwap`,
   `structure_break` (BOS/CHoCH), `zone_touch` (FVG/OB). Judgement uses
   closed bars only; unknown types are invalid files, never silent misses.
   `watch` requires `when`; `watchPaused` requires `watch`. `price_touch` on
   an intraday interval requires `freshness.maxStaleMinutes`; set it for other
-  intraday monitoring too, especially with a delayed source. A signal-less hit dispatches once while it holds; a
+  intraday monitoring too, especially with a delayed source. Bar-proxy volume hits carry
+  `fidelity: 'bar_proxy'` and suggestive language ("suggests/possible"). A signal-less hit dispatches once while it holds; a
   signal-bearing leaf may dispatch again only for a new signal id. Your turn
   opens with a `<watch-verdict>` block (version, per-leaf actuals, bar window, signal
   ids, run id). Your three valid exits: **re-arm** (write a new `watch`
@@ -250,7 +253,7 @@ plain tracked item; add a `when` and it starts firing.
   contexts and a leaf selects one with `source: '<name>'`. Contexts are
   freshness-gated and judged independently, so `all` / `any` may combine intervals;
   a check is bounded to five contexts, 1,000 total bars (`WATCH_MAX_TOTAL_BARS`), and four concurrent fetches. Out of scope remain
-  volume/order-flow thresholds (CVD, absorption, exhaustion, footprint) and
+  volume/order-flow thresholds (absorption, exhaustion, footprint) and
   open/high/low intraday touch. Those stay in `what` as post-hit analysis —
   never as a reason to skip `watch`. Use `price_cross_*` for a one-time
   breakout, `all` for a conjunction, and `any` only when either trigger is
@@ -258,8 +261,8 @@ plain tracked item; add a `when` and it starts firing.
   set `since` to the intended observation start; for `zone_touch`, keep
   `lookbackBars` small. Prefer an explicit VWAP `anchor` over `auto` when the
   anchor is part of the thesis. Hybrid pattern: the cheap
-  machine-checkable trigger in `watch` (e.g. `price_above` + `ema_alignment`),
-  the multi-timeframe + Fib/VWAP + CVD/divergence read in `what`. A fitting
+  machine-checkable trigger in `watch` (e.g. `price_above` + `volume_spike`),
+  the multi-timeframe + Fib/VWAP read in `what`. A fitting
   `watch` fires deterministically with zero LLM; a What-only condition burns a
   full run every tick and can drift. Discover the `barId` first, never guess
   it: `alice analysis search-bars --query NVDA` (see the `alice-analysis`

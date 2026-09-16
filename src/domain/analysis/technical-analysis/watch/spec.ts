@@ -111,6 +111,28 @@ const priceTouchSchema = watchLeafObject({
   lookbackBars: z.number().int().min(1).max(500).optional(),
 }).strict()
 
+const volumeSpikeSchema = watchLeafObject({
+  type: z.literal('volume_spike'),
+  /** Prior-bar window for the mean (default 20). */
+  lookback: z.number().int().min(1).max(199).optional(),
+  /** Last-bar volume must reach this multiple of the mean (default 2). */
+  multiplier: z.number().finite().gt(1).optional(),
+}).strict()
+
+const cvdSlopeSchema = watchLeafObject({
+  type: z.literal('cvd_slope'),
+  direction: z.enum(['rising', 'falling']),
+  /** CVD change window in bars (default 5). */
+  lookback: z.number().int().min(1).max(199).optional(),
+}).strict()
+
+const priceVolumeDivergenceSchema = watchLeafObject({
+  type: z.literal('price_volume_divergence'),
+  kind: z.enum(['bullish', 'bearish']),
+  /** Trailing window fed to the pivot/CVD detector (default 50). */
+  lookback: z.number().int().min(1).max(199).optional(),
+}).strict()
+
 const emaAlignmentSchema = watchLeafObject({
   type: z.literal('ema_alignment'),
   direction: z.enum(['bullish', 'bearish']),
@@ -154,6 +176,9 @@ export const watchLeafSchema = z.discriminatedUnion('type', [
   priceCrossAboveSchema,
   priceCrossBelowSchema,
   priceTouchSchema,
+  volumeSpikeSchema,
+  cvdSlopeSchema,
+  priceVolumeDivergenceSchema,
   emaAlignmentSchema,
   priceVsEmaSchema,
   priceVsVwapSchema,
@@ -176,6 +201,9 @@ export const watchLeafDataKind = {
   price_cross_above: 'price',
   price_cross_below: 'price',
   price_touch: 'price',
+  volume_spike: 'price',
+  cvd_slope: 'price',
+  price_volume_divergence: 'price',
   ema_alignment: 'indicators',
   price_vs_ema: 'indicators',
   price_vs_vwap: 'indicators',

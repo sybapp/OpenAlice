@@ -392,6 +392,7 @@ export function issueWatchVerdictBlock(input: {
     actual?: number | string
     expected?: number | string
     reason?: string
+    fidelity?: string
     signalIds?: readonly string[]
     freshSignalIds?: readonly string[]
   }>
@@ -405,6 +406,7 @@ export function issueWatchVerdictBlock(input: {
       const actual = leaf.actual !== undefined ? ` actual=${JSON.stringify(leaf.actual)}` : ''
       const expected = leaf.expected !== undefined ? ` expected=${JSON.stringify(leaf.expected)}` : ''
       const reason = leaf.reason ? ` reason=${JSON.stringify(leaf.reason)}` : ''
+      const fidelity = leaf.fidelity ? ` fidelity=${leaf.fidelity}` : ''
       const signals = leaf.signalIds && leaf.signalIds.length > 0
         ? ` signalIds=${JSON.stringify(leaf.signalIds)}`
         : ''
@@ -412,7 +414,7 @@ export function issueWatchVerdictBlock(input: {
         ? ` freshSignalIds=${JSON.stringify(leaf.freshSignalIds)}`
         : ''
       const fresh = input.freshLeafIndices?.includes(leaf.index) ? ' [fresh]' : ''
-      return `- leaf[${leaf.index}]: ${leaf.status}${fresh}${actual}${expected}${reason}${signals}${freshSignals}`
+      return `- leaf[${leaf.index}]: ${leaf.status}${fresh}${actual}${expected}${reason}${fidelity}${signals}${freshSignals}`
     })
     .join('\n')
   const signals = input.signalIds.length > 0

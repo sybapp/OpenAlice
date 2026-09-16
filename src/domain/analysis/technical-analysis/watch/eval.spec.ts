@@ -204,6 +204,62 @@ describe('evaluateWatch — indicator leaves', () => {
   })
 })
 
+describe('evaluateWatch — volume leaves', () => {
+  function volBars(count: number, lastVolume: number, volume = 100): OhlcvBar[] {
+    return Array.from({ length: count }, (_, i) =>
+      bar(`2024-01-${String(i + 1).padStart(2, '0')}`, 100 + i, {
+        volume: i === count - 1 ? lastVolume : volume,
+      }))
+  }
+
+  it('hits volume_spike when the last bar exceeds the mean multiple', () => {
+    const out = evaluateWatch(input(volBars(21, 300)), { type: 'volume_spike' })
+    expect(out.status).toBe('hit')
+    expect(out.leaves[0]).toMatchObject({ status: 'hit', actual: 300 })
+    expect(out.leaves[0]?.fidelity).toBe('bar_proxy')
+    const miss = evaluateWatch(input(volBars(21, 150)), { type: 'volume_spike' })
+    expect(miss.status).toBe('miss')
+  })
+
+  it('reports unavailable for volume_spike without enough positive-volume bars', () => {
+    const bars = [bar('2024-01-01', 100, { volume: null }), bar('2024-01-02', 101, { volume: 0 })]
+    const out = evaluateWatch(input(bars), { type: 'volume_spike' })
+    expect(out.status).toBe('unavailable')
+    expect(out.leaves[0]?.reason).toMatch(/no positive volume/)
+  })
+
+  it('judges cvd_slope on bar-proxy CVD change', () => {
+    const rising = Array.from({ length: 10 }, (_, i) =>
+      bar(`2024-01-${String(i + 1).padStart(2, '0')}`, 100 + i, { open: 99 + i, volume: 100 }))
+    expect(evaluateWatch(input(rising), { type: 'cvd_slope', direction: 'rising' }).status).toBe('hit')
+    expect(evaluateWatch(input(rising), { type: 'cvd_slope', direction: 'falling' }).status).toBe('miss')
+  })
+
+  it('judges price_volume_divergence through the shared pivot/CVD detector', () => {
+    // Higher second high (106 -> 107) with falling bar-proxy CVD between
+    // the pivots: the climb into peak 1 is all up bars, the path to peak 2
+    // is choppy so cumulative delta falls.
+    const closes = [100, 101, 102, 103, 104, 105, 104, 103, 102, 101, 100,
+      100.5, 100, 100.5, 100, 100.5, 101, 100, 99, 98, 97, 96, 95]
+    const peaks = new Map([[5, 106], [16, 107]])
+    const bars = closes.map((close, i) => bar(`2024-01-${String(i + 1).padStart(2, '0')}`, close, {
+      open: i === 0 ? 100 : closes[i - 1]!,
+      high: peaks.get(i) ?? close + 0.5,
+      low: close - 0.5,
+      volume: 100,
+    }))
+    const out = evaluateWatch(input(bars), { type: 'price_volume_divergence', kind: 'bearish' })
+    expect(out.status).toBe('hit')
+    expect(out.leaves[0]?.fidelity).toBe('bar_proxy')
+    expect(out.leaves[0]?.reason).toMatch(/suggests bearish divergence/)
+    const wrongKind = evaluateWatch(input(bars), { type: 'price_volume_divergence', kind: 'bullish' })
+    expect(wrongKind.status).toBe('miss')
+    const noVol = bars.map((b) => ({ ...b, volume: null as number | null }))
+    const unavailable = evaluateWatch(input(noVol), { type: 'price_volume_divergence', kind: 'bearish' })
+    expect(unavailable.status).toBe('unavailable')
+  })
+})
+
 describe('evaluateWatch — structure leaves', () => {
   const bosBars = uptrend(12)
   const bosEvent = {

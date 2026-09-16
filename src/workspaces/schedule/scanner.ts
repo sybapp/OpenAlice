@@ -486,7 +486,7 @@ export class ScheduleScanner {
 
   /** Due + watched fire: judge first, dispatch only on a leaf with
    * fresh (unlatched) content.  Each leaf latches independently:
-   * - Price / indicator (signal-less): latches on its OWN `lastTriggeredAt`
+   * - Price / indicator / volume (signal-less): latches on its OWN `lastTriggeredAt`
    *   — once its hit is dispatched it stays silent while the condition
    *   holds; a miss clears it (band exit re-arms within the same arming),
    *   while `unavailable` preserves it (a data gap is not a band exit).
@@ -962,6 +962,7 @@ function verdictEvidence(verdict: WatchCheckVerdict): Record<string, unknown> {
       ...(leaf.actual !== undefined ? { actual: leaf.actual } : {}),
       ...(leaf.expected !== undefined ? { expected: leaf.expected } : {}),
       ...(leaf.reason ? { reason: leaf.reason } : {}),
+      ...(leaf.fidelity ? { fidelity: leaf.fidelity } : {}),
       ...(leaf.signalIds.length > 0 ? { signalIds: leaf.signalIds } : {}),
     })),
     evidence: verdict.evidence,

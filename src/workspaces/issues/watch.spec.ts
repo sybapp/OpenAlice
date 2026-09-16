@@ -55,6 +55,9 @@ describe('issueWatchSchema', () => {
       { type: 'price_out_of_range', low: 1, high: 2 },
       { type: 'price_cross_above', price: 1 },
       { type: 'price_cross_below', price: 1 },
+      { type: 'volume_spike' },
+      { type: 'cvd_slope', direction: 'rising' },
+      { type: 'price_volume_divergence', kind: 'bullish' },
       { type: 'ema_alignment', direction: 'bullish' },
       { type: 'price_vs_ema', which: 'fast', relation: 'above' },
       { type: 'price_vs_vwap', relation: 'at' },
@@ -139,6 +142,21 @@ describe('issueWatchSchema', () => {
     expect(issueWatchSchema.safeParse({
       ...baseWatch,
       rule: { all: [{ all: [{ type: 'price_above', price: 1 }] }] },
+    }).success).toBe(false)
+  })
+
+  it('rejects bad volume params', () => {
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch, rule: { type: 'volume_spike', lookback: 0 },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch, rule: { type: 'volume_spike', multiplier: 1 },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch, rule: { type: 'cvd_slope' },
+    }).success).toBe(false)
+    expect(issueWatchSchema.safeParse({
+      ...baseWatch, rule: { type: 'price_volume_divergence' },
     }).success).toBe(false)
   })
 
